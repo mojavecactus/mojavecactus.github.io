@@ -1,6 +1,6 @@
 {
-  "name": "SportsMed Toolbox",
-  "short_name": "Toolbox",
+  "name": "SM ToolBox",
+  "short_name": "SM ToolBox",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
