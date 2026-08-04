@@ -1334,6 +1334,15 @@ var GLOSS = {
       if (/^\d+$/.test(m[1]) && +m[1] < D.items.length) return legacyRedirect('item', +m[1]);
       return instrScreen(m[1]);
     }
+    if (h === '#/scan') {
+      home();
+      setTimeout(function () {
+        history.replaceState(null, '', '#/');
+        var sb = document.getElementById('scanbtn');
+        if (sb) sb.click();
+      }, 350);
+      return;
+    }
     if (h === '#/about') return aboutScreen();
     if (h === '#/probes') return probesScreen();
     if ((m = h.match(/^#\/probe\/(\d+)$/))) return legacyRedirect('probe', +m[1]);
@@ -1529,6 +1538,7 @@ var GLOSS = {
       ov.hidden = true; teach.hidden = true; teachList.innerHTML = ''; teachQ.value = '';
     }
     function onCode(txt) {
+      try { if (navigator.vibrate) navigator.vibrate(60); } catch (ev) {}
       var r = resolveCode(txt);
       if (r.sku) {
         var entry = BYPN[nrm(r.sku)];
@@ -1622,6 +1632,22 @@ var GLOSS = {
           try {
             var track = s.getVideoTracks()[0];
             if (track && track.applyConstraints) track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+            // flashlight toggle when the camera supports it (dim OR corners)
+            var torchBtn = document.getElementById('scan-torch');
+            if (torchBtn) {
+              torchBtn.hidden = true;
+              torchBtn.classList.remove('on');
+              var caps = track && track.getCapabilities ? track.getCapabilities() : null;
+              if (caps && caps.torch) {
+                torchBtn.hidden = false;
+                TORCH_ON = false;
+                torchBtn.onclick = function () {
+                  TORCH_ON = !TORCH_ON;
+                  torchBtn.classList.toggle('on', TORCH_ON);
+                  track.applyConstraints({ advanced: [{ torch: TORCH_ON }] }).catch(function () {});
+                };
+              }
+            }
           } catch (e2) {}
           statusEl.textContent = 'Fill the box with the barcode';
           video.play && video.play().catch(function () {});
@@ -1630,6 +1656,7 @@ var GLOSS = {
           statusEl.textContent = 'Camera permission needed — allow access in Settings, or type the part number in search instead.';
         });
     }
+    var TORCH_ON = false;
     btn.addEventListener('click', startScan);
     closeB.addEventListener('click', stopScan);
     teachQ.addEventListener('input', function () {
