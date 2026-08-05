@@ -1209,15 +1209,15 @@ var GLOSS = {
   function aboutScreen() {
     setTitle('About', ''); backBtn.hidden = false;
     render(
-      '<div class="card" style="text-align:center">' +
+      '<div class="card about-card" style="text-align:center">' +
         '<img class="about-logo" src="favicon.svg" alt="SportsMed Toolbox logo">' +
         '<h1 style="margin:0">Sports<span style="color:var(--amber)">Med</span> Toolbox</h1>' +
         '<div style="color:var(--muted); font-size:13px; margin-top:5px">v' + APPVER + ' &middot; data updated ' + esc(D.built) + '</div>' +
-        '<div style="margin-top:10px"><button class="footlink" data-act="checkupd">Check for updates</button>' +
+        '<div style="margin-top:6px"><button class="footlink" data-act="checkupd">Check for updates</button>' +
         '<span class="footsep">&middot;</span><button class="footlink" data-act="lockdev">Lock this device</button></div>' +
       '</div>' +
-      '<div class="grouphead">Tips</div>' +
-      '<div class="card">' +
+      '<div class="grouphead ab-gh">Tips</div>' +
+      '<div class="card about-card">' +
         '<div class="tip"><b>Search smart.</b> Part numbers work with or without dashes.</div>' +
         '<div class="tip"><b>Scan the label.</b> The barcode button reads any package barcode &mdash; the card opens with lot and expiration shown.</div>' +
         '<div class="tip"><b>Zoom the fine print.</b> Tap any product photo to view it fullscreen; pinch or double-tap to zoom.</div>' +
@@ -1225,8 +1225,8 @@ var GLOSS = {
         '<div class="tip"><b>Take it offline.</b> Once loaded, everything works offline with zero signal preventing blackouts in hospital deadzones.</div>' +
         '<div class="tip"><b>Install it.</b> Add the site to your home screen for the full app experience. <button class="footlink" data-act="a2hs" style="padding:0">Show me how &#x203A;</button></div>' +
       '</div>' +
-      '<div class="grouphead">Credits</div>' +
-      '<div class="card">' +
+      '<div class="grouphead ab-gh">Credits</div>' +
+      '<div class="card about-card">' +
         '<div class="tip"><b style="color:var(--bone)">Created by Nate Merrell</b><br>Built for the CT Sports Medicine Team.</div>' +
         '<div class="tip">Questions, corrections, or a product you want added? Use the feedback bubble on any screen.</div>' +
       '</div>' +
