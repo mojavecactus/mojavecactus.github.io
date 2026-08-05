@@ -51,6 +51,7 @@ var GLOSS = {
   "Biocomposite": "85% PLLA + 15% \u03b2-TCP blend — resorbable, with an osteoconductive mineral phase.",
   "polyester": "Braided polyester — the flexible sheath material of all-suture anchors.",
   "Positive stop": "A hard mechanical stop that sets insertion depth automatically — no eyeballing.",
+  "Reposable": "Sterile-packed instrument that can be sold as capital or as a disposable \u2014 use once, or re-sterilize in central sterile for a few more cases (soft limit).",
   "swaged": "Suture permanently fixed to the anchor at manufacture; it cannot slide.",
   "Non-sliding": "Suture fixed relative to the anchor — tension is set without strand sliding.",
   "Locked": "Rep term for non-sliding — the suture is fixed to the anchor rather than free-running.",
@@ -180,6 +181,14 @@ var GLOSS = {
         if (uw) uw.classList.add('bye');
         setTimeout(function () { if (content.classList.contains('homeview')) home(); }, 280);
       }, 240);
+      return;
+    }
+    var cr = e.target.closest('[data-clearrec]');
+    if (cr) {
+      try { localStorage.removeItem('tbx_recents'); } catch (e6) {}
+      var rws = content.querySelectorAll('[data-unrec]');
+      for (var ri = 0; ri < rws.length; ri++) { var rw = rws[ri].closest('.rowwrap'); if (rw) rw.classList.add('bye'); }
+      setTimeout(function () { if (content.classList.contains('homeview')) home(); }, 300);
       return;
     }
     var ur = e.target.closest('[data-unrec]');
@@ -937,7 +946,7 @@ var GLOSS = {
         '<button class="rwact" data-unfav-route="' + esc(f.route) + '" aria-label="Remove favorite">&#9733;</button></div>';
     }).join('') + '</div>' : '';
     var rc = recents();
-    var recHTML = rc.length ? '<div class="eyebrow">Recent</div><div class="list">' + rc.slice(0, 3).map(function (r) {
+    var recHTML = rc.length ? '<div class="eyebrow ebrow"><span>Recent</span><button class="clearrec" data-clearrec="1">Clear all</button></div><div class="list">' + rc.slice(0, 3).map(function (r) {
       return '<div class="rowwrap">' + rowHTML(pnRoute(r.sku), { t: r.label, sku: r.sku }, '') +
         '<button class="rwact rwx" data-unrec="' + esc(r.sku) + '" aria-label="Remove from recents">&#x2715;</button></div>';
     }).join('') + '</div>' : '';
@@ -1161,7 +1170,7 @@ var GLOSS = {
       if (l.go) links.push({ t: l.t, go: l.go });
       else if (BYPN[nrm(l.sku)]) links.push({ t: l.t, go: pnRoute(l.sku) });
     });
-    render(specCard({ name: it.name, fam: it.fam, sku: it.sku, uom: it.uom, chips: chips,
+    render(specCard({ name: it.name, fam: it.fam, sku: it.sku, uom: it.uom, chips: chips, tags: it.tags,
       specs: it.specs, note: it.note, src: it.src, imgs: it.imgs, warn: it.warn, links: links, bp: it.bp,
       vars: variantsFor(it), used: usedWith(it),
       fav: { route: pnRoute(it.sku), it: { t: it.t || it.name, sz: it.sz || '', ld: it.ld || '', sku: it.sku } } }));
@@ -1218,7 +1227,7 @@ var GLOSS = {
       '</div>' +
       '<div class="grouphead">Credits</div>' +
       '<div class="card">' +
-        '<div class="tip"><b style="color:var(--bone)">Created by Nate Merrell</b><br>Built for the Stryker Sports Medicine team.</div>' +
+        '<div class="tip"><b style="color:var(--bone)">Created by Nate Merrell</b><br>Built for the CT Sports Medicine Team.</div>' +
         '<div class="tip">Questions, corrections, or a product you want added? Use the feedback bubble on any screen.</div>' +
       '</div>');
   }
