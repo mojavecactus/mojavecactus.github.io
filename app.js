@@ -979,13 +979,12 @@ var GLOSS = {
       '</div>');
   }
   var DISP_GROUPS = {
-    'Anchor disposables': ['CinchLock knotless anchor', 'Gravity anchor', 'Iconix all-suture anchor', 'Knotilus+ knotless anchor', 'NanoTack suture anchor', 'Titanium wedge interference screws'],
+    'Anchor disposables': ['CinchLock knotless anchor', 'Gravity anchor', 'Iconix all-suture anchor', 'Knotilus+ knotless anchor', 'NanoTack suture anchor', 'Titanium wedge interference screws', 'AIR+'],
     'Biologics & cartilage': ['ProChondrix CR', 'RegenKit THT (A-PRP)'],
-    'Blades & suture passing': ['Samurai blades', 'NanoPass suture management system'],
-    'Cannulas & portal access': ['Dri-Lok cannula', 'FlowPort', 'GateWay flexible cannula', 'Portal entry kit', 'Transport'],
-    'Pump & fluid management': ['CrossFlow arthroscopy pump', 'AIR+'],
+    'Cannulas & portal access': ['Dri-Lok cannula', 'FlowPort', 'GateWay flexible cannula', 'Portal entry kit', 'Transport', 'Samurai blades'],
+    'Pump & fluid management': ['CrossFlow arthroscopy pump'],
     'Reamers & drilling': ['VersiTomic Flexible Reaming System', 'VersiTomic Low Profile Reaming System', 'VersiTomic RetroReamer', 'MicroFX OCD Osteochondral Drilling System', 'Phoenix Microfracture Drill'],
-    'Repair & closure systems': ['ArthroTunneler system', 'G-Force tenodesis system', 'InJector II capsule closure', 'SharpShooter meniscal repair system', 'SlingShot capsule restoration system']
+    'Suture passing systems': ['ArthroTunneler system', 'G-Force tenodesis system', 'InJector II capsule closure', 'SharpShooter meniscal repair system', 'SlingShot capsule restoration system', 'NanoPass suture management system']
   };
   function dispFamGroup() {
     var m = {};
@@ -997,7 +996,7 @@ var GLOSS = {
     var famGroup = dispFamGroup(), counts = {};
     D.items.forEach(function (it) {
       if (it.cat !== 'Disposables' && it.cat2 !== 'Disposables') return;
-      var g = famGroup[it.fam] || 'More disposables';
+      var g = it.dgrp || famGroup[it.fam] || 'More disposables';
       counts[g] = (counts[g] || 0) + 1;
     });
     var names = Object.keys(counts).sort();
@@ -1012,8 +1011,8 @@ var GLOSS = {
     var famGroup = dispFamGroup(), fams = {}, order = [];
     D.items.forEach(function (it) {
       if (it.cat !== 'Disposables' && it.cat2 !== 'Disposables') return;
-      var mine = famGroup[it.fam] ? famGroup[it.fam] === g : g === 'More disposables';
-      if (!mine) return;
+      var itg = it.dgrp || famGroup[it.fam] || 'More disposables';
+      if (itg !== g) return;
       if (!fams[it.fam]) { fams[it.fam] = 0; order.push(it.fam); }
       fams[it.fam]++;
     });
