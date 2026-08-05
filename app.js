@@ -51,7 +51,7 @@ var GLOSS = {
   "Biocomposite": "85% PLLA + 15% \u03b2-TCP blend — resorbable, with an osteoconductive mineral phase.",
   "polyester": "Braided polyester — the flexible sheath material of all-suture anchors.",
   "Positive stop": "A hard mechanical stop that sets insertion depth automatically — no eyeballing.",
-  "Reposable": "Sterile-packed instrument that can be sold as capital or as a disposable \u2014 use once, or re-sterilize in central sterile for a few more cases (soft limit).",
+  "Reposable": "Sterile-packed instrument that can be sold as capital or as a disposable \u2014 use once, or re-sterilize in central sterile for additional cases.",
   "swaged": "Suture permanently fixed to the anchor at manufacture; it cannot slide.",
   "Non-sliding": "Suture fixed relative to the anchor — tension is set without strand sliding.",
   "Locked": "Rep term for non-sliding — the suture is fixed to the anchor rather than free-running.",
