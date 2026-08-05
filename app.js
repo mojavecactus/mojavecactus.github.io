@@ -819,7 +819,7 @@ var GLOSS = {
 
   // ---- welcome tour ----
   var TOUR_STEPS = [
-    { t: 'Search anything', p: 'Type a product name or part number in the bar below — dashes optional. Chips narrow results by category.',
+    { t: 'Search anything', p: 'Type a product name or part number in the bar below — dashes optional.',
       ico: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.5-4.5"/></svg>' },
     { t: 'Scan any package', p: 'Tap the barcode button and fill the frame with any package label — the right card opens instantly, with lot and expiration.',
       ico: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.9" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10.5 8v8M13.5 8v5M16.5 8v8"/></svg>' },
@@ -1218,7 +1218,7 @@ var GLOSS = {
       '</div>' +
       '<div class="grouphead">Tips</div>' +
       '<div class="card">' +
-        '<div class="tip"><b>Search smart.</b> Part numbers work with or without dashes. Use the chips under the results to narrow by category.</div>' +
+        '<div class="tip"><b>Search smart.</b> Part numbers work with or without dashes.</div>' +
         '<div class="tip"><b>Scan the label.</b> The barcode button reads any package barcode &mdash; the card opens with lot and expiration shown.</div>' +
         '<div class="tip"><b>Zoom the fine print.</b> Tap any product photo to view it fullscreen; pinch or double-tap to zoom.</div>' +
         '<div class="tip"><b>Save your go-tos.</b> The Save button on any card pins it to Favorites at the top of home.</div>' +
