@@ -378,7 +378,7 @@ var GLOSS = {
     var rows = (o.specs || []).filter(function (s) { return s[1]; }).map(function (s) {
       return '<div class="lr"><div class="lk">' + esc(s[0]) + '</div><div class="lv">' + mark(s[1]) + '</div></div>';
     }).join('');
-    var built = !!rows || !!o.note || !!o.bp;
+    var built = !!rows || !!o.note || !!o.bp || !!(o.imgs && o.imgs.length);
     var tagb = (o.tags || []).map(function (tg) { return ' <span class="subtag">' + esc(tg) + '</span>'; }).join('');
     var fav = '';
     if (o.fav) {
@@ -984,7 +984,7 @@ var GLOSS = {
     'Cannulas & portal access': ['Dri-Lok cannula', 'FlowPort', 'GateWay flexible cannula', 'Portal entry kit', 'Transport', 'Samurai blades'],
     'Pump & fluid management': ['CrossFlow arthroscopy pump'],
     'Reamers & drilling': ['VersiTomic Flexible Reaming System', 'VersiTomic Low Profile Reaming System', 'VersiTomic RetroReamer', 'MicroFX OCD Osteochondral Drilling System', 'Phoenix Microfracture Drill'],
-    'Suture passing systems': ['ArthroTunneler system', 'G-Force tenodesis system', 'InJector II capsule closure', 'SharpShooter meniscal repair system', 'SlingShot capsule restoration system', 'NanoPass suture management system']
+    'Suture passing systems': ['ArthroTunneler system', 'G-Force tenodesis system', 'InJector II capsule closure', 'SharpShooter meniscal repair system', 'SlingShot capsule restoration system', 'NanoPass suture management system', 'Champion SlingShot suture passer']
   };
   function dispFamGroup() {
     var m = {};
