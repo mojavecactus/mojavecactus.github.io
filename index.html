@@ -357,14 +357,19 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 #wnmore{display:block; width:100%; background:none; border:0; color:var(--amber);
   font-weight:700; font-size:13px; text-align:left; padding:9px 0 2px; cursor:pointer;}
 /* expiration banner */
-#expban{position:fixed; left:10px; right:10px; top:calc(env(safe-area-inset-top) + 66px); z-index:80;
-  border-radius:12px; padding:12px 42px 12px 14px; font-size:14.5px; font-weight:700; line-height:1.45;
-  animation:vtin .2s ease; box-shadow:0 6px 20px rgba(0,0,0,.45);}
-#expban.expired{background:#4A1214; border:1px solid #D06A68; border-left:5px solid #FF6B66; color:#FFC9C5;}
-#expban.soon{background:#3A2A14; border:1px solid #8a6420; border-left:5px solid var(--amber); color:#FFD98A;}
-#expban b{letter-spacing:.4px;}
-#expban.expired b{color:#FF8A85;}
-#expban.soon b{color:var(--amber);}
+#expban{position:fixed; left:50%; transform:translateX(-50%); top:calc(env(safe-area-inset-top) + 74px); z-index:80;
+  width:min(300px, calc(100% - 48px)); border-radius:20px; padding:22px 18px 20px; text-align:center;
+  box-shadow:0 12px 34px rgba(0,0,0,.55); animation:xbpop .22s ease-out;}
+@keyframes xbpop{from{opacity:0; transform:translateX(-50%) scale(.92);} to{opacity:1; transform:translateX(-50%) scale(1);}}
+#expban.expired{background:#4A1214; border:1.5px solid #D06A68; color:#FFC9C5;}
+#expban.soon{background:#3A2A14; border:1.5px solid #8a6420; color:#FFD98A;}
+#expban .xb-ico{font-size:30px; line-height:1; margin-bottom:8px;}
+#expban .xb-t{font-size:19px; font-weight:800; letter-spacing:.3px; line-height:1.25;}
+#expban.expired .xb-t{color:#FF8A85;}
+#expban.soon .xb-t{color:var(--amber);}
+#expban .xb-days{margin-top:4px; font-size:13.5px; font-weight:700;}
+#expban .xb-sub{margin-top:7px; font-size:15px; font-weight:600;}
+#expban .xb-dn{margin-top:9px; font-size:12px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:#FF8A85;}
 #expban #expban-x{position:absolute; right:4px; top:4px; border:0; background:none; color:inherit;
   font-size:14px; padding:9px; cursor:pointer; opacity:.85;}
 /* welcome tour */

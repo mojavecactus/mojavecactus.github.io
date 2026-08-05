@@ -586,15 +586,19 @@ var GLOSS = {
     if (days <= 30) return { k: 'soon', days: days };
     return { k: 'ok', days: days };
   }
-  function showExpBanner(st, feStr) {
+  function showExpBanner(st, feStr, lot) {
     var old = document.getElementById('expban');
     if (old) old.remove();
     if (!st || st.k === 'ok') return;
     var b = document.createElement('div');
     b.id = 'expban';
     b.className = st.k;
-    b.innerHTML = '<b>' + (st.k === 'expired' ? '&#9888; EXPIRED ' : '&#9200; EXPIRES SOON ') + '</b>' +
-      esc(feStr) + (st.k === 'expired' ? ' — do not use' : ' (' + st.days + ' day' + (st.days === 1 ? '' : 's') + ' left)') +
+    b.innerHTML = '<div class="xb-ico">' + (st.k === 'expired' ? '&#9888;' : '&#9200;') + '</div>' +
+      '<div class="xb-t">' + (st.k === 'expired' ? 'Last Scan is EXPIRED!' : 'Last Scan Expires Soon') + '</div>' +
+      (st.k === 'soon' ? '<div class="xb-days">' + st.days + ' day' + (st.days === 1 ? '' : 's') + ' left</div>' : '') +
+      (lot ? '<div class="xb-sub">Lot ' + esc(lot) + '</div>' : '') +
+      (feStr ? '<div class="xb-sub">Exp ' + esc(feStr) + '</div>' : '') +
+      (st.k === 'expired' ? '<div class="xb-dn">Do not use</div>' : '') +
       '<button id="expban-x" aria-label="Dismiss">&#x2715;</button>';
     document.body.appendChild(b);
   }
@@ -1580,8 +1584,7 @@ var GLOSS = {
       if (fe) bits.push('Exp ' + fe);
       var st = expStatus(p.exp);
       if (st && st.k !== 'ok') {
-        showExpBanner(st, fe);
-        if (p.lot) toastMsg('Lot ' + p.lot, 2600);
+        showExpBanner(st, fe, p.lot);
       } else {
         toastMsg(bits.length ? bits.join(' · ') : 'Found: ' + (it || 'product'), 2600);
       }
