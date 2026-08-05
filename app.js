@@ -1229,7 +1229,8 @@ var GLOSS = {
       '<div class="card">' +
         '<div class="tip"><b style="color:var(--bone)">Created by Nate Merrell</b><br>Built for the CT Sports Medicine Team.</div>' +
         '<div class="tip">Questions, corrections, or a product you want added? Use the feedback bubble on any screen.</div>' +
-      '</div>');
+      '</div>' +
+      '<div class="about-quote">\u201cIf your tools don\u2019t work, make them work. If you can\u2019t make them work, make some that do work.\u201d<span class="aq-by">\u2014 Homer Stryker</span></div>');
   }
   function instrScreen(sku) {
     var e = BYPN[nrm(sku)];
