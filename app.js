@@ -463,6 +463,7 @@ var GLOSS = {
       }
       out.push({ it: x });
     });
+    if (it.cat === 'Disposables' && !out.some(function (x) { return x.it.cat === 'Capital'; })) return [];
     return out;
   }
 
