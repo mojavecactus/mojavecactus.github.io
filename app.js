@@ -1507,6 +1507,38 @@ var GLOSS = {
       }
       return out;
     }
+    function parseHIBC(t) {
+      // HIBC LIC: '+' LIC(4) product-code UOM-digit [/secondary...] check-char
+      var out = { cats: [], lot: '', exp: '' };
+      var s2 = t.slice(1);
+      if (s2.length > 5) s2 = s2.slice(0, -1); // drop trailing check character
+      var parts = s2.split('/');
+      var prim = parts[0] || '';
+      if (prim.length > 5) {
+        var body = prim.slice(4); // drop labeler ID (e.g. B504)
+        if (/\d$/.test(body)) body = body.slice(0, -1); // drop unit-of-measure digit
+        var cands = [body];
+        var noPreCat = body.replace(/^[A-Z]+(?=CAT\d)/i, '');
+        if (noPreCat !== body) cands.push(noPreCat);
+        var noAlpha = body.replace(/^[A-Z]+/i, '');
+        if (noAlpha && noAlpha !== body) cands.push(noAlpha);
+        var dm = body.match(/\d{4,}/); if (dm) cands.push(dm[0]);
+        var seen = {};
+        cands.forEach(function (c) { if (c && !seen[c]) { seen[c] = 1; out.cats.push(c); } });
+      }
+      for (var k = 1; k < parts.length; k++) {
+        var sec = parts[k];
+        if (sec.slice(0, 2) === '$$') {
+          var r = sec.slice(2), f = r.charAt(0), rest;
+          if (f >= '2' && f <= '7') { rest = r.slice(1); } else { f = ''; rest = r; }
+          if (f === '3' && /^\d{6}/.test(rest)) { out.exp = rest.slice(0, 6); out.lot = rest.slice(6); }
+          else if (f === '2' && /^\d{6}/.test(rest)) { out.exp = rest.slice(4, 6) + rest.slice(0, 4); out.lot = rest.slice(6); }
+          else if (f === '' && /^\d{4}/.test(rest)) { out.exp = rest.slice(2, 4) + rest.slice(0, 2) + '00'; out.lot = rest.slice(4); }
+          else { out.lot = rest; }
+        } else if (sec.charAt(0) === '$') { out.lot = sec.slice(1).replace(/^\+/, ''); }
+      }
+      return out;
+    }
     function fmtExp(e6) {
       if (!e6 || e6.length !== 6) return '';
       var mm = e6.slice(2, 4), dd = e6.slice(4);
@@ -1517,6 +1549,20 @@ var GLOSS = {
       if (p.gtin && p.gtin.length === 14) {
         key = p.gtin.slice(1, 13);
         sku = (window.TBX_GTIN || {})[key] || learned()[key] || null;
+      }
+      if (!sku && !p.gtin) {
+        var th = String(txt).replace(/^\][A-Za-z]\d/, '');
+        if (th.charAt(0) === '+') {
+          var h = parseHIBC(th);
+          p.lot = p.lot || h.lot; p.exp = p.exp || h.exp;
+          for (var ci = 0; ci < h.cats.length && !sku; ci++) {
+            var hc = nrm(h.cats[ci]);
+            if (hc && BYPN[hc]) sku = skuOf(BYPN[hc]);
+            else if (hc && BYPN[hc.replace(/^0+/, '')]) sku = skuOf(BYPN[hc.replace(/^0+/, '')]);
+            else { var hl = learned(); if (hl[hc]) sku = hl[hc]; }
+          }
+          if (sku) return { sku: sku, key: nrm(h.cats[0] || txt), p: p };
+        }
       }
       if (!sku) {
         var n = nrm(txt);
