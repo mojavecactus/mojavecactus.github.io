@@ -593,6 +593,7 @@ var GLOSS = {
     var b = document.createElement('div');
     b.id = 'expban';
     b.className = st.k;
+    b.dataset.born = String(Date.now());
     b.innerHTML = '<div class="xb-ico">' + (st.k === 'expired' ? '&#9888;' : '&#9200;') + '</div>' +
       '<div class="xb-t">' + (st.k === 'expired' ? 'Last Scan is EXPIRED!' : 'Last Scan Expires Soon') + '</div>' +
       (st.k === 'soon' ? '<div class="xb-days">' + st.days + ' day' + (st.days === 1 ? '' : 's') + ' left</div>' : '') +
@@ -1328,7 +1329,8 @@ var GLOSS = {
       var k = s.indexOf('/'); return k > -1 ? [s.slice(0, k), s.slice(k + 1)] : [s, ''];
     };
     window.scrollTo(0, 0);
-    var xb = document.getElementById('expban'); if (xb) xb.remove();
+    var xb = document.getElementById('expban');
+    if (xb && Date.now() - (+xb.dataset.born || 0) > 1500) xb.remove();
     hideWN(false);
     homeBtn.classList.add('away');
     FILT = {}; CURVIEW = null;
