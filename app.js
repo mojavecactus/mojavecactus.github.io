@@ -1306,6 +1306,322 @@ var GLOSS = {
     render(html);
   }
 
+  // ---- cycle count (CT team) ----
+  var CC = { creds: null, dev: '', loc: '', notes: '', mode: 'single', rows: [], stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), busy: false, view: 'gate' };
+  function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+  function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
+  function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
+  function ccStop() {
+    if (!CC) return;
+    CC.running = false;
+    if (CC.stream) { try { CC.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} CC.stream = null; }
+    if (CC.poll) { clearInterval(CC.poll); CC.poll = null; }
+  }
+  function ccPost(body) {
+    body.token = CC.creds.token; body.dev = CC.dev; body.loc = CC.loc; body.notes = CC.notes;
+    return fetch(CC.creds.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); });
+  }
+  function ccList() {
+    return fetch(CC.creds.url + '?token=' + encodeURIComponent(CC.creds.token) + '&action=list')
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j && j.rows) { CC.rows = j.rows; ccRenderList(); } });
+  }
+  function ccScreen() {
+    setTitle('Cycle Count', ''); backBtn.hidden = false;
+    ccStop();
+    if (!CC.creds) { var st = ccLS('tbx_cc'); if (st) { try { CC.creds = JSON.parse(st); } catch (e) {} } }
+    if (!CC.creds) return ccGate();
+    if (!CC.dev) CC.dev = ccLS('tbx_cc_dev') || '';
+    if (!CC.dev) return ccDevice();
+    return ccSession();
+  }
+  function ccGate() {
+    CC.view = 'gate';
+    render(
+      '<div class="card cc-card">' +
+        '<h2 class="cc-h">Cycle Count</h2>' +
+        '<div class="cc-sub">CT team access &mdash; enter the count password.</div>' +
+        '<input id="cc-pw" class="cc-in" type="password" autocomplete="off" placeholder="Count password">' +
+        '<div id="cc-err" class="cc-err" hidden>Wrong password.</div>' +
+        '<button id="cc-go" class="cc-btn">Unlock</button>' +
+      '</div>');
+    var go = document.getElementById('cc-go'), pw = document.getElementById('cc-pw');
+    function tryPw() {
+      var v = pw.value; if (!v) return;
+      go.disabled = true; go.textContent = 'Checking\u2026';
+      fetch('cc.enc.json').then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (P) {
+        return crypto.subtle.importKey('raw', new TextEncoder().encode(v), 'PBKDF2', false, ['deriveKey'])
+          .then(function (km) { return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: ccB64d(P.salt), iterations: P.it }, km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']); })
+          .then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: ccB64d(P.iv) }, key, ccB64d(P.ct)); });
+      }).then(function (buf) {
+        CC.creds = JSON.parse(new TextDecoder().decode(buf));
+        ccLS('tbx_cc', JSON.stringify(CC.creds));
+        ccScreen();
+      }).catch(function () {
+        go.disabled = false; go.textContent = 'Unlock';
+        var er = document.getElementById('cc-err'); if (er) er.hidden = false;
+      });
+    }
+    go.addEventListener('click', tryPw);
+    pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryPw(); });
+    setTimeout(function () { pw.focus(); }, 60);
+  }
+  function ccDevice() {
+    CC.view = 'device';
+    render(
+      '<div class="card cc-card">' +
+        '<h2 class="cc-h">Name this device</h2>' +
+        '<div class="cc-sub">Shown next to every scan from this phone (e.g. &ldquo;Nate&rsquo;s iPhone&rdquo;).</div>' +
+        '<input id="cc-dev" class="cc-in" type="text" autocomplete="off" placeholder="Device name">' +
+        '<button id="cc-devgo" class="cc-btn">Continue</button>' +
+      '</div>');
+    document.getElementById('cc-devgo').addEventListener('click', function () {
+      var v = document.getElementById('cc-dev').value.trim();
+      if (!v) return;
+      CC.dev = v; ccLS('tbx_cc_dev', v); ccScreen();
+    });
+  }
+  function ccSession() {
+    CC.view = 'session';
+    var locs = [];
+    try { locs = JSON.parse(ccLS('tbx_cc_locs') || '[]'); } catch (e) {}
+    render(
+      '<div class="card cc-card">' +
+        '<h2 class="cc-h">Start a count</h2>' +
+        '<div class="cc-sub">Device: <b>' + esc(CC.dev) + '</b></div>' +
+        '<input id="cc-loc" class="cc-in" type="text" autocomplete="off" placeholder="Location (e.g. Storage Unit, Nate\u2019s trunk)" list="cc-locl" value="' + esc(CC.loc || '') + '">' +
+        '<datalist id="cc-locl">' + locs.map(function (l) { return '<option value="' + esc(l) + '">'; }).join('') + '</datalist>' +
+        '<input id="cc-notes" class="cc-in" type="text" autocomplete="off" placeholder="Notes (optional)" value="' + esc(CC.notes || '') + '">' +
+        '<button id="cc-start" class="cc-btn">Start Scanning</button>' +
+        '<div class="cc-sub2">Scans feed the shared team sheet in real time.</div>' +
+      '</div>');
+    document.getElementById('cc-start').addEventListener('click', function () {
+      var loc = document.getElementById('cc-loc').value.trim();
+      if (!loc) { document.getElementById('cc-loc').focus(); return; }
+      CC.loc = loc; CC.notes = document.getElementById('cc-notes').value.trim();
+      var ls = [loc].concat(locs.filter(function (l) { return l !== loc; })).slice(0, 8);
+      ccLS('tbx_cc_locs', JSON.stringify(ls));
+      ccCount();
+    });
+  }
+  function ccStatus(t) { var el = document.getElementById('cc-stat'); if (el) el.textContent = t; }
+  function ccCount() {
+    CC.view = 'count';
+    render(
+      '<div id="ccwrap">' +
+        '<div id="cctop">' +
+          '<video id="ccvid" playsinline muted autoplay></video>' +
+          '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
+          '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
+          '<div id="ccbar">' +
+            '<div class="cc-toggle"><button id="cc-m1" class="on">Single</button><button id="cc-m2">Continuous</button></div>' +
+            '<button id="cc-manual" class="cc-mini">+ Manual</button>' +
+            '<button id="cc-end" class="cc-mini cc-endb">End</button>' +
+          '</div>' +
+        '</div>' +
+        '<div id="cchead"><span id="cc-locname">' + esc(CC.loc) + '</span><span id="cc-tot"></span></div>' +
+        '<div id="cclist"><div class="cc-empty">Loading list\u2026</div></div>' +
+        '<div id="cc-sheet" hidden></div>' +
+      '</div>');
+    document.getElementById('cc-m1').addEventListener('click', function () { CC.mode = 'single'; ccModeUI(); });
+    document.getElementById('cc-m2').addEventListener('click', function () { CC.mode = 'cont'; ccModeUI(); });
+    document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccSession(); });
+    document.getElementById('cc-manual').addEventListener('click', function () { ccManual(); });
+    document.getElementById('cclist').addEventListener('click', function (e) {
+      var row = e.target.closest ? e.target.closest('.ccrow') : null;
+      if (!row) return;
+      var r = CC.rows.filter(function (x) { return x.id === row.dataset.id; })[0];
+      if (r) ccEditor(r);
+    });
+    ccStartCam();
+    ccList().catch(function () { ccStatus('Sheet unreachable \u2014 check signal'); });
+    CC.poll = setInterval(function () { if (CC.view === 'count') ccList().catch(function () {}); }, 4000);
+  }
+  function ccModeUI() {
+    var m1 = document.getElementById('cc-m1'), m2 = document.getElementById('cc-m2');
+    if (m1) m1.classList.toggle('on', CC.mode === 'single');
+    if (m2) m2.classList.toggle('on', CC.mode === 'cont');
+    ccStatus(CC.mode === 'cont' ? 'Continuous: every scan counts 1' : 'Single: scan once, then set quantity');
+  }
+  function ccStartCam() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { ccStatus('Camera not available'); return; }
+    if (window.__TBX_PREPZX) window.__TBX_PREPZX();
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+      .then(function (st) {
+        CC.stream = st; CC.running = true;
+        var v = document.getElementById('ccvid');
+        if (!v) { ccStop(); return; }
+        v.srcObject = st; v.play && v.play().catch(function () {});
+        try {
+          var track = st.getVideoTracks()[0];
+          if (track && track.applyConstraints) track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+          var tb = document.getElementById('cc-torch');
+          var caps = track && track.getCapabilities ? track.getCapabilities() : null;
+          if (tb && caps && caps.torch) {
+            tb.hidden = false; var on = false;
+            tb.onclick = function () { on = !on; tb.classList.toggle('on', on); track.applyConstraints({ advanced: [{ torch: on }] }).catch(function () {}); };
+          }
+        } catch (e) {}
+        ccModeUI();
+        setTimeout(ccTick, 400);
+      }, function () { ccStatus('Camera permission needed \u2014 allow in Settings'); });
+  }
+  function ccTick() {
+    if (!CC.running || CC.view !== 'count') return;
+    var v = document.getElementById('ccvid');
+    if (!v || v.readyState < 2 || !v.videoWidth) { setTimeout(ccTick, 250); return; }
+    try {
+      var w = v.videoWidth, h = v.videoHeight, sc = Math.min(1, 1100 / w);
+      CC.canvas.width = Math.round(w * sc); CC.canvas.height = Math.round(h * sc);
+      var c2 = CC.canvas.getContext('2d', { willReadFrequently: true });
+      c2.drawImage(v, 0, 0, CC.canvas.width, CC.canvas.height);
+      var img = c2.getImageData(0, 0, CC.canvas.width, CC.canvas.height);
+      ZXingWASM.readBarcodes(img, { formats: ['DataMatrix', 'Code128', 'QRCode', 'EAN-13', 'UPC-A', 'PDF417'], maxNumberOfSymbols: 1, tryHarder: true })
+        .then(function (res) {
+          if (!CC.running) return;
+          if (res && res.length && res[0].text) ccOnCode(res[0].text);
+          else setTimeout(ccTick, 150);
+        }, function () { setTimeout(ccTick, 400); });
+    } catch (e) { setTimeout(ccTick, 300); }
+  }
+  function ccResume(ms) { setTimeout(ccTick, ms || 250); }
+  function ccOnCode(txt) {
+    var now = Date.now();
+    if (txt === CC.cool.code && now - CC.cool.t < 2000) { ccResume(200); return; }
+    CC.cool = { code: txt, t: now };
+    var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
+    var lot = (r.p && r.p.lot) || '', exp = ccExp(r.p && r.p.exp);
+    var ref = null, desc = '', fam = '';
+    if (r.sku) {
+      ref = r.sku;
+      var e = BYPN[nrm(r.sku)];
+      var it = e ? (e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]) : null;
+      if (it) { desc = it.t || it.name || ''; fam = it.fam || ''; }
+    } else if (r.p && r.p.gtin) {
+      ccUnknown(r, lot, exp); return;
+    } else {
+      var n = nrm(txt);
+      if (n.length >= 5 && n.length <= 20) { ref = n; }
+      else { ccStatus('Not a product barcode \u2014 keep aiming'); ccResume(500); return; }
+    }
+    if (CC.mode === 'single') {
+      var ex = CC.rows.filter(function (x) { return x.loc === CC.loc && x.ref === ref && String(x.lot) === String(lot); })[0];
+      if (ex) {
+        try { navigator.vibrate && navigator.vibrate([30, 60, 30]); } catch (ev) {}
+        ccStatus('Already counted \u2014 adjust quantity');
+        ccFlash(ex.id); ccEditor(ex); ccResume(800); return;
+      }
+    }
+    try { navigator.vibrate && navigator.vibrate(35); } catch (ev2) {}
+    ccStatus((CC.mode === 'cont' ? '+1 ' : 'Added ') + ref + (lot ? ' \u00b7 Lot ' + lot : ''));
+    ccAdd(ref, desc, fam, lot, exp);
+    ccResume(CC.mode === 'cont' ? 350 : 700);
+  }
+  function ccAdd(ref, desc, fam, lot, exp) {
+    var tmp = { id: 'tmp' + Date.now(), ts: new Date().toISOString(), dev: CC.dev, loc: CC.loc, ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, qty: 1, pending: true };
+    var ex = CC.rows.filter(function (x) { return x.loc === CC.loc && x.ref === ref && String(x.lot) === String(lot); })[0];
+    if (ex) { ex.qty += 1; } else { CC.rows.unshift(tmp); }
+    ccRenderList();
+    ccPost({ action: 'add', ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, qty: 1, mode: CC.mode })
+      .then(function (j) { if (j && j.ok) { if (!ex) tmp.id = j.id; ccList().catch(function () {}); } else { ccStatus('Save failed \u2014 rescan'); } })
+      .catch(function () { ccStatus('No signal \u2014 scan NOT saved'); });
+  }
+  function ccUnknown(r, lot, exp) {
+    CC.running = false;
+    var sheet = document.getElementById('cc-sheet');
+    sheet.hidden = false;
+    sheet.innerHTML =
+      '<div class="cc-sh-h">Unknown barcode</div>' +
+      '<div class="cc-sub">GTIN ' + esc(r.p.gtin || '') + (lot ? ' \u00b7 Lot ' + esc(lot) : '') + '</div>' +
+      '<input id="cc-upn" class="cc-in" type="text" autocomplete="off" placeholder="Enter part number">' +
+      '<div class="cc-sh-row"><button id="cc-uadd" class="cc-btn">Add to count</button><button id="cc-uskip" class="cc-mini">Skip</button></div>';
+    document.getElementById('cc-uadd').addEventListener('click', function () {
+      var v = nrm(document.getElementById('cc-upn').value);
+      if (!v) return;
+      var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
+      var desc = '', fam = '', ref = v;
+      if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
+      sheet.hidden = true; CC.running = true;
+      ccAdd(ref, desc, fam, lot, exp); ccResume(400);
+    });
+    document.getElementById('cc-uskip').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccResume(300); });
+  }
+  function ccManual() {
+    CC.running = false;
+    var sheet = document.getElementById('cc-sheet');
+    sheet.hidden = false;
+    sheet.innerHTML =
+      '<div class="cc-sh-h">Manual add</div>' +
+      '<input id="cc-mpn" class="cc-in" type="text" autocomplete="off" placeholder="Part number">' +
+      '<input id="cc-mlot" class="cc-in" type="text" autocomplete="off" placeholder="Lot (optional)">' +
+      '<div class="cc-sh-row"><button id="cc-madd" class="cc-btn">Add to count</button><button id="cc-mx" class="cc-mini">Cancel</button></div>';
+    document.getElementById('cc-madd').addEventListener('click', function () {
+      var v = nrm(document.getElementById('cc-mpn').value);
+      if (!v) return;
+      var lot = document.getElementById('cc-mlot').value.trim();
+      var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
+      var desc = '', fam = '', ref = v;
+      if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
+      sheet.hidden = true; CC.running = true;
+      ccAdd(ref, desc, fam, lot, ''); ccResume(400);
+    });
+    document.getElementById('cc-mx').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccResume(300); });
+  }
+  function ccEditor(r) {
+    CC.running = false;
+    var sheet = document.getElementById('cc-sheet');
+    if (!sheet) return;
+    sheet.hidden = false;
+    function draw(q) {
+      sheet.innerHTML =
+        '<div class="cc-sh-h">' + esc(r.ref) + (r.desc ? ' \u2014 ' + esc(r.desc) : '') + '</div>' +
+        '<div class="cc-sub">' + (r.lot ? 'Lot ' + esc(r.lot) : 'No lot') + (r.exp ? ' \u00b7 Exp ' + esc(r.exp) : '') + '</div>' +
+        '<div class="cc-qtyrow"><button id="cc-qm" class="cc-qbtn">\u2212</button><input id="cc-qv" class="cc-qin" type="number" inputmode="numeric" value="' + q + '"><button id="cc-qp" class="cc-qbtn">+</button></div>' +
+        '<div class="cc-sh-row"><button id="cc-qdone" class="cc-btn">Done</button><button id="cc-qdel" class="cc-mini cc-endb">Delete line</button></div>';
+      var qv = document.getElementById('cc-qv');
+      document.getElementById('cc-qm').onclick = function () { qv.value = Math.max(0, (+qv.value || 0) - 1); };
+      document.getElementById('cc-qp').onclick = function () { qv.value = (+qv.value || 0) + 1; };
+      document.getElementById('cc-qdone').onclick = function () {
+        var nq = Math.max(0, Math.round(+qv.value || 0));
+        sheet.hidden = true; CC.running = true; ccResume(300);
+        if (nq === r.qty) return;
+        r.qty = nq; ccRenderList();
+        ccPost({ action: 'setqty', id: r.id, qty: nq }).then(function () { ccList().catch(function () {}); }).catch(function () { ccStatus('Save failed \u2014 check signal'); });
+      };
+      document.getElementById('cc-qdel').onclick = function () {
+        if (!confirm('Delete ' + r.ref + (r.lot ? ' lot ' + r.lot : '') + ' from the count?')) return;
+        sheet.hidden = true; CC.running = true; ccResume(300);
+        CC.rows = CC.rows.filter(function (x) { return x.id !== r.id; });
+        ccRenderList();
+        ccPost({ action: 'del', id: r.id }).then(function () { ccList().catch(function () {}); }).catch(function () {});
+      };
+    }
+    draw(r.qty);
+  }
+  function ccFlash(id) {
+    var el = document.querySelector('.ccrow[data-id="' + id + '"]');
+    if (el) { el.classList.add('flash'); setTimeout(function () { el.classList.remove('flash'); }, 1200); }
+  }
+  function ccRenderList() {
+    var list = document.getElementById('cclist');
+    if (!list) return;
+    var rows = CC.rows.filter(function (x) { return x.loc === CC.loc; });
+    rows.sort(function (a, b) { return String(b.ts).localeCompare(String(a.ts)); });
+    var tot = 0; rows.forEach(function (x) { tot += (+x.qty || 0); });
+    var totEl = document.getElementById('cc-tot');
+    if (totEl) totEl.textContent = rows.length + ' lines \u00b7 ' + tot + ' units';
+    if (!rows.length) { list.innerHTML = '<div class="cc-empty">No scans yet at this location \u2014 point the camera at a barcode.</div>'; return; }
+    list.innerHTML = rows.map(function (x) {
+      return '<div class="ccrow' + (x.pending ? ' pend' : '') + '" data-id="' + esc(x.id) + '">' +
+        '<div class="ccr-main"><div class="ccr-ref">' + esc(x.ref) + '</div>' +
+        '<div class="ccr-sub">' + esc(x.desc || '') + '</div>' +
+        '<div class="ccr-sub2">' + (x.lot ? 'Lot ' + esc(x.lot) : '') + (x.exp ? ' \u00b7 Exp ' + esc(x.exp) : '') + (x.dev && x.dev !== CC.dev ? ' \u00b7 ' + esc(x.dev) : '') + '</div></div>' +
+        '<div class="ccr-qty">' + (+x.qty || 0) + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
   // ---- router ----
   function legacyRedirect(kind, n) {
     var pool = kind === 'item' ? D.items : kind === 'probe' ? D.probes : D.shavers;
@@ -1756,321 +2072,6 @@ var GLOSS = {
       toastMsg('Barcode saved to this product', 2400);
     });
   })();
-
-  // ---- cycle count (CT team) ----
-  var CC = { creds: null, dev: '', loc: '', notes: '', mode: 'single', rows: [], stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), busy: false, view: 'gate' };
-  function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
-  function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
-  function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
-  function ccStop() {
-    CC.running = false;
-    if (CC.stream) { try { CC.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} CC.stream = null; }
-    if (CC.poll) { clearInterval(CC.poll); CC.poll = null; }
-  }
-  function ccPost(body) {
-    body.token = CC.creds.token; body.dev = CC.dev; body.loc = CC.loc; body.notes = CC.notes;
-    return fetch(CC.creds.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body) })
-      .then(function (r) { return r.json(); });
-  }
-  function ccList() {
-    return fetch(CC.creds.url + '?token=' + encodeURIComponent(CC.creds.token) + '&action=list')
-      .then(function (r) { return r.json(); })
-      .then(function (j) { if (j && j.rows) { CC.rows = j.rows; ccRenderList(); } });
-  }
-  function ccScreen() {
-    setTitle('Cycle Count', ''); backBtn.hidden = false;
-    ccStop();
-    if (!CC.creds) { var st = ccLS('tbx_cc'); if (st) { try { CC.creds = JSON.parse(st); } catch (e) {} } }
-    if (!CC.creds) return ccGate();
-    if (!CC.dev) CC.dev = ccLS('tbx_cc_dev') || '';
-    if (!CC.dev) return ccDevice();
-    return ccSession();
-  }
-  function ccGate() {
-    CC.view = 'gate';
-    render(
-      '<div class="card cc-card">' +
-        '<h2 class="cc-h">Cycle Count</h2>' +
-        '<div class="cc-sub">CT team access &mdash; enter the count password.</div>' +
-        '<input id="cc-pw" class="cc-in" type="password" autocomplete="off" placeholder="Count password">' +
-        '<div id="cc-err" class="cc-err" hidden>Wrong password.</div>' +
-        '<button id="cc-go" class="cc-btn">Unlock</button>' +
-      '</div>');
-    var go = document.getElementById('cc-go'), pw = document.getElementById('cc-pw');
-    function tryPw() {
-      var v = pw.value; if (!v) return;
-      go.disabled = true; go.textContent = 'Checking\u2026';
-      fetch('cc.enc.json').then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (P) {
-        return crypto.subtle.importKey('raw', new TextEncoder().encode(v), 'PBKDF2', false, ['deriveKey'])
-          .then(function (km) { return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: ccB64d(P.salt), iterations: P.it }, km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']); })
-          .then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: ccB64d(P.iv) }, key, ccB64d(P.ct)); });
-      }).then(function (buf) {
-        CC.creds = JSON.parse(new TextDecoder().decode(buf));
-        ccLS('tbx_cc', JSON.stringify(CC.creds));
-        ccScreen();
-      }).catch(function () {
-        go.disabled = false; go.textContent = 'Unlock';
-        var er = document.getElementById('cc-err'); if (er) er.hidden = false;
-      });
-    }
-    go.addEventListener('click', tryPw);
-    pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryPw(); });
-    setTimeout(function () { pw.focus(); }, 60);
-  }
-  function ccDevice() {
-    CC.view = 'device';
-    render(
-      '<div class="card cc-card">' +
-        '<h2 class="cc-h">Name this device</h2>' +
-        '<div class="cc-sub">Shown next to every scan from this phone (e.g. &ldquo;Nate&rsquo;s iPhone&rdquo;).</div>' +
-        '<input id="cc-dev" class="cc-in" type="text" autocomplete="off" placeholder="Device name">' +
-        '<button id="cc-devgo" class="cc-btn">Continue</button>' +
-      '</div>');
-    document.getElementById('cc-devgo').addEventListener('click', function () {
-      var v = document.getElementById('cc-dev').value.trim();
-      if (!v) return;
-      CC.dev = v; ccLS('tbx_cc_dev', v); ccScreen();
-    });
-  }
-  function ccSession() {
-    CC.view = 'session';
-    var locs = [];
-    try { locs = JSON.parse(ccLS('tbx_cc_locs') || '[]'); } catch (e) {}
-    render(
-      '<div class="card cc-card">' +
-        '<h2 class="cc-h">Start a count</h2>' +
-        '<div class="cc-sub">Device: <b>' + esc(CC.dev) + '</b></div>' +
-        '<input id="cc-loc" class="cc-in" type="text" autocomplete="off" placeholder="Location (e.g. Storage Unit, Nate\u2019s trunk)" list="cc-locl" value="' + esc(CC.loc || '') + '">' +
-        '<datalist id="cc-locl">' + locs.map(function (l) { return '<option value="' + esc(l) + '">'; }).join('') + '</datalist>' +
-        '<input id="cc-notes" class="cc-in" type="text" autocomplete="off" placeholder="Notes (optional)" value="' + esc(CC.notes || '') + '">' +
-        '<button id="cc-start" class="cc-btn">Start Scanning</button>' +
-        '<div class="cc-sub2">Scans feed the shared team sheet in real time.</div>' +
-      '</div>');
-    document.getElementById('cc-start').addEventListener('click', function () {
-      var loc = document.getElementById('cc-loc').value.trim();
-      if (!loc) { document.getElementById('cc-loc').focus(); return; }
-      CC.loc = loc; CC.notes = document.getElementById('cc-notes').value.trim();
-      var ls = [loc].concat(locs.filter(function (l) { return l !== loc; })).slice(0, 8);
-      ccLS('tbx_cc_locs', JSON.stringify(ls));
-      ccCount();
-    });
-  }
-  function ccStatus(t) { var el = document.getElementById('cc-stat'); if (el) el.textContent = t; }
-  function ccCount() {
-    CC.view = 'count';
-    render(
-      '<div id="ccwrap">' +
-        '<div id="cctop">' +
-          '<video id="ccvid" playsinline muted autoplay></video>' +
-          '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
-          '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
-          '<div id="ccbar">' +
-            '<div class="cc-toggle"><button id="cc-m1" class="on">Single</button><button id="cc-m2">Continuous</button></div>' +
-            '<button id="cc-manual" class="cc-mini">+ Manual</button>' +
-            '<button id="cc-end" class="cc-mini cc-endb">End</button>' +
-          '</div>' +
-        '</div>' +
-        '<div id="cchead"><span id="cc-locname">' + esc(CC.loc) + '</span><span id="cc-tot"></span></div>' +
-        '<div id="cclist"><div class="cc-empty">Loading list\u2026</div></div>' +
-        '<div id="cc-sheet" hidden></div>' +
-      '</div>');
-    document.getElementById('cc-m1').addEventListener('click', function () { CC.mode = 'single'; ccModeUI(); });
-    document.getElementById('cc-m2').addEventListener('click', function () { CC.mode = 'cont'; ccModeUI(); });
-    document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccSession(); });
-    document.getElementById('cc-manual').addEventListener('click', function () { ccManual(); });
-    document.getElementById('cclist').addEventListener('click', function (e) {
-      var row = e.target.closest ? e.target.closest('.ccrow') : null;
-      if (!row) return;
-      var r = CC.rows.filter(function (x) { return x.id === row.dataset.id; })[0];
-      if (r) ccEditor(r);
-    });
-    ccStartCam();
-    ccList().catch(function () { ccStatus('Sheet unreachable \u2014 check signal'); });
-    CC.poll = setInterval(function () { if (CC.view === 'count') ccList().catch(function () {}); }, 4000);
-  }
-  function ccModeUI() {
-    var m1 = document.getElementById('cc-m1'), m2 = document.getElementById('cc-m2');
-    if (m1) m1.classList.toggle('on', CC.mode === 'single');
-    if (m2) m2.classList.toggle('on', CC.mode === 'cont');
-    ccStatus(CC.mode === 'cont' ? 'Continuous: every scan counts 1' : 'Single: scan once, then set quantity');
-  }
-  function ccStartCam() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { ccStatus('Camera not available'); return; }
-    if (window.__TBX_PREPZX) window.__TBX_PREPZX();
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
-      .then(function (st) {
-        CC.stream = st; CC.running = true;
-        var v = document.getElementById('ccvid');
-        if (!v) { ccStop(); return; }
-        v.srcObject = st; v.play && v.play().catch(function () {});
-        try {
-          var track = st.getVideoTracks()[0];
-          if (track && track.applyConstraints) track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
-          var tb = document.getElementById('cc-torch');
-          var caps = track && track.getCapabilities ? track.getCapabilities() : null;
-          if (tb && caps && caps.torch) {
-            tb.hidden = false; var on = false;
-            tb.onclick = function () { on = !on; tb.classList.toggle('on', on); track.applyConstraints({ advanced: [{ torch: on }] }).catch(function () {}); };
-          }
-        } catch (e) {}
-        ccModeUI();
-        setTimeout(ccTick, 400);
-      }, function () { ccStatus('Camera permission needed \u2014 allow in Settings'); });
-  }
-  function ccTick() {
-    if (!CC.running || CC.view !== 'count') return;
-    var v = document.getElementById('ccvid');
-    if (!v || v.readyState < 2 || !v.videoWidth) { setTimeout(ccTick, 250); return; }
-    try {
-      var w = v.videoWidth, h = v.videoHeight, sc = Math.min(1, 1100 / w);
-      CC.canvas.width = Math.round(w * sc); CC.canvas.height = Math.round(h * sc);
-      var c2 = CC.canvas.getContext('2d', { willReadFrequently: true });
-      c2.drawImage(v, 0, 0, CC.canvas.width, CC.canvas.height);
-      var img = c2.getImageData(0, 0, CC.canvas.width, CC.canvas.height);
-      ZXingWASM.readBarcodes(img, { formats: ['DataMatrix', 'Code128', 'QRCode', 'EAN-13', 'UPC-A', 'PDF417'], maxNumberOfSymbols: 1, tryHarder: true })
-        .then(function (res) {
-          if (!CC.running) return;
-          if (res && res.length && res[0].text) ccOnCode(res[0].text);
-          else setTimeout(ccTick, 150);
-        }, function () { setTimeout(ccTick, 400); });
-    } catch (e) { setTimeout(ccTick, 300); }
-  }
-  function ccResume(ms) { setTimeout(ccTick, ms || 250); }
-  function ccOnCode(txt) {
-    var now = Date.now();
-    if (txt === CC.cool.code && now - CC.cool.t < 2000) { ccResume(200); return; }
-    CC.cool = { code: txt, t: now };
-    var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
-    var lot = (r.p && r.p.lot) || '', exp = ccExp(r.p && r.p.exp);
-    var ref = null, desc = '', fam = '';
-    if (r.sku) {
-      ref = r.sku;
-      var e = BYPN[nrm(r.sku)];
-      var it = e ? (e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]) : null;
-      if (it) { desc = it.t || it.name || ''; fam = it.fam || ''; }
-    } else if (r.p && r.p.gtin) {
-      ccUnknown(r, lot, exp); return;
-    } else {
-      var n = nrm(txt);
-      if (n.length >= 5 && n.length <= 20) { ref = n; }
-      else { ccStatus('Not a product barcode \u2014 keep aiming'); ccResume(500); return; }
-    }
-    if (CC.mode === 'single') {
-      var ex = CC.rows.filter(function (x) { return x.loc === CC.loc && x.ref === ref && String(x.lot) === String(lot); })[0];
-      if (ex) {
-        try { navigator.vibrate && navigator.vibrate([30, 60, 30]); } catch (ev) {}
-        ccStatus('Already counted \u2014 adjust quantity');
-        ccFlash(ex.id); ccEditor(ex); ccResume(800); return;
-      }
-    }
-    try { navigator.vibrate && navigator.vibrate(35); } catch (ev2) {}
-    ccStatus((CC.mode === 'cont' ? '+1 ' : 'Added ') + ref + (lot ? ' \u00b7 Lot ' + lot : ''));
-    ccAdd(ref, desc, fam, lot, exp);
-    ccResume(CC.mode === 'cont' ? 350 : 700);
-  }
-  function ccAdd(ref, desc, fam, lot, exp) {
-    var tmp = { id: 'tmp' + Date.now(), ts: new Date().toISOString(), dev: CC.dev, loc: CC.loc, ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, qty: 1, pending: true };
-    var ex = CC.rows.filter(function (x) { return x.loc === CC.loc && x.ref === ref && String(x.lot) === String(lot); })[0];
-    if (ex) { ex.qty += 1; } else { CC.rows.unshift(tmp); }
-    ccRenderList();
-    ccPost({ action: 'add', ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, qty: 1, mode: CC.mode })
-      .then(function (j) { if (j && j.ok) { if (!ex) tmp.id = j.id; ccList().catch(function () {}); } else { ccStatus('Save failed \u2014 rescan'); } })
-      .catch(function () { ccStatus('No signal \u2014 scan NOT saved'); });
-  }
-  function ccUnknown(r, lot, exp) {
-    CC.running = false;
-    var sheet = document.getElementById('cc-sheet');
-    sheet.hidden = false;
-    sheet.innerHTML =
-      '<div class="cc-sh-h">Unknown barcode</div>' +
-      '<div class="cc-sub">GTIN ' + esc(r.p.gtin || '') + (lot ? ' \u00b7 Lot ' + esc(lot) : '') + '</div>' +
-      '<input id="cc-upn" class="cc-in" type="text" autocomplete="off" placeholder="Enter part number">' +
-      '<div class="cc-sh-row"><button id="cc-uadd" class="cc-btn">Add to count</button><button id="cc-uskip" class="cc-mini">Skip</button></div>';
-    document.getElementById('cc-uadd').addEventListener('click', function () {
-      var v = nrm(document.getElementById('cc-upn').value);
-      if (!v) return;
-      var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
-      var desc = '', fam = '', ref = v;
-      if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
-      sheet.hidden = true; CC.running = true;
-      ccAdd(ref, desc, fam, lot, exp); ccResume(400);
-    });
-    document.getElementById('cc-uskip').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccResume(300); });
-  }
-  function ccManual() {
-    CC.running = false;
-    var sheet = document.getElementById('cc-sheet');
-    sheet.hidden = false;
-    sheet.innerHTML =
-      '<div class="cc-sh-h">Manual add</div>' +
-      '<input id="cc-mpn" class="cc-in" type="text" autocomplete="off" placeholder="Part number">' +
-      '<input id="cc-mlot" class="cc-in" type="text" autocomplete="off" placeholder="Lot (optional)">' +
-      '<div class="cc-sh-row"><button id="cc-madd" class="cc-btn">Add to count</button><button id="cc-mx" class="cc-mini">Cancel</button></div>';
-    document.getElementById('cc-madd').addEventListener('click', function () {
-      var v = nrm(document.getElementById('cc-mpn').value);
-      if (!v) return;
-      var lot = document.getElementById('cc-mlot').value.trim();
-      var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
-      var desc = '', fam = '', ref = v;
-      if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
-      sheet.hidden = true; CC.running = true;
-      ccAdd(ref, desc, fam, lot, ''); ccResume(400);
-    });
-    document.getElementById('cc-mx').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccResume(300); });
-  }
-  function ccEditor(r) {
-    CC.running = false;
-    var sheet = document.getElementById('cc-sheet');
-    if (!sheet) return;
-    sheet.hidden = false;
-    function draw(q) {
-      sheet.innerHTML =
-        '<div class="cc-sh-h">' + esc(r.ref) + (r.desc ? ' \u2014 ' + esc(r.desc) : '') + '</div>' +
-        '<div class="cc-sub">' + (r.lot ? 'Lot ' + esc(r.lot) : 'No lot') + (r.exp ? ' \u00b7 Exp ' + esc(r.exp) : '') + '</div>' +
-        '<div class="cc-qtyrow"><button id="cc-qm" class="cc-qbtn">\u2212</button><input id="cc-qv" class="cc-qin" type="number" inputmode="numeric" value="' + q + '"><button id="cc-qp" class="cc-qbtn">+</button></div>' +
-        '<div class="cc-sh-row"><button id="cc-qdone" class="cc-btn">Done</button><button id="cc-qdel" class="cc-mini cc-endb">Delete line</button></div>';
-      var qv = document.getElementById('cc-qv');
-      document.getElementById('cc-qm').onclick = function () { qv.value = Math.max(0, (+qv.value || 0) - 1); };
-      document.getElementById('cc-qp').onclick = function () { qv.value = (+qv.value || 0) + 1; };
-      document.getElementById('cc-qdone').onclick = function () {
-        var nq = Math.max(0, Math.round(+qv.value || 0));
-        sheet.hidden = true; CC.running = true; ccResume(300);
-        if (nq === r.qty) return;
-        r.qty = nq; ccRenderList();
-        ccPost({ action: 'setqty', id: r.id, qty: nq }).then(function () { ccList().catch(function () {}); }).catch(function () { ccStatus('Save failed \u2014 check signal'); });
-      };
-      document.getElementById('cc-qdel').onclick = function () {
-        if (!confirm('Delete ' + r.ref + (r.lot ? ' lot ' + r.lot : '') + ' from the count?')) return;
-        sheet.hidden = true; CC.running = true; ccResume(300);
-        CC.rows = CC.rows.filter(function (x) { return x.id !== r.id; });
-        ccRenderList();
-        ccPost({ action: 'del', id: r.id }).then(function () { ccList().catch(function () {}); }).catch(function () {});
-      };
-    }
-    draw(r.qty);
-  }
-  function ccFlash(id) {
-    var el = document.querySelector('.ccrow[data-id="' + id + '"]');
-    if (el) { el.classList.add('flash'); setTimeout(function () { el.classList.remove('flash'); }, 1200); }
-  }
-  function ccRenderList() {
-    var list = document.getElementById('cclist');
-    if (!list) return;
-    var rows = CC.rows.filter(function (x) { return x.loc === CC.loc; });
-    rows.sort(function (a, b) { return String(b.ts).localeCompare(String(a.ts)); });
-    var tot = 0; rows.forEach(function (x) { tot += (+x.qty || 0); });
-    var totEl = document.getElementById('cc-tot');
-    if (totEl) totEl.textContent = rows.length + ' lines \u00b7 ' + tot + ' units';
-    if (!rows.length) { list.innerHTML = '<div class="cc-empty">No scans yet at this location \u2014 point the camera at a barcode.</div>'; return; }
-    list.innerHTML = rows.map(function (x) {
-      return '<div class="ccrow' + (x.pending ? ' pend' : '') + '" data-id="' + esc(x.id) + '">' +
-        '<div class="ccr-main"><div class="ccr-ref">' + esc(x.ref) + '</div>' +
-        '<div class="ccr-sub">' + esc(x.desc || '') + '</div>' +
-        '<div class="ccr-sub2">' + (x.lot ? 'Lot ' + esc(x.lot) : '') + (x.exp ? ' \u00b7 Exp ' + esc(x.exp) : '') + (x.dev && x.dev !== CC.dev ? ' \u00b7 ' + esc(x.dev) : '') + '</div></div>' +
-        '<div class="ccr-qty">' + (+x.qty || 0) + '</div>' +
-      '</div>';
-    }).join('');
-  }
 
   // ---- service worker + update banner + manual check ----
   var TBX_REG = null;
