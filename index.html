@@ -357,10 +357,10 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 #wnmore{display:block; width:100%; background:none; border:0; color:var(--amber);
   font-weight:700; font-size:13px; text-align:left; padding:9px 0 2px; cursor:pointer;}
 /* expiration banner */
-#expban{position:fixed; left:50%; transform:translateX(-50%); top:calc(env(safe-area-inset-top) + 74px); z-index:80;
+#expban{position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:80;
   width:min(300px, calc(100% - 48px)); border-radius:20px; padding:22px 18px 20px; text-align:center;
   box-shadow:0 12px 34px rgba(0,0,0,.55); animation:xbpop .22s ease-out;}
-@keyframes xbpop{from{opacity:0; transform:translateX(-50%) scale(.92);} to{opacity:1; transform:translateX(-50%) scale(1);}}
+@keyframes xbpop{from{opacity:0; transform:translate(-50%,-50%) scale(.92);} to{opacity:1; transform:translate(-50%,-50%) scale(1);}}
 #expban.expired{background:#4A1214; border:1.5px solid #D06A68; color:#FFC9C5;}
 #expban.soon{background:#3A2A14; border:1.5px solid #8a6420; color:#FFD98A;}
 #expban .xb-ico{font-size:30px; line-height:1; margin-bottom:8px;}
