@@ -1555,7 +1555,7 @@ var GLOSS = {
       var p = parseGS1(txt), sku = null, key = '';
       if (p.gtin && p.gtin.length === 14) {
         key = p.gtin.slice(1, 13);
-        sku = (window.TBX_GTIN || {})[key] || learned()[key] || null;
+        sku = (window.TBX_GTIN14 || {})[p.gtin] || (window.TBX_GTIN || {})[key] || learned()[key] || null;
       }
       if (!sku && !p.gtin) {
         var th = String(txt).replace(/^\][A-Za-z]\d/, '');
