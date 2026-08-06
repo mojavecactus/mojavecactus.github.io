@@ -330,6 +330,58 @@ html:not(.authed) #fb-fab, html:not(.authed) #updbanner { display: none !importa
 .about-card .about-logo{width:58px; height:58px; margin:0 auto 6px;}
 .about-card .tip{padding:8px 0; font-size:13.5px; line-height:1.48;}
 .ab-gh{margin:12px 2px 6px;}
+/* cycle count */
+.cc-card{max-width:420px; margin:14px auto; text-align:center; padding:20px 16px;}
+.cc-h{margin:0 0 6px; font-size:20px;}
+.cc-sub{color:var(--muted); font-size:13px; margin-bottom:12px;}
+.cc-sub2{color:var(--muted); font-size:11.5px; margin-top:10px;}
+.cc-in{display:block; width:100%; box-sizing:border-box; margin:8px 0; padding:12px; border-radius:12px;
+  border:1px solid var(--line); background:#141414; color:var(--bone); font-size:15px;}
+.cc-btn{display:inline-block; margin-top:10px; padding:12px 22px; border-radius:999px; border:0;
+  background:var(--amber); color:#141414; font-weight:800; font-size:15px; cursor:pointer;}
+.cc-btn:disabled{opacity:.6;}
+.cc-err{color:#FF8A85; font-size:13px; margin:4px 0;}
+#ccwrap{display:flex; flex-direction:column; margin:-4px -2px 0;}
+#cctop{position:relative; background:#000; border-radius:16px; overflow:hidden; height:38vh; min-height:230px;}
+#ccvid{width:100%; height:100%; object-fit:cover;}
+.cc-stat{position:absolute; left:0; right:0; top:8px; text-align:center; color:#fff; font-size:12.5px;
+  text-shadow:0 1px 3px rgba(0,0,0,.8); padding:0 40px;}
+.cc-torch{position:absolute; right:10px; top:6px; border:0; background:rgba(0,0,0,.45); color:#fff;
+  border-radius:999px; width:36px; height:36px; font-size:16px;}
+.cc-torch.on{background:var(--amber); color:#141414;}
+#ccbar{position:absolute; left:0; right:0; bottom:0; display:flex; align-items:center; gap:8px;
+  padding:8px 10px; background:linear-gradient(transparent, rgba(0,0,0,.72));}
+.cc-toggle{display:flex; border:1px solid rgba(255,255,255,.5); border-radius:999px; overflow:hidden;}
+.cc-toggle button{border:0; background:transparent; color:#fff; padding:7px 12px; font-size:12.5px; font-weight:700;}
+.cc-toggle button.on{background:var(--amber); color:#141414;}
+.cc-mini{border:1px solid rgba(255,255,255,.5); background:rgba(0,0,0,.35); color:#fff; border-radius:999px;
+  padding:7px 12px; font-size:12.5px; font-weight:700;}
+.cc-endb{border-color:#D06A68; color:#FFC9C5;}
+#cchead{display:flex; justify-content:space-between; align-items:baseline; margin:10px 4px 6px;
+  color:var(--amber); font-weight:800; font-size:14px;}
+#cc-tot{color:var(--muted); font-weight:600; font-size:12px;}
+#cclist{padding-bottom:90px;}
+.cc-empty{color:var(--muted); text-align:center; font-size:13px; padding:22px 10px;}
+.ccrow{display:flex; align-items:center; gap:10px; padding:10px 10px; border-radius:14px;
+  border:1px solid var(--line); background:var(--panel); margin-bottom:8px;}
+.ccrow.pend{opacity:.65;}
+.ccrow.flash{outline:2px solid var(--amber);}
+.ccr-main{flex:1; min-width:0;}
+.ccr-ref{font-weight:800; font-size:15px; letter-spacing:.2px;}
+.ccr-sub{color:var(--bone); font-size:12.5px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.ccr-sub2{color:var(--muted); font-size:11.5px; margin-top:1px;}
+.ccr-qty{min-width:44px; text-align:center; background:var(--amber); color:#141414; font-weight:900;
+  border-radius:12px; padding:8px 6px; font-size:16px;}
+#cc-sheet{position:fixed; left:10px; right:10px; bottom:calc(env(safe-area-inset-bottom) + 78px); z-index:75;
+  background:#1E1E1E; border:1px solid var(--line); border-radius:18px; padding:14px 14px 16px; text-align:center;
+  box-shadow:0 12px 34px rgba(0,0,0,.55);}
+.cc-sh-h{font-weight:800; font-size:15px; margin-bottom:4px;}
+.cc-sh-row{display:flex; gap:10px; justify-content:center; align-items:center; margin-top:10px;}
+.cc-qtyrow{display:flex; gap:12px; justify-content:center; align-items:center; margin-top:10px;}
+.cc-qbtn{width:52px; height:52px; border-radius:16px; border:1px solid var(--line); background:#141414;
+  color:var(--bone); font-size:24px; font-weight:800;}
+.cc-qin{width:84px; text-align:center; font-size:24px; font-weight:900; padding:10px 4px; border-radius:14px;
+  border:1px solid var(--line); background:#141414; color:var(--amber);}
 .about-quote .aq-by{display:block; margin-top:7px; font-style:normal; color:var(--muted); font-size:11px; letter-spacing:.08em;}
 #content.homeview .a2hs{margin-top:10px;}
 #content.homeview .foot{margin-top:auto; padding-top:12px;}
