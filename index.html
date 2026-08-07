@@ -382,6 +382,22 @@ html:not(.authed) #fb-fab, html:not(.authed) #updbanner { display: none !importa
   color:var(--bone); font-size:24px; font-weight:800;}
 .cc-qin{width:84px; text-align:center; font-size:24px; font-weight:900; padding:10px 4px; border-radius:14px;
   border:1px solid var(--line); background:#141414; color:var(--amber);}
+/* cycle-count scan confirm: centered modal */
+#cc-backdrop{position:fixed; inset:0; z-index:74; background:rgba(8,8,8,.72);}
+#cc-sheet.cc-modal{left:50%; right:auto; top:50%; bottom:auto; transform:translate(-50%,-50%);
+  width:min(430px, calc(100vw - 32px)); padding:24px 22px 22px; border-radius:24px; z-index:76;
+  box-shadow:0 22px 66px rgba(0,0,0,.6);}
+.cc-modal .cc-sh-h{font-size:19px; margin-bottom:6px;}
+.cc-modal .cc-sub{font-size:14px; margin-bottom:0;}
+.cc-modal .cc-qlabel{color:var(--muted); font-size:11.5px; font-weight:700; letter-spacing:.12em;
+  text-transform:uppercase; margin:18px 0 0;}
+.cc-modal .cc-qtyrow{gap:16px; margin-top:8px;}
+.cc-modal .cc-qbtn{width:60px; height:60px; font-size:28px;}
+.cc-modal .cc-qin{width:98px; font-size:30px;}
+.cc-modal .cc-sh-row{gap:14px; margin-top:24px;}
+.cc-modal .cc-sh-row button{flex:1; margin-top:0; padding:17px 0; font-size:17px; border-radius:999px;}
+.cc-cancel{border:1px solid rgba(255,255,255,.34); background:rgba(255,255,255,.05); color:var(--bone);
+  font-weight:800; cursor:pointer;}
 /* cycle-count scanner: targeting box, scan flash, focus, expiry + required-lot */
 #cc-target{position:absolute; left:14%; right:14%; top:19%; bottom:19%; pointer-events:none; z-index:4;}
 #cc-target i{position:absolute; width:26px; height:26px;}

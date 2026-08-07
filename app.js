@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.0';
+  var APPVER = '4.1';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1583,29 +1583,46 @@ var GLOSS = {
     CC.running = false;
     var sheet = document.getElementById('cc-sheet');
     if (!sheet) { CC.running = true; ccSchedule(300); return; }
+    var bd = document.getElementById('cc-backdrop');
+    if (!bd) { bd = document.createElement('div'); bd.id = 'cc-backdrop'; document.body.appendChild(bd); }
+    bd.hidden = false;
+    sheet.classList.add('cc-modal');
     sheet.hidden = false;
     try { navigator.vibrate && navigator.vibrate(35); } catch (ev) {}
+    function closeModal() {
+      sheet.hidden = true; sheet.classList.remove('cc-modal');
+      if (bd) bd.hidden = true;
+    }
     sheet.innerHTML =
       '<div class="cc-sh-h">' + esc(ref) + (desc ? ' \u2014 ' + esc(desc) : '') + '</div>' +
       '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
       (ccIsExpired(exp) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
-      '<div class="cc-sh-row"><button id="cc-cok" class="cc-btn">Confirm</button><button id="cc-cx" class="cc-mini">Cancel</button></div>';
+      '<div class="cc-qlabel">Quantity</div>' +
+      '<div class="cc-qtyrow"><button id="cc-cqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
+        '<input id="cc-cqv" class="cc-qin" type="number" inputmode="numeric" min="1" value="1">' +
+        '<button id="cc-cqp" class="cc-qbtn" aria-label="Increase">+</button></div>' +
+      '<div class="cc-sh-row"><button id="cc-cx" class="cc-cancel">Cancel</button><button id="cc-cok" class="cc-btn">Confirm</button></div>';
+    var qv = document.getElementById('cc-cqv');
+    document.getElementById('cc-cqm').onclick = function () { qv.value = Math.max(1, (+qv.value || 1) - 1); };
+    document.getElementById('cc-cqp').onclick = function () { qv.value = Math.max(1, (+qv.value || 0) + 1); };
     document.getElementById('cc-cok').onclick = function () {
-      sheet.hidden = true; CC.running = true;
-      ccStatus('Added ' + ref + (lot ? ' \u00b7 Lot ' + lot : ''));
-      ccAdd(ref, desc, fam, lot, exp); ccSchedule(500);
+      var q = Math.max(1, Math.round(+qv.value || 1));
+      closeModal(); CC.running = true;
+      ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
+      ccAdd(ref, desc, fam, lot, exp, q); ccSchedule(500);
     };
     document.getElementById('cc-cx').onclick = function () {
-      sheet.hidden = true; CC.running = true; ccStatus('Cancelled \u2014 keep scanning'); ccSchedule(350);
+      closeModal(); CC.running = true; ccStatus('Cancelled \u2014 keep scanning'); ccSchedule(350);
     };
   }
-  function ccAdd(ref, desc, fam, lot, exp) {
+  function ccAdd(ref, desc, fam, lot, exp, qty) {
+    qty = Math.max(1, Math.round(+qty || 1));
     var expired = ccIsExpired(exp);
-    var tmp = { id: 'tmp' + Date.now(), ts: new Date().toISOString(), dev: CC.dev, loc: CC.loc, ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, expired: expired, qty: 1, pending: true };
+    var tmp = { id: 'tmp' + Date.now(), ts: new Date().toISOString(), dev: CC.dev, loc: CC.loc, ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, expired: expired, qty: qty, pending: true };
     var ex = CC.rows.filter(function (x) { return x.loc === CC.loc && x.ref === ref && String(x.lot) === String(lot); })[0];
-    if (ex) { ex.qty += 1; } else { CC.rows.unshift(tmp); }
+    if (ex) { ex.qty += qty; } else { CC.rows.unshift(tmp); }
     ccRenderList();
-    ccPost({ action: 'add', ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, expired: expired, qty: 1, mode: CC.mode })
+    ccPost({ action: 'add', ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, expired: expired, qty: qty, mode: CC.mode })
       .then(function (j) { if (j && j.ok) { if (!ex) tmp.id = j.id; ccList().catch(function () {}); } else { ccStatus('Save failed \u2014 rescan'); } })
       .catch(function () { ccStatus('No signal \u2014 scan NOT saved'); });
   }
@@ -2178,8 +2195,10 @@ var GLOSS = {
   // ---- service worker + update banner + manual check ----
   var TBX_REG = null;
   if ('serviceWorker' in navigator) {
+    var hadController = !!navigator.serviceWorker.controller;
     var reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController) return; // first-visit SW claim: page already works, reloading here is the first-run jank
       if (reloaded) return; reloaded = true; location.reload();
     });
     navigator.serviceWorker.register('sw.js').then(function (reg) {
