@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.1';
+  var APPVER = '4.2';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1306,7 +1306,7 @@ var GLOSS = {
   }
 
   // ---- cycle count (CT team) ----
-  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, listSig: '', busy: false, view: 'gate' };
+  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, listSig: '', busy: false, view: 'gate' };
   function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
   function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
@@ -1461,6 +1461,7 @@ var GLOSS = {
       if (r) ccEditor(r);
     });
     ccStartCam();
+    ccHistLoad();
     ccList().catch(function () { ccStatus('Sheet unreachable \u2014 check signal'); });
     CC.poll = setInterval(function () { if (CC.view === 'count') ccList().catch(function () {}); }, 4000);
   }
@@ -1543,6 +1544,25 @@ var GLOSS = {
     var f = document.getElementById('cc-flash'); if (!f) return;
     f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
   }
+  function ccHistKey(loc, ref, lot) { return String(loc) + '|' + String(ref) + '|' + String(lot || ''); }
+  function ccHistSave() { try { localStorage.setItem('tbx_cc_hist', JSON.stringify(CC.hist)); } catch (e) {} }
+  function ccHistLoad() { try { CC.hist = JSON.parse(localStorage.getItem('tbx_cc_hist') || '{}') || {}; } catch (e) { CC.hist = {}; } }
+  function ccHistText(arr) {
+    if (!arr || !arr.length) return '';
+    var s = String(arr[0]);
+    for (var i = 1; i < arr.length; i++) { s += (arr[i] < 0 ? ' \u2212 ' + Math.abs(arr[i]) : ' + ' + arr[i]); }
+    var t = arr.reduce(function (a, b) { return a + (+b || 0); }, 0);
+    return 'Scans: ' + s + ' = ' + t;
+  }
+  function ccModalOpen(sheet) {
+    var bd = document.getElementById('cc-backdrop');
+    if (!bd) { bd = document.createElement('div'); bd.id = 'cc-backdrop'; document.body.appendChild(bd); }
+    bd.hidden = false; sheet.classList.add('cc-modal'); sheet.hidden = false;
+  }
+  function ccModalClose(sheet) {
+    sheet.hidden = true; sheet.classList.remove('cc-modal');
+    var bd = document.getElementById('cc-backdrop'); if (bd) bd.hidden = true;
+  }
   function ccOnCode(txt) {
     var now = Date.now();
     if (txt === CC.cool.code && now - CC.cool.t < 2000) { ccSchedule(200); return; }
@@ -1565,12 +1585,6 @@ var GLOSS = {
     }
     ccFlashGreen();
     if (CC.mode === 'single') {
-      var ex = CC.rows.filter(function (x) { return x.loc === CC.loc && x.ref === ref && String(x.lot) === String(lot); })[0];
-      if (ex) {
-        try { navigator.vibrate && navigator.vibrate([30, 60, 30]); } catch (ev) {}
-        ccStatus('Already counted \u2014 adjust quantity');
-        ccFlash(ex.id); ccEditor(ex); return;
-      }
       ccConfirm(ref, desc, fam, lot, exp); return;
     }
     try { navigator.vibrate && navigator.vibrate(35); } catch (ev2) {}
@@ -1582,21 +1596,17 @@ var GLOSS = {
     CC.running = false;
     var sheet = document.getElementById('cc-sheet');
     if (!sheet) { CC.running = true; ccSchedule(300); return; }
-    var bd = document.getElementById('cc-backdrop');
-    if (!bd) { bd = document.createElement('div'); bd.id = 'cc-backdrop'; document.body.appendChild(bd); }
-    bd.hidden = false;
-    sheet.classList.add('cc-modal');
-    sheet.hidden = false;
-    try { navigator.vibrate && navigator.vibrate(35); } catch (ev) {}
-    function closeModal() {
-      sheet.hidden = true; sheet.classList.remove('cc-modal');
-      if (bd) bd.hidden = true;
-    }
+    var ex = CC.rows.filter(function (x) { return x.loc === CC.loc && x.ref === ref && String(x.lot) === String(lot); })[0];
+    if (ex) ccFlash(ex.id);
+    ccModalOpen(sheet);
+    try { navigator.vibrate && navigator.vibrate(ex ? [30, 60, 30] : 35); } catch (ev) {}
+    function closeModal() { ccModalClose(sheet); }
     sheet.innerHTML =
       '<div class="cc-sh-h">' + esc(ref) + (desc ? ' \u2014 ' + esc(desc) : '') + '</div>' +
       '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
       (ccIsExpired(exp) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
-      '<div class="cc-qlabel">Quantity</div>' +
+      (ex ? '<div class="cc-note">Already in list here: <b>' + (+ex.qty || 0) + '</b> \u00b7 this adds on top</div>' : '') +
+      '<div class="cc-qlabel">' + (ex ? 'Add quantity' : 'Quantity') + '</div>' +
       '<div class="cc-qtyrow"><button id="cc-cqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
         '<input id="cc-cqv" class="cc-qin" type="number" inputmode="numeric" min="1" value="1">' +
         '<button id="cc-cqp" class="cc-qbtn" aria-label="Increase">+</button></div>' +
@@ -1617,17 +1627,23 @@ var GLOSS = {
   function ccAdd(ref, desc, fam, lot, exp, qty) {
     qty = Math.max(1, Math.round(+qty || 1));
     var expired = ccIsExpired(exp);
-    var tmp = { id: 'tmp' + Date.now(), ts: new Date().toISOString(), dev: CC.dev, loc: CC.loc, ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, expired: expired, qty: qty, pending: true };
+    var nowIso = new Date().toISOString();
     var ex = CC.rows.filter(function (x) { return x.loc === CC.loc && x.ref === ref && String(x.lot) === String(lot); })[0];
-    if (ex) { ex.qty += qty; } else { CC.rows.unshift(tmp); }
+    var tmp = null;
+    if (ex) { ex.qty = (+ex.qty || 0) + qty; ex.ts = nowIso; }
+    else { tmp = { id: 'tmp' + Date.now(), ts: nowIso, dev: CC.dev, loc: CC.loc, ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, expired: expired, qty: qty, pending: true }; CC.rows.unshift(tmp); }
+    var key = ccHistKey(CC.loc, ref, lot);
+    if (!CC.hist[key]) CC.hist[key] = [];
+    CC.hist[key].push(qty); ccHistSave();
     ccRenderList();
     ccPost({ action: 'add', ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, expired: expired, qty: qty, mode: CC.mode })
-      .then(function (j) { if (j && j.ok) { if (!ex) tmp.id = j.id; ccList().catch(function () {}); } else { ccStatus('Save failed \u2014 rescan'); } })
+      .then(function (j) { if (j && j.ok) { if (tmp) tmp.id = j.id; ccList().catch(function () {}); } else { ccStatus('Save failed \u2014 rescan'); } })
       .catch(function () { ccStatus('No signal \u2014 scan NOT saved'); });
   }
   function ccUnknown(r, lot, exp) {
     CC.running = false;
     var sheet = document.getElementById('cc-sheet');
+    sheet.classList.remove('cc-modal');
     sheet.hidden = false;
     sheet.innerHTML =
       '<div class="cc-sh-h">Unknown barcode</div>' +
@@ -1653,6 +1669,7 @@ var GLOSS = {
   function ccManual() {
     CC.running = false;
     var sheet = document.getElementById('cc-sheet');
+    sheet.classList.remove('cc-modal');
     sheet.hidden = false;
     sheet.innerHTML =
       '<div class="cc-sh-h">Manual add</div>' +
@@ -1685,28 +1702,39 @@ var GLOSS = {
     CC.running = false;
     var sheet = document.getElementById('cc-sheet');
     if (!sheet) return;
-    sheet.hidden = false;
+    var key = ccHistKey(r.loc, r.ref, r.lot);
+    if (!CC.hist[key] || !CC.hist[key].length) { CC.hist[key] = [(+r.qty || 0)]; ccHistSave(); }
+    ccModalOpen(sheet);
+    function closeModal() { ccModalClose(sheet); }
     function draw(q) {
+      var breakdown = ccHistText(CC.hist[key]);
       sheet.innerHTML =
         '<div class="cc-sh-h">' + esc(r.ref) + (r.desc ? ' \u2014 ' + esc(r.desc) : '') + '</div>' +
         '<div class="cc-sub">' + (r.lot ? 'Lot ' + esc(r.lot) : 'No lot') + (r.exp ? ' \u00b7 Exp ' + esc(r.exp) : '') + '</div>' +
         ((r.expired || ccIsExpired(r.exp)) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
+        '<div class="cc-qlabel">Final quantity</div>' +
         '<div class="cc-qtyrow"><button id="cc-qm" class="cc-qbtn">\u2212</button><input id="cc-qv" class="cc-qin" type="number" inputmode="numeric" value="' + q + '"><button id="cc-qp" class="cc-qbtn">+</button></div>' +
-        '<div class="cc-sh-row"><button id="cc-qdone" class="cc-btn">Done</button><button id="cc-qdel" class="cc-mini cc-endb">Delete line</button></div>';
+        (breakdown ? '<div class="cc-break">' + esc(breakdown) + '</div>' : '') +
+        '<div class="cc-sh-row"><button id="cc-qdel" class="cc-cancel cc-endb">Delete line</button><button id="cc-qdone" class="cc-btn">Done</button></div>';
       var qv = document.getElementById('cc-qv');
       document.getElementById('cc-qm').onclick = function () { qv.value = Math.max(0, (+qv.value || 0) - 1); };
       document.getElementById('cc-qp').onclick = function () { qv.value = (+qv.value || 0) + 1; };
       document.getElementById('cc-qdone').onclick = function () {
         var nq = Math.max(0, Math.round(+qv.value || 0));
-        sheet.hidden = true; CC.running = true; ccSchedule(300);
-        if (nq === r.qty) return;
-        r.qty = nq; ccRenderList();
+        closeModal(); CC.running = true; ccSchedule(300);
+        if (nq === (+r.qty || 0)) return;
+        var delta = nq - (+r.qty || 0);
+        r.qty = nq; r.ts = new Date().toISOString();
+        if (!CC.hist[key]) CC.hist[key] = [];
+        CC.hist[key].push(delta); ccHistSave();
+        ccRenderList();
         ccPost({ action: 'setqty', id: r.id, qty: nq }).then(function () { ccList().catch(function () {}); }).catch(function () { ccStatus('Save failed \u2014 check signal'); });
       };
       document.getElementById('cc-qdel').onclick = function () {
         if (!confirm('Delete ' + r.ref + (r.lot ? ' lot ' + r.lot : '') + ' from the count?')) return;
-        sheet.hidden = true; CC.running = true; ccSchedule(300);
+        closeModal(); CC.running = true; ccSchedule(300);
         CC.rows = CC.rows.filter(function (x) { return x.id !== r.id; });
+        delete CC.hist[key]; ccHistSave();
         ccRenderList();
         ccPost({ action: 'del', id: r.id }).then(function () { ccList().catch(function () {}); }).catch(function () {});
       };
