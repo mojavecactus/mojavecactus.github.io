@@ -382,6 +382,26 @@ html:not(.authed) #fb-fab, html:not(.authed) #updbanner { display: none !importa
   color:var(--bone); font-size:24px; font-weight:800;}
 .cc-qin{width:84px; text-align:center; font-size:24px; font-weight:900; padding:10px 4px; border-radius:14px;
   border:1px solid var(--line); background:#141414; color:var(--amber);}
+/* cycle-count scanner: targeting box, scan flash, focus, expiry + required-lot */
+#cc-target{position:absolute; left:14%; right:14%; top:19%; bottom:19%; pointer-events:none; z-index:4;}
+#cc-target i{position:absolute; width:26px; height:26px;}
+#cc-target i:nth-child(1){left:0; top:0; border-left:3px solid rgba(253,181,21,.95); border-top:3px solid rgba(253,181,21,.95); border-top-left-radius:6px;}
+#cc-target i:nth-child(2){right:0; top:0; border-right:3px solid rgba(253,181,21,.95); border-top:3px solid rgba(253,181,21,.95); border-top-right-radius:6px;}
+#cc-target i:nth-child(3){left:0; bottom:0; border-left:3px solid rgba(253,181,21,.95); border-bottom:3px solid rgba(253,181,21,.95); border-bottom-left-radius:6px;}
+#cc-target i:nth-child(4){right:0; bottom:0; border-right:3px solid rgba(253,181,21,.95); border-bottom:3px solid rgba(253,181,21,.95); border-bottom-right-radius:6px;}
+#cc-flash{position:absolute; inset:0; pointer-events:none; z-index:6; border-radius:16px; opacity:0;
+  box-shadow:inset 0 0 0 3px #35D07F, inset 0 0 34px 7px rgba(53,208,127,.85);}
+#cc-flash.go{animation:ccflash 2.1s ease-out forwards;}
+@keyframes ccflash{0%{opacity:0;} 7%{opacity:1;} 100%{opacity:0;}}
+.cc-focus{position:absolute; right:10px; top:48px; border:0; background:rgba(0,0,0,.45); color:#fff;
+  border-radius:999px; width:36px; height:36px; font-size:18px; line-height:1; z-index:5;}
+.cc-focus:active{background:var(--amber); color:#141414;}
+.cc-exptag{display:inline-block; margin:6px 0 2px; padding:3px 11px; border-radius:999px;
+  background:#B3261E; color:#fff; font-weight:800; font-size:12px; letter-spacing:.05em;}
+.ccr-exp{display:inline-block; margin-left:7px; padding:1px 7px; border-radius:999px;
+  background:#B3261E; color:#fff; font-weight:800; font-size:10.5px; letter-spacing:.04em; vertical-align:middle;}
+.cc-in.cc-need{border-color:#FF8A85; box-shadow:0 0 0 2px rgba(255,138,133,.28);}
+.cc-hint{color:#FF8A85; font-size:12px; margin:2px 0 0; text-align:center;}
 .about-quote .aq-by{display:block; margin-top:7px; font-style:normal; color:var(--muted); font-size:11px; letter-spacing:.08em;}
 #content.homeview .a2hs{margin-top:10px;}
 #content.homeview .foot{margin-top:auto; padding-top:12px;}
