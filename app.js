@@ -571,7 +571,6 @@ var GLOSS = {
       }).join('') +
       (WN2.items.length > 1 ? '<button id="wnmore">Show all ' + WN2.items.length + ' &#x203A;</button>' : '');
     document.body.appendChild(el);
-    WN_TIMER = setTimeout(function () { hideWN(false); }, 5000);
   }
   // ---- expiration status ----
   function expStatus(e6) {
