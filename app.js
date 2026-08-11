@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.3';
+  var APPVER = '4.4';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1333,7 +1333,7 @@ var GLOSS = {
     if (CC.tgt === 'fa') {
       var s = FA.sess || {};
       body.token = CC.creds.fa.token; body.dev = CC.dev;
-      body.sid = s.sid; body.started = s.started; body.from = s.from; body.drop = s.drop; body.snotes = s.snotes; body.sby = s.sby;
+      body.sid = s.sid; body.started = s.started; body.cname = s.cname; body.from = s.from; body.drop = s.drop; body.snotes = s.snotes; body.sby = s.sby;
       url = CC.creds.fa.url;
     } else {
       body.token = CC.creds.token; body.dev = CC.dev; body.loc = CC.loc; body.notes = CC.notes;
@@ -1346,7 +1346,7 @@ var GLOSS = {
     if (CC.tgt === 'fa') return faList().then(function () { ccRenderList(); });
     return fetch(CC.creds.url + '?token=' + encodeURIComponent(CC.creds.token) + '&action=list')
       .then(function (r) { return r.json(); })
-      .then(function (j) { if (j && j.rows) { CC.rows = j.rows; ccRenderList(); } });
+      .then(function (j) { if (j && j.rows) { CC.rows = j.rows; ccCacheSave('cc'); ccRenderList(); } });
   }
   function ccScreen() {
     setTitle('Cycle Count', ''); backBtn.hidden = false;
@@ -1354,13 +1354,16 @@ var GLOSS = {
     if (!ctEnsure(ccScreen)) return;
     CC.tgt = 'cc'; CC.view = 'cchome';
     render(
-      '<div class="card cc-card">' +
+      '<div class="card cc-card cc-home">' +
+        '<button id="cc-rf" class="cc-rfb" aria-label="Refresh counts">&#x21bb;</button>' +
         '<h2 class="cc-h">Cycle Count</h2>' +
         '<div class="cc-sub">Counts by location \u2014 open one to keep adding, or start fresh.</div>' +
         '<button id="cc-new" class="cc-btn">Start new count</button>' +
+        '<div id="cc-sync" class="cc-sync"></div>' +
         '<div id="cc-cards" class="ctc-wrap"><div class="cc-empty">Loading counts\u2026</div></div>' +
       '</div>');
     document.getElementById('cc-new').addEventListener('click', function () { ccSession(); });
+    document.getElementById('cc-rf').addEventListener('click', function () { ccHomeLoad('cc', true); });
     document.getElementById('cc-cards').addEventListener('click', function (e) {
       var c = e.target.closest ? e.target.closest('.ctc') : null; if (!c) return;
       var loc = c.dataset.loc; if (!loc) return;
@@ -1368,7 +1371,7 @@ var GLOSS = {
       var p = loc.split(' \u2014 '); CC.locBase = p[0]; CC.subloc = p.slice(1).join(' \u2014 ');
       CC.notes = ''; CC.tgt = 'cc'; ccCount();
     });
-    ccList().then(ccHomeCards).catch(function () { var el = document.getElementById('cc-cards'); if (el) el.innerHTML = '<div class="cc-empty">Sheet unreachable \u2014 check signal.</div>'; });
+    ccHomeLoad('cc', false);
   }
   function ccGate() {
     CC.view = 'gate';
@@ -1468,7 +1471,7 @@ var GLOSS = {
             '<button id="cc-end" class="cc-mini cc-endb">End</button>' +
           '</div>' +
         '</div>' +
-        '<div id="cchead"><span id="cc-locname">' + (CC.tgt === 'fa' && FA.sess ? esc((FA.sess.from || '?') + ' \u2192 ' + (FA.sess.drop || '?')) : esc(CC.loc)) + '</span><span id="cc-tot"></span></div>' +
+        '<div id="cchead"><span id="cc-locname">' + (CC.tgt === 'fa' && FA.sess ? esc(FA.sess.cname || ((FA.sess.from || '?') + ' \u2192 ' + (FA.sess.drop || '?'))) : esc(CC.loc)) + '</span><span id="cc-tot"></span></div>' +
         '<div id="cclist"><div class="cc-empty">Loading list\u2026</div></div>' +
         '<div id="cc-sheet" hidden></div>' +
       '</div>');
@@ -1657,7 +1660,7 @@ var GLOSS = {
     if (ex) { ex.qty = (+ex.qty || 0) + qty; ex.ts = nowIso; }
     else {
       tmp = { id: 'tmp' + Date.now(), ts: nowIso, dev: CC.dev, ref: ref, desc: desc, fam: fam, lot: lot, exp: exp, expired: expired, qty: qty, pending: true };
-      if (CC.tgt === 'fa') { var fs = FA.sess || {}; tmp.sid = fs.sid; tmp.started = fs.started; tmp.from = fs.from; tmp.drop = fs.drop; tmp.snotes = fs.snotes; tmp.sby = fs.sby; FA.rows.unshift(tmp); }
+      if (CC.tgt === 'fa') { var fs = FA.sess || {}; tmp.sid = fs.sid; tmp.started = fs.started; tmp.cname = fs.cname; tmp.from = fs.from; tmp.drop = fs.drop; tmp.snotes = fs.snotes; tmp.sby = fs.sby; FA.rows.unshift(tmp); }
       else { tmp.loc = CC.loc; CC.rows.unshift(tmp); }
     }
     var key = ccHK({ ref: ref, lot: lot });
@@ -1861,25 +1864,28 @@ var GLOSS = {
     }
     CC.tgt = 'fa'; CC.view = 'fahome';
     render(
-      '<div class="card cc-card">' +
+      '<div class="card cc-card cc-home">' +
+        '<button id="fa-rf" class="cc-rfb" aria-label="Refresh counts">&#x21bb;</button>' +
         '<h2 class="cc-h">F&amp;A Inventory</h2>' +
         '<div class="cc-sub">Product handed to the Foot &amp; Ankle team, one count per drop.</div>' +
         '<button id="fa-new" class="cc-btn">Start new count</button>' +
+        '<div id="fa-sync" class="cc-sync"></div>' +
         '<div id="fa-cards" class="ctc-wrap"><div class="cc-empty">Loading counts\u2026</div></div>' +
       '</div>');
     document.getElementById('fa-new').addEventListener('click', function () { faNew(); });
+    document.getElementById('fa-rf').addEventListener('click', function () { ccHomeLoad('fa', true); });
     document.getElementById('fa-cards').addEventListener('click', function (e) {
       var c = e.target.closest ? e.target.closest('.ctc') : null; if (!c) return;
       var s = FA.byId[c.dataset.sid]; if (!s) return;
-      FA.sess = { sid: s.sid, started: s.started, from: s.from, drop: s.drop, snotes: s.snotes, sby: s.sby };
+      FA.sess = { sid: s.sid, started: s.started, cname: s.cname, from: s.from, drop: s.drop, snotes: s.snotes, sby: s.sby };
       CC.tgt = 'fa'; ccCount();
     });
-    faList().then(faCards).catch(function () { var el = document.getElementById('fa-cards'); if (el) el.innerHTML = '<div class="cc-empty">Sheet unreachable \u2014 check signal.</div>'; });
+    ccHomeLoad('fa', false);
   }
   function faList() {
     return fetch(CC.creds.fa.url + '?token=' + encodeURIComponent(CC.creds.fa.token) + '&action=list')
       .then(function (r) { return r.json(); })
-      .then(function (j) { if (j && j.rows) FA.rows = j.rows; return FA.rows; });
+      .then(function (j) { if (j && j.rows) { FA.rows = j.rows; ccCacheSave('fa'); } return FA.rows; });
   }
   function faFmt(iso) {
     var d = new Date(iso); if (isNaN(d)) return String(iso || '');
@@ -1892,7 +1898,7 @@ var GLOSS = {
     var by = {}; FA.byId = {};
     FA.rows.forEach(function (x) {
       var s = by[x.sid];
-      if (!s) { s = by[x.sid] = { sid: x.sid, started: x.started, from: x.from, drop: x.drop, snotes: x.snotes, sby: x.sby, lines: 0, units: 0, last: '' }; FA.byId[x.sid] = s; }
+      if (!s) { s = by[x.sid] = { sid: x.sid, started: x.started, cname: x.cname, from: x.from, drop: x.drop, snotes: x.snotes, sby: x.sby, lines: 0, units: 0, last: '' }; FA.byId[x.sid] = s; }
       s.lines++; s.units += (+x.qty || 0);
       if (String(x.ts) > String(s.last)) s.last = x.ts;
     });
@@ -1901,7 +1907,8 @@ var GLOSS = {
     if (!arr.length) { el.innerHTML = '<div class="cc-empty">No counts yet \u2014 start the first one above.</div>'; return; }
     el.innerHTML = arr.map(function (s) {
       return '<div class="ctc" data-sid="' + esc(s.sid) + '">' +
-        '<div class="ctc-main"><div class="ctc-t">' + esc(faFmt(s.started)) + '</div>' +
+        '<div class="ctc-main"><div class="ctc-t">' + esc(s.cname || faFmt(s.started)) + '</div>' +
+        (s.cname ? '<div class="ctc-l">' + esc(faFmt(s.started)) + '</div>' : '') +
         '<div class="ctc-l">' + esc(s.from || '?') + ' \u2192 ' + esc(s.drop || '?') + '</div>' +
         (s.snotes ? '<div class="ctc-n">' + esc(s.snotes) + '</div>' : '') +
         '<div class="ctc-n">Started by ' + esc(s.sby || '?') + '</div></div>' +
@@ -1919,6 +1926,7 @@ var GLOSS = {
         '<div class="cc-sub">Device: <b>' + esc(CC.dev) + '</b></div>' +
         '<label class="cc-lab" for="fa-dt">Date &amp; time</label>' +
         '<input id="fa-dt" class="cc-in" type="datetime-local" value="' + dv + '">' +
+        '<input id="fa-name" class="cc-in" type="text" autocomplete="off" placeholder="Count name (e.g. Hartford drop)">' +
         '<input id="fa-from" class="cc-in" type="text" autocomplete="off" placeholder="From location (e.g. Nate\u2019s trunk)">' +
         '<input id="fa-drop" class="cc-in" type="text" autocomplete="off" placeholder="Dropped location (e.g. F&amp;A rep \u2014 Hartford)">' +
         '<input id="fa-notes" class="cc-in" type="text" autocomplete="off" placeholder="Notes (optional)">' +
@@ -1926,14 +1934,43 @@ var GLOSS = {
         '<div class="cc-sub2">The count appears for the whole team after the first scan.</div>' +
       '</div>');
     document.getElementById('fa-go').addEventListener('click', function () {
+      var cname = document.getElementById('fa-name').value.trim();
       var from = document.getElementById('fa-from').value.trim();
       var drop = document.getElementById('fa-drop').value.trim();
+      if (!cname) { document.getElementById('fa-name').focus(); return; }
       if (!from) { document.getElementById('fa-from').focus(); return; }
       if (!drop) { document.getElementById('fa-drop').focus(); return; }
       var dt = document.getElementById('fa-dt').value;
       var iso; try { iso = dt ? new Date(dt).toISOString() : new Date().toISOString(); } catch (e) { iso = new Date().toISOString(); }
-      FA.sess = { sid: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), started: iso, from: from, drop: drop, snotes: document.getElementById('fa-notes').value.trim(), sby: CC.dev };
+      FA.sess = { sid: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), started: iso, cname: cname, from: from, drop: drop, snotes: document.getElementById('fa-notes').value.trim(), sby: CC.dev };
       CC.tgt = 'fa'; ccCount();
+    });
+  }
+
+  // ---- home cache + refresh (instant paint from last-known rows, background sync) ----
+  function ccCacheSave(t) { try { localStorage.setItem('tbx_' + t + '_rows', JSON.stringify(t === 'fa' ? FA.rows : CC.rows)); } catch (e) {} }
+  function ccCacheLoad(t) { try { var v = localStorage.getItem('tbx_' + t + '_rows'); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
+  function ccHomeLoad(t, manual) {
+    var fa = t === 'fa';
+    var sy = document.getElementById(fa ? 'fa-sync' : 'cc-sync');
+    var rf = document.getElementById(fa ? 'fa-rf' : 'cc-rf');
+    var rows = fa ? FA.rows : CC.rows;
+    if (!rows.length) { var c = ccCacheLoad(t); if (c && c.length) { if (fa) { FA.rows = c; } else { CC.rows = c; } rows = c; } }
+    var paint = fa ? faCards : ccHomeCards;
+    if (rows.length) { paint(); if (sy) sy.textContent = manual ? 'Refreshing\u2026' : 'Updating\u2026'; }
+    else if (sy && manual) { sy.textContent = 'Refreshing\u2026'; }
+    if (rf) { rf.classList.add('spin'); rf.disabled = true; }
+    function done() { var r2 = document.getElementById(fa ? 'fa-rf' : 'cc-rf'); if (r2) { r2.classList.remove('spin'); r2.disabled = false; } }
+    return (fa ? faList() : ccList()).then(function () {
+      paint();
+      var s2 = document.getElementById(fa ? 'fa-sync' : 'cc-sync'); if (s2) s2.textContent = '';
+      done();
+    }).catch(function () {
+      var s2 = document.getElementById(fa ? 'fa-sync' : 'cc-sync');
+      var e2 = document.getElementById(fa ? 'fa-cards' : 'cc-cards');
+      if (!(fa ? FA.rows : CC.rows).length && e2) { e2.innerHTML = '<div class="cc-empty">Sheet unreachable \u2014 check signal.</div>'; }
+      else if (s2) { s2.textContent = 'Offline \u2014 showing last saved counts.'; }
+      done();
     });
   }
 
