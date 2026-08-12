@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.7';
+  var APPVER = '4.8';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -382,7 +382,7 @@ var GLOSS = {
   }
   function specCard(o) {
     var chips = (o.chips || []).map(function (c) {
-      return '<span class="chip' + (c.dim ? ' dim' : '') + '">' + esc(c.t) + '</span>'; }).join('');
+      return '<span class="chip' + (c.k ? ' ' + c.k : '') + (c.dim ? ' dim' : '') + '">' + esc(c.t) + '</span>'; }).join('');
     var rows = (o.specs || []).filter(function (s) { return s[1]; }).map(function (s) {
       return '<div class="lr"><div class="lk">' + esc(s[0]) + '</div><div class="lv">' + mark(s[1]) + '</div></div>';
     }).join('');
@@ -400,7 +400,7 @@ var GLOSS = {
       (o.warn ? '<div class="warn">&#9888; ' + esc(o.warn) + '</div>' : '') +
       '<div class="pnblock"><div class="num mono">' + esc(o.sku) + '</div>' +
       '<button class="copy" data-copy="' + esc(o.sku) + '">Copy</button></div>' +
-      (o.uom ? '<div class="uomline">Unit: ' + esc(o.uom) + '</div>' : '') +
+      (o.uom ? '<div class="uomline">Unit: <b>' + esc(o.uom) + '</b></div>' : '') +
       (fav ? '<div class="favrow">' + fav + '</div>' : '') +
       (chips ? '<div class="chips">' + chips + '</div>' : '') +
       (o.vars && o.vars.length ? '<div class="eyebrow vhead">Variants</div><div class="chips">' + o.vars.map(function (v) {
@@ -1166,8 +1166,8 @@ var GLOSS = {
     CUR_IT = it;
     var chips = [];
     if (it.sz) chips.push({ t: it.sz });
-    if (it.sub) chips.push({ t: it.sub, dim: true });
-    if (it.grp) chips.push({ t: it.grp, dim: true });
+    if (it.sub) chips.push({ t: it.sub, k: 'k-sub' });
+    if (it.grp) chips.push({ t: it.grp, k: 'k-grp' });
     var links = [];
     if (instrFor(it).length) links.push({ t: 'Instrumentation', go: '#/instr/' + encodeURIComponent(it.sku) });
     (it.links || []).forEach(function (l) {
