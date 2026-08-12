@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.6';
+  var APPVER = '4.7';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1084,13 +1084,9 @@ var GLOSS = {
     { t: 'Concave', f: function (it) { return /concave/i.test(it.name); } },
     { t: 'Flat', f: function (it) { return /flat/i.test(it.name); } }
   ];
-  // families where a token is inherent to every member — no point offering it as a filter
-  var FSUPPRESS = { 'Wedge HS suture anchor': ['Force Fiber'] };
   function withFilters(baseFilter, famLabel) {
     var base = D.items.filter(baseFilter);
-    var sup = (famLabel && FSUPPRESS[famLabel]) || [];
     var avail = FTOKENS.filter(function (tk) {
-      if (sup.indexOf(tk.t) !== -1) return false;
       if (famLabel && famLabel.indexOf(tk.t) !== -1) return false;
       var n = base.filter(tk.f).length; return n > 0 && n < base.length;
     });
