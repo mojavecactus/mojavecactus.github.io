@@ -1198,16 +1198,20 @@ var GLOSS = {
     if (it.grp) chips.push({ t: it.grp, k: 'k-grp' });
     var links = [];
     var relAll = instrFor(it).filter(function (x) { return x.it.sku !== it.sku; });
-    if (it.cat === 'Capital') {
-      [['Capital', 'Associated capital'], ['Disposables', 'Associated disposables'], ['Instruments', 'Instrumentation']].forEach(function (cb) {
-        if (relAll.some(function (x) { return x.it.cat === cb[0]; }))
-          links.push({ t: cb[1], go: '#/instr/' + encodeURIComponent(it.sku) + '/' + cb[0] });
+    var capFam = it.cat === 'Capital' || relAll.some(function (x) { return x.it.cat === 'Capital'; });
+    if (capFam) {
+      if (it.parts && it.parts.length) links.push({ t: 'Parts', go: '#/parts/' + encodeURIComponent(it.sku) });
+      if (relAll.some(function (x) { return x.it.cat === 'Disposables'; }))
+        links.push({ t: 'Associated disposables', go: '#/instr/' + encodeURIComponent(it.sku) + '/Disposables' });
+      if (relAll.some(function (x) { return x.it.cat === 'Capital'; }))
+        links.push({ t: 'Associated capital', go: '#/fam/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) });
+    } else {
+      if (relAll.length) links.push({ t: 'Instrumentation', go: '#/instr/' + encodeURIComponent(it.sku) });
+      (it.links || []).forEach(function (l) {
+        if (l.go) links.push({ t: l.t, go: l.go });
+        else if (BYPN[nrm(l.sku)]) links.push({ t: l.t, go: pnRoute(l.sku) });
       });
-    } else if (relAll.length) links.push({ t: 'Instrumentation', go: '#/instr/' + encodeURIComponent(it.sku) });
-    (it.links || []).forEach(function (l) {
-      if (l.go) links.push({ t: l.t, go: l.go });
-      else if (BYPN[nrm(l.sku)]) links.push({ t: l.t, go: pnRoute(l.sku) });
-    });
+    }
     render(specCard({ name: it.name, fam: it.fam, sku: it.sku, uom: it.uom, chips: chips, tags: it.tags,
       specs: it.specs, note: it.note, src: it.src, imgs: it.imgs, warn: it.warn, links: links, bp: it.bp,
       vars: variantsFor(it), used: usedWith(it),
@@ -1288,6 +1292,21 @@ var GLOSS = {
       html += (cat ? '' : '<div class="grouphead">' + esc(label[c]) + '</div>') + '<div class="list">' +
         grp.map(function (x) { return rowHTML(pnRoute(x.it.sku), x.it, ''); }).join('') + '</div>';
     });
+    render(html);
+  }
+  function partsScreen(sku) {
+    var e = BYPN[nrm(sku)];
+    if (!e || e.kind !== 'item') return home();
+    var it = D.items[e.idx];
+    backBtn.hidden = false;
+    setTitle('Parts', '');
+    var html = '<div class="eyebrow">' + esc(it.t || it.name) + '</div><div class="list">' +
+      (it.parts || []).map(function (psku) {
+        var e2 = BYPN[nrm(psku)];
+        if (!e2 || e2.kind !== 'item') return '';
+        var x = D.items[e2.idx];
+        return rowHTML(pnRoute(x.sku), x, '');
+      }).join('') + '</div>';
     render(html);
   }
   function probesScreen() {
@@ -2058,6 +2077,7 @@ var GLOSS = {
       if (/^\d+$/.test(isku) && +isku < D.items.length) return legacyRedirect('item', +isku);
       return instrScreen(isku, m[2] || '');
     }
+    if ((m = h.match(/^#\/parts\/(.+)$/))) return partsScreen(dec(m[1]));
     if (h === '#/scan') {
       home();
       setTimeout(function () {
