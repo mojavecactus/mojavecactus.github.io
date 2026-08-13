@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.10';
+  var APPVER = '4.11';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1004,10 +1004,9 @@ var GLOSS = {
   var ALLO_GROUPS = {
     'PRP': ['RegenKit THT (A-PRP)'],
     'ProChondrix': ['ProChondrix CR'],
-    'Evergen': ['Evergen allograft tendon', 'Evergen allograft meniscus', 'Evergen fresh osteochondral allograft',
-      'Evergen allograft chips & cubes', 'Evergen allograft wedges', 'Evergen UniCort dowel',
-      'Evergen ilium tricortical allograft', 'Evergen structural bone allograft',
-      'Evergen cortical bone blocks', 'Matrix HD acellular human dermis', 'Fortiva porcine dermis']
+    'Evergen': ['Tendon', 'Meniscus', 'Fresh Osteochondral', 'Chips and Cubes', 'Cortical Bone Blocks',
+      'Ilium Tricortical', 'Structural Bone', 'UniCort Dowels', 'Wedges',
+      'Matrix HD acellular human dermis', 'Fortiva porcine dermis']
   };
   var GROUPED = {
     'Disposables': { groups: DISP_GROUPS, fallback: 'More disposables', title: ['Disposables', ''] },
