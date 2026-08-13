@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.8';
+  var APPVER = '4.9';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -235,6 +235,7 @@ var GLOSS = {
     cats.forEach(function (c) {
       if (c === 'Capital' && b.indexOf('Instruments') === -1) b.push('Instruments');
       if (c === 'Disposables' && b.indexOf('Disposables') === -1) b.push('Disposables');
+      if (c === 'Allografts & Biologics' && b.indexOf('Biologics') === -1) b.push('Biologics');
       if (c === 'Suture' && b.indexOf('Suture') === -1) b.push('Suture');
       if (IMPLANT_CATS.indexOf(c) !== -1 && b.indexOf('Implants') === -1) b.push('Implants');
     });
@@ -341,7 +342,7 @@ var GLOSS = {
     return '<div class="list">' + list.map(function (r) { return rowHTML(r.route, r.it, r.sub); }).join('') + '</div>';
   }
   var SFILT = null;
-  var SBUCKETS = ['Arthroscopy', 'Disposables', 'Implants', 'Instruments', 'Suture'];
+  var SBUCKETS = ['Arthroscopy', 'Biologics', 'Disposables', 'Implants', 'Instruments', 'Suture'];
   function resultsHTML() {
     var hits = searchAll(CURQ);
     if (!hits.length) {
@@ -536,6 +537,7 @@ var GLOSS = {
   }
   var TILE_ICONS = {
     'Arthroscopy': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l6-6"/><path d="M8 13l3 3 9-9-3-3-9 9z"/><path d="M14 4l6 6"/><circle cx="18.5" cy="5.5" r="1" fill="#FDB515" stroke="none"/></svg>',
+    'Allografts & Biologics': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c0-5 1.5-8 4.5-10.5"/><path d="M20 4.5c0 5.2-3.2 8.5-8 8.5 0-5.2 3.2-8.5 8-8.5z"/><path d="M4.5 8c3.4 0 5.5 2.3 5.5 6-3.4 0-5.5-2.3-5.5-6z"/></svg>',
     'Disposables': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l9-4.5L21 8l-9 4.5L3 8z"/><path d="M3 8v8l9 4.5 9-4.5V8"/><path d="M12 12.5V20"/></svg>',
     'Implants': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3h5"/><path d="M12 3v2.5"/><path d="M9 5.5h6v10l-3 5.5-3-5.5v-10z"/><path d="M9 8.5h6M9 11.5h6M9 14.5h6"/></svg>',
     'Instruments': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.7 6.3a5 5 0 0 1-6.6 6.6L7 20a2.1 2.1 0 0 1-3-3l7.1-7.1a5 5 0 0 1 6.6-6.6L14.5 6.5l3 3 3.2-3.2z"/></svg>',
@@ -927,6 +929,7 @@ var GLOSS = {
     setTitle('Sports', 'Med Toolbox'); backBtn.hidden = true;
     var tileDefs = [
       { label: 'Arthroscopy', go: '#/top/arthroscopy', n: D.probes.length + D.shavers.length + pumpTubing().length },
+      { label: 'Allografts & Biologics', go: '#/cat/' + encodeURIComponent('Allografts & Biologics'), n: D.counts['Allografts & Biologics'] || 0 },
       { label: 'Disposables', go: '#/cat/' + encodeURIComponent('Disposables'), n: D.counts['Disposables'] || 0 },
       { label: 'Implants', go: '#/top/implants', n: implantCount() },
       { label: 'Instruments', go: '#/cat/' + encodeURIComponent('Capital'), n: D.counts['Capital'] || 0 },
@@ -993,23 +996,45 @@ var GLOSS = {
   }
   var DISP_GROUPS = {
     'Anchor disposables': ['CinchLock knotless anchor', 'Gravity anchor', 'Iconix all-suture anchor', 'Knotilus+ knotless anchor', 'NanoTack suture anchor', 'Titanium wedge interference screws', 'AIR+'],
-    'Biologics & cartilage': ['ProChondrix CR', 'RegenKit THT (A-PRP)'],
     'Cannulas & portal access': ['Dri-Lok cannula', 'FlowPort', 'GateWay flexible cannula', 'Portal entry kit', 'Transport', 'Samurai blades'],
     'Pump & fluid management': ['CrossFlow arthroscopy pump'],
     'Reamers & drilling': ['VersiTomic Flexible Reaming System', 'VersiTomic Low Profile Reaming System', 'VersiTomic RetroReamer', 'MicroFX OCD Osteochondral Drilling System', 'Phoenix Microfracture Drill'],
     'Suture passing systems': ['ArthroTunneler system', 'G-Force tenodesis system', 'InJector II capsule closure', 'SharpShooter meniscal repair system', 'SlingShot capsule restoration system', 'NanoPass suture management system', 'Champion SlingShot suture passer', 'Champion+ Slider suture passer']
   };
-  function dispFamGroup() {
-    var m = {};
-    Object.keys(DISP_GROUPS).forEach(function (g) { DISP_GROUPS[g].forEach(function (f) { m[f] = g; }); });
+  var ALLO_GROUPS = {
+    'PRP': ['RegenKit THT (A-PRP)'],
+    'ProChondrix': ['ProChondrix CR'],
+    'Evergen': ['Evergen allograft tendon', 'Evergen allograft meniscus', 'Evergen fresh osteochondral allograft',
+      'Evergen allograft chips & cubes', 'Evergen allograft wedges', 'Evergen UniCort dowel',
+      'Evergen ilium tricortical allograft', 'Evergen structural bone allograft',
+      'Matrix HD acellular human dermis']
+  };
+  var GROUPED = {
+    'Disposables': { groups: DISP_GROUPS, fallback: 'More disposables', title: ['Disposables', ''] },
+    'Allografts & Biologics': { groups: ALLO_GROUPS, fallback: 'More biologics', title: ['Allografts ', '& Biologics'] }
+  };
+  function dispFamGroup(cat) {
+    var m = {}, gs = GROUPED[cat || 'Disposables'].groups;
+    Object.keys(gs).forEach(function (g) { gs[g].forEach(function (f) { m[f] = g; }); });
     return m;
   }
-  function dispGroupsScreen() {
-    setTitle('Disposables', ''); backBtn.hidden = false;
-    var famGroup = dispFamGroup(), counts = {};
+  function catOfGroup(g) {
+    var found = null;
+    Object.keys(GROUPED).forEach(function (c) {
+      if (found) return;
+      if (GROUPED[c].groups[g] || GROUPED[c].fallback === g) found = c;
+    });
+    return found || 'Disposables';
+  }
+  function grpOf(it, famGroup, fallback) { return it.agrp || it.dgrp || famGroup[it.fam] || fallback; }
+  function dispGroupsScreen(cat) {
+    cat = GROUPED[cat] ? cat : 'Disposables';
+    var cfg = GROUPED[cat];
+    setTitle(cfg.title[0], cfg.title[1]); backBtn.hidden = false;
+    var famGroup = dispFamGroup(cat), counts = {};
     D.items.forEach(function (it) {
-      if (it.cat !== 'Disposables' && it.cat2 !== 'Disposables') return;
-      var g = it.dgrp || famGroup[it.fam] || 'More disposables';
+      if (it.cat !== cat && it.cat2 !== cat) return;
+      var g = grpOf(it, famGroup, cfg.fallback);
       counts[g] = (counts[g] || 0) + 1;
     });
     var names = Object.keys(counts).sort();
@@ -1020,26 +1045,27 @@ var GLOSS = {
     }).join('') + '</div>');
   }
   function dispGroupScreen(g) {
+    var cat = catOfGroup(g), cfg = GROUPED[cat];
     setTitle(g, ''); backBtn.hidden = false;
-    var famGroup = dispFamGroup(), fams = {}, order = [];
+    var famGroup = dispFamGroup(cat), fams = {}, order = [];
     D.items.forEach(function (it) {
-      if (it.cat !== 'Disposables' && it.cat2 !== 'Disposables') return;
-      var itg = it.dgrp || famGroup[it.fam] || 'More disposables';
+      if (it.cat !== cat && it.cat2 !== cat) return;
+      var itg = grpOf(it, famGroup, cfg.fallback);
       if (itg !== g) return;
       if (!fams[it.fam]) { fams[it.fam] = 0; order.push(it.fam); }
       fams[it.fam]++;
     });
-    if (!order.length) return dispGroupsScreen();
-    if (order.length === 1) return famScreen('Disposables', order[0]);
+    if (!order.length) return dispGroupsScreen(cat);
+    if (order.length === 1) return famScreen(cat, order[0]);
     order.sort();
     render('<div class="list">' + order.map(function (f) {
-      return '<button class="rowitem" data-go="#/fam/' + encodeURIComponent('Disposables') + '/' + encodeURIComponent(f) + '">' +
+      return '<button class="rowitem" data-go="#/fam/' + encodeURIComponent(cat) + '/' + encodeURIComponent(f) + '">' +
         '<div class="rl"><b class="ti">' + esc(f) + '</b><span class="ld dim2">' + fams[f] + ' items</span></div>' +
         '<div class="ct">&#x203A;</div></button>';
     }).join('') + '</div>');
   }
   function catScreen(c) {
-    if (c === 'Disposables') return dispGroupsScreen();
+    if (GROUPED[c]) return dispGroupsScreen(c);
     var fams = {}, order = [];
     D.items.forEach(function (it) {
       if (it.cat !== c && it.cat2 !== c) return;
