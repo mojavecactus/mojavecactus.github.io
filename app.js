@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.9';
+  var APPVER = '4.10';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1007,7 +1007,7 @@ var GLOSS = {
     'Evergen': ['Evergen allograft tendon', 'Evergen allograft meniscus', 'Evergen fresh osteochondral allograft',
       'Evergen allograft chips & cubes', 'Evergen allograft wedges', 'Evergen UniCort dowel',
       'Evergen ilium tricortical allograft', 'Evergen structural bone allograft',
-      'Matrix HD acellular human dermis']
+      'Evergen cortical bone blocks', 'Matrix HD acellular human dermis', 'Fortiva porcine dermis']
   };
   var GROUPED = {
     'Disposables': { groups: DISP_GROUPS, fallback: 'More disposables', title: ['Disposables', ''] },
