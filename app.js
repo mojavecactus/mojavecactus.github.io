@@ -1197,7 +1197,13 @@ var GLOSS = {
     if (it.sub) chips.push({ t: it.sub, k: 'k-sub' });
     if (it.grp) chips.push({ t: it.grp, k: 'k-grp' });
     var links = [];
-    if (instrFor(it).length) links.push({ t: 'Instrumentation', go: '#/instr/' + encodeURIComponent(it.sku) });
+    var relAll = instrFor(it).filter(function (x) { return x.it.sku !== it.sku; });
+    if (it.cat === 'Capital') {
+      [['Capital', 'Associated capital'], ['Disposables', 'Associated disposables'], ['Instruments', 'Instrumentation']].forEach(function (cb) {
+        if (relAll.some(function (x) { return x.it.cat === cb[0]; }))
+          links.push({ t: cb[1], go: '#/instr/' + encodeURIComponent(it.sku) + '/' + cb[0] });
+      });
+    } else if (relAll.length) links.push({ t: 'Instrumentation', go: '#/instr/' + encodeURIComponent(it.sku) });
     (it.links || []).forEach(function (l) {
       if (l.go) links.push({ t: l.t, go: l.go });
       else if (BYPN[nrm(l.sku)]) links.push({ t: l.t, go: pnRoute(l.sku) });
@@ -1265,19 +1271,21 @@ var GLOSS = {
       '</div>' +
       '<div class="about-quote">\u201cIf your tools don\u2019t work, make them work. If you can\u2019t make them work, make some that do work.\u201d<span class="aq-by">\u2014 Homer Stryker</span></div>');
   }
-  function instrScreen(sku) {
+  function instrScreen(sku, cat) {
     var e = BYPN[nrm(sku)];
     if (!e || e.kind !== 'item') return home();
     var it = D.items[e.idx];
     backBtn.hidden = false;
-    setTitle('Instrumentation', '');
-    var list = instrFor(it);
+    var CATTITLE = { Capital: 'Associated capital', Disposables: 'Associated disposables', Instruments: 'Instrumentation' };
+    setTitle(cat ? (CATTITLE[cat] || cat) : 'Instrumentation', '');
+    var list = instrFor(it).filter(function (x) { return x.it.sku !== it.sku; });
+    if (cat) list = list.filter(function (x) { return x.it.cat === cat; });
     var order = ['Disposables', 'Instruments', 'Capital'], label = { Disposables: 'Disposables', Instruments: 'Instruments', Capital: 'Capital' };
     var html = '<div class="eyebrow">' + esc((it.t || it.name) + (it.sz ? ' ' + it.sz : '')) + '</div>';
     order.forEach(function (c) {
       var grp = list.filter(function (x) { return x.it.cat === c; });
       if (!grp.length) return;
-      html += '<div class="grouphead">' + esc(label[c]) + '</div><div class="list">' +
+      html += (cat ? '' : '<div class="grouphead">' + esc(label[c]) + '</div>') + '<div class="list">' +
         grp.map(function (x) { return rowHTML(pnRoute(x.it.sku), x.it, ''); }).join('') + '</div>';
     });
     render(html);
@@ -2044,11 +2052,11 @@ var GLOSS = {
     if ((m = h.match(/^#\/sub\/(.+)$/))) { var sp = splitCatRest(m[1]); var j = sp[1].lastIndexOf('/'); return subScreen(sp[0], dec(sp[1].slice(0, j)), dec(sp[1].slice(j + 1))); }
     if ((m = h.match(/^#\/pn\/(.+)$/))) return pnScreen(dec(m[1]));
     if ((m = h.match(/^#\/item\/(\d+)$/))) return legacyRedirect('item', +m[1]);
-    if ((m = h.match(/^#\/instr\/(.+)$/))) {
-      m[1] = dec(m[1]);
-      if (BYPN[nrm(m[1])]) return instrScreen(m[1]);
-      if (/^\d+$/.test(m[1]) && +m[1] < D.items.length) return legacyRedirect('item', +m[1]);
-      return instrScreen(m[1]);
+    if ((m = h.match(/^#\/instr\/([^\/]+)(?:\/(Capital|Disposables|Instruments))?$/))) {
+      var isku = dec(m[1]);
+      if (BYPN[nrm(isku)]) return instrScreen(isku, m[2] || '');
+      if (/^\d+$/.test(isku) && +isku < D.items.length) return legacyRedirect('item', +isku);
+      return instrScreen(isku, m[2] || '');
     }
     if (h === '#/scan') {
       home();
