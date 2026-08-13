@@ -1200,11 +1200,14 @@ var GLOSS = {
     var relAll = instrFor(it).filter(function (x) { return x.it.sku !== it.sku; });
     var capFam = it.cat === 'Capital' || relAll.some(function (x) { return x.it.cat === 'Capital'; });
     if (capFam) {
+      var rel = it.sub ? relAll.filter(function (x) { return (x.it.sub || '') === it.sub; }) : relAll;
       if (it.parts && it.parts.length) links.push({ t: 'Parts', go: '#/parts/' + encodeURIComponent(it.sku) });
-      if (relAll.some(function (x) { return x.it.cat === 'Disposables'; }))
+      if (rel.some(function (x) { return x.it.cat === 'Disposables'; }))
         links.push({ t: 'Associated disposables', go: '#/instr/' + encodeURIComponent(it.sku) + '/Disposables' });
-      if (relAll.some(function (x) { return x.it.cat === 'Capital'; }))
-        links.push({ t: 'Associated capital', go: '#/fam/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) });
+      if (rel.some(function (x) { return x.it.cat === 'Capital'; }))
+        links.push({ t: 'Associated capital', go: it.sub
+          ? '#/sub/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) + '/' + encodeURIComponent(it.sub)
+          : '#/fam/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) });
     } else {
       if (relAll.length) links.push({ t: 'Instrumentation', go: '#/instr/' + encodeURIComponent(it.sku) });
       (it.links || []).forEach(function (l) {
@@ -1283,7 +1286,7 @@ var GLOSS = {
     var CATTITLE = { Capital: 'Associated capital', Disposables: 'Associated disposables', Instruments: 'Instrumentation' };
     setTitle(cat ? (CATTITLE[cat] || cat) : 'Instrumentation', '');
     var list = instrFor(it).filter(function (x) { return x.it.sku !== it.sku; });
-    if (cat) list = list.filter(function (x) { return x.it.cat === cat; });
+    if (cat) list = list.filter(function (x) { return x.it.cat === cat && (!it.sub || (x.it.sub || '') === it.sub); });
     var order = ['Disposables', 'Instruments', 'Capital'], label = { Disposables: 'Disposables', Instruments: 'Instruments', Capital: 'Capital' };
     var html = '<div class="eyebrow">' + esc((it.t || it.name) + (it.sz ? ' ' + it.sz : '')) + '</div>';
     order.forEach(function (c) {
