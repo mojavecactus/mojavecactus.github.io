@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.11';
+  var APPVER = '4.12';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -233,7 +233,8 @@ var GLOSS = {
   function bucketsOf(it) {
     var b = [], cats = [it.cat, it.cat2].filter(Boolean);
     cats.forEach(function (c) {
-      if (c === 'Capital' && b.indexOf('Instruments') === -1) b.push('Instruments');
+      if (c === 'Instruments' && b.indexOf('Instruments') === -1) b.push('Instruments');
+      if (c === 'Capital' && b.indexOf('Capital') === -1) b.push('Capital');
       if (c === 'Disposables' && b.indexOf('Disposables') === -1) b.push('Disposables');
       if (c === 'Allografts & Biologics' && b.indexOf('Biologics') === -1) b.push('Biologics');
       if (c === 'Suture' && b.indexOf('Suture') === -1) b.push('Suture');
@@ -342,7 +343,7 @@ var GLOSS = {
     return '<div class="list">' + list.map(function (r) { return rowHTML(r.route, r.it, r.sub); }).join('') + '</div>';
   }
   var SFILT = null;
-  var SBUCKETS = ['Arthroscopy', 'Biologics', 'Disposables', 'Implants', 'Instruments', 'Suture'];
+  var SBUCKETS = ['Arthroscopy', 'Biologics', 'Capital', 'Disposables', 'Implants', 'Instruments', 'Suture'];
   function resultsHTML() {
     var hits = searchAll(CURQ);
     if (!hits.length) {
@@ -453,7 +454,7 @@ var GLOSS = {
     var out = [];
     D.items.forEach(function (x) {
       if (fams.indexOf(x.fam) === -1) return;
-      if (x.cat !== 'Disposables' && x.cat !== 'Capital') return;
+      if (x.cat !== 'Disposables' && x.cat !== 'Instruments' && x.cat !== 'Capital') return;
       if (excl.indexOf(x.sku) !== -1) return;
       if (req && ((x.name || '') + ' ' + (x.ld || '')).indexOf(req) === -1) return;
       var name = (x.name || '') + ' ' + (x.ld || '');
@@ -472,12 +473,12 @@ var GLOSS = {
       }
       out.push({ it: x });
     });
-    if (it.cat === 'Disposables' && !out.some(function (x) { return x.it.cat === 'Capital'; })) return [];
+    if (it.cat === 'Disposables' && !out.some(function (x) { return x.it.cat === 'Instruments' || x.it.cat === 'Capital'; })) return [];
     return out;
   }
 
   function variantsFor(it) {
-    if (!it.sz || ['Disposables', 'Capital', 'Suture'].indexOf(it.cat) !== -1) return [];
+    if (!it.sz || ['Disposables', 'Instruments', 'Capital', 'Suture'].indexOf(it.cat) !== -1) return [];
     var out = [], seen = {};
     D.items.forEach(function (x) {
       if (x.fam !== it.fam || (x.sub || '') !== (it.sub || '') || x.sku === it.sku) return;
@@ -503,10 +504,10 @@ var GLOSS = {
     return out.slice(0, 8);
   }
   function usedWith(inst) {
-    if (inst.cat !== 'Disposables' && inst.cat !== 'Capital') return [];
+    if (inst.cat !== 'Disposables' && inst.cat !== 'Instruments' && inst.cat !== 'Capital') return [];
     var groups = {}, order = [];
     D.items.forEach(function (a) {
-      if (a.cat === 'Disposables' || a.cat === 'Capital' || a.cat === 'Suture') return;
+      if (a.cat === 'Disposables' || a.cat === 'Instruments' || a.cat === 'Capital' || a.cat === 'Suture') return;
       if (!a.specs || !a.specs.length) return;
       var l = instrFor(a);
       for (var i = 0; i < l.length; i++) {
@@ -541,7 +542,8 @@ var GLOSS = {
     'Disposables': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l9-4.5L21 8l-9 4.5L3 8z"/><path d="M3 8v8l9 4.5 9-4.5V8"/><path d="M12 12.5V20"/></svg>',
     'Implants': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3h5"/><path d="M12 3v2.5"/><path d="M9 5.5h6v10l-3 5.5-3-5.5v-10z"/><path d="M9 8.5h6M9 11.5h6M9 14.5h6"/></svg>',
     'Instruments': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.7 6.3a5 5 0 0 1-6.6 6.6L7 20a2.1 2.1 0 0 1-3-3l7.1-7.1a5 5 0 0 1 6.6-6.6L14.5 6.5l3 3 3.2-3.2z"/></svg>',
-    'Suture': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3.5" width="9" height="12" rx="1.5"/><path d="M7.5 7h9M7.5 10h9M7.5 13h9"/><path d="M12 15.5c0 3 6.5 2 6.5 5.5"/></svg>'
+    'Suture': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3.5" width="9" height="12" rx="1.5"/><path d="M7.5 7h9M7.5 10h9M7.5 13h9"/><path d="M12 15.5c0 3 6.5 2 6.5 5.5"/></svg>',
+    'Capital': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="9" rx="1.5"/><path d="M8 14v3.5M16 14v3.5"/><circle cx="8" cy="19.5" r="1.3"/><circle cx="16" cy="19.5" r="1.3"/><path d="M9 8.5h6"/></svg>'
   };
   var WN_TIMER = null, WN_SHOWN = false;
   function hideWN(markSeen) {
@@ -932,7 +934,8 @@ var GLOSS = {
       { label: 'Allografts & Biologics', go: '#/cat/' + encodeURIComponent('Allografts & Biologics'), n: D.counts['Allografts & Biologics'] || 0 },
       { label: 'Disposables', go: '#/cat/' + encodeURIComponent('Disposables'), n: D.counts['Disposables'] || 0 },
       { label: 'Implants', go: '#/top/implants', n: implantCount() },
-      { label: 'Instruments', go: '#/cat/' + encodeURIComponent('Capital'), n: D.counts['Capital'] || 0 },
+      { label: 'Instruments', go: '#/cat/' + encodeURIComponent('Instruments'), n: D.counts['Instruments'] || 0 },
+      { label: 'Capital', go: '#/cat/' + encodeURIComponent('Capital'), n: D.counts['Capital'] || 0 },
       { label: 'Suture', go: '#/cat/' + encodeURIComponent('Suture'), n: D.counts['Suture'] || 0 }
     ];
     tileDefs.sort(function (a, b) { return a.label.localeCompare(b.label); });
@@ -1269,7 +1272,7 @@ var GLOSS = {
     backBtn.hidden = false;
     setTitle('Instrumentation', '');
     var list = instrFor(it);
-    var order = ['Disposables', 'Capital'], label = { Disposables: 'Disposables', Capital: 'Instruments' };
+    var order = ['Disposables', 'Instruments', 'Capital'], label = { Disposables: 'Disposables', Instruments: 'Instruments', Capital: 'Capital' };
     var html = '<div class="eyebrow">' + esc((it.t || it.name) + (it.sz ? ' ' + it.sz : '')) + '</div>';
     order.forEach(function (c) {
       var grp = list.filter(function (x) { return x.it.cat === c; });
