@@ -1200,9 +1200,9 @@ var GLOSS = {
     var links = [];
     var relAll = instrFor(it).filter(function (x) { return x.it.sku !== it.sku; });
     var capFam = it.cat === 'Capital' || relAll.some(function (x) { return x.it.cat === 'Capital'; });
+    if (it.parts && it.parts.length) links.push({ t: it.plabel || 'Parts', go: '#/parts/' + encodeURIComponent(it.sku) });
     if (capFam) {
       var rel = it.sub ? relAll.filter(function (x) { return (x.it.sub || '') === it.sub; }) : relAll;
-      if (it.parts && it.parts.length) links.push({ t: 'Parts', go: '#/parts/' + encodeURIComponent(it.sku) });
       if (rel.some(function (x) { return x.it.cat === 'Disposables'; }))
         links.push({ t: 'Associated disposables', go: '#/instr/' + encodeURIComponent(it.sku) + '/Disposables' });
       if (rel.some(function (x) { return x.it.cat === 'Capital'; }))
@@ -1303,7 +1303,7 @@ var GLOSS = {
     if (!e || e.kind !== 'item') return home();
     var it = D.items[e.idx];
     backBtn.hidden = false;
-    setTitle('Parts', '');
+    setTitle(it.plabel || 'Parts', '');
     var html = '<div class="eyebrow">' + esc(it.t || it.name) + '</div><div class="list">' +
       (it.parts || []).map(function (psku) {
         var e2 = BYPN[nrm(psku)];
