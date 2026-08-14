@@ -415,7 +415,7 @@ var GLOSS = {
       }).join('') + '</div>' : '') +
       (o.bp ? '<div class="bp"><div class="bp-h">RFT Best Practice</div><div class="bp-b">' + esc(o.bp).replace(/\n/g, '<br>') + '</div></div>' : '') +
       ((o.imgs || []).map(function (im) {
-        return '<img class="photo' + ((im.indexOf('img/serfas-') === 0 || im.indexOf('img/shaver-') === 0) ? ' photo-sm' : '') + '" src="' + esc(im) + '" alt="Product reference photo" loading="lazy">';
+        return '<img class="photo' + ((!o.imgFull && (im.indexOf('img/serfas-') === 0 || im.indexOf('img/shaver-') === 0)) ? ' photo-sm' : '') + '" src="' + esc(im) + '" alt="Product reference photo" loading="lazy">';
       }).join('')) +
       (o.links && o.links.length ? '<div class="linkrow">' + o.links.map(function (l) {
         return '<button class="linkbtn" data-go="' + l.go + '">' + esc(l.t) + ' &#x203A;</button>';
@@ -1230,21 +1230,21 @@ var GLOSS = {
       });
     }
     render(specCard({ name: it.name, fam: it.fam, sku: it.sku, uom: it.uom, chips: chips, tags: it.tags,
-      specs: it.specs, note: it.note, src: it.src, imgs: it.imgs, warn: it.warn, links: links, bp: it.bp,
+      specs: it.specs, note: it.note, src: it.src, imgs: it.imgs, imgFull: it.imgFull, warn: it.warn, links: links, bp: it.bp,
       vars: variantsFor(it), used: usedWith(it),
       fav: { route: pnRoute(it.sku), it: { t: it.t || it.name, sz: it.sz || '', ld: it.ld || '', sku: it.sku } } }));
   }
   function probeCard(p) {
     setTitle('Arthro ', 'Probes'); backBtn.hidden = false;
     CUR_IT = p;
-    render(specCard({ name: p.name, fam: p.fam, sku: p.sku, uom: p.uom, tags: p.tags, specs: p.specs, imgs: p.imgs, note: p.note,
+    render(specCard({ name: p.name, fam: p.fam, sku: p.sku, uom: p.uom, tags: p.tags, specs: p.specs, imgs: p.imgs, imgFull: p.imgFull, note: p.note,
       src: p.src || 'SERFAS energy probes guide 1000904464 Rev A (2023) — part numbers, diameters, lengths; RF settings from legacy Toolbox site, verify against console',
       fav: { route: pnRoute(p.sku), it: { t: p.name, sku: p.sku } } }));
   }
   function shaverCard(s) {
     setTitle('Shaver ', 'Blades'); backBtn.hidden = false;
     CUR_IT = s;
-    render(specCard({ name: s.name, fam: (s.fam ? s.fam + ' series' : 'Shaver blades & burs'), sku: s.sku, uom: s.uom, tags: s.tags, specs: s.specs, imgs: s.imgs, warn: s.warn,
+    render(specCard({ name: s.name, fam: (s.fam ? s.fam + ' series' : 'Shaver blades & burs'), sku: s.sku, uom: s.uom, tags: s.tags, specs: s.specs, imgs: s.imgs, imgFull: s.imgFull, warn: s.warn,
       note: s.note || 'Speed settings held pending verification of the console parameter fields — flagged for review.',
       src: s.src || 'Part numbers cross-checked against the 2026 Sports Medicine product guide (Jan 2026); descriptions from the Cutter and bur guide 1000900564 Rev C (2024) and CrossBlade brochures. Reference images from Cutters and burs competitive cross reference 1000904542 Rev A (2023).',
       fav: { route: pnRoute(s.sku), it: { t: s.name, sku: s.sku } } }));
