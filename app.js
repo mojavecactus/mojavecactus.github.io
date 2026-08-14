@@ -27,8 +27,8 @@ window.TBX_BOOT = function () {
   var D = window.TOOLBOX, view = document.getElementById('view'),
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
-  var content, qInput, CURQ = '', LAST_BROWSE = '', CUR_IT = null;
-  var APPVER = '4.12';
+  var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
+  var APPVER = '4.13';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -368,6 +368,7 @@ var GLOSS = {
   function render(browseHTML) {
     LAST_BROWSE = browseHTML;
     content.classList.remove('homeview');
+    if (CURQ) { if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML; title.innerHTML = 'Search'; }
     content.innerHTML = CURQ ? resultsHTML() : browseHTML;
     content.classList.remove('vt'); void content.offsetWidth; content.classList.add('vt');
   }
@@ -2109,7 +2110,14 @@ var GLOSS = {
     if (!CURQ) SFILT = null;
     var base = (location.hash || '#/').split('?')[0];
     history.replaceState(null, '', base + (CURQ ? '?q=' + encodeURIComponent(CURQ) : ''));
-    content.innerHTML = CURQ ? resultsHTML() : LAST_BROWSE;
+    if (CURQ) {
+      if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML;
+      title.innerHTML = 'Search';
+      content.innerHTML = resultsHTML();
+    } else {
+      if (LAST_TITLE) { title.innerHTML = LAST_TITLE; LAST_TITLE = ''; }
+      content.innerHTML = LAST_BROWSE;
+    }
   });
   function tbxStart() {
     window.addEventListener('hashchange', route); route();
