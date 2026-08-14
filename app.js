@@ -537,6 +537,10 @@ var GLOSS = {
   function pumpTubing() {
     return D.items.filter(function (i) { return i.fam === 'CrossFlow arthroscopy pump' && i.cat === 'Disposables'; });
   }
+  function capArthro() {
+    var fams = ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'Shaver handpieces'];
+    return D.items.filter(function (i) { return i.cat === 'Capital' && fams.indexOf(i.fam) !== -1; });
+  }
   var TILE_ICONS = {
     'Arthroscopy': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l6-6"/><path d="M8 13l3 3 9-9-3-3-9 9z"/><path d="M14 4l6 6"/><circle cx="18.5" cy="5.5" r="1" fill="#FDB515" stroke="none"/></svg>',
     'Allografts & Biologics': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c0-5 1.5-8 4.5-10.5"/><path d="M20 4.5c0 5.2-3.2 8.5-8 8.5 0-5.2 3.2-8.5 8-8.5z"/><path d="M4.5 8c3.4 0 5.5 2.3 5.5 6-3.4 0-5.5-2.3-5.5-6z"/></svg>',
@@ -931,7 +935,7 @@ var GLOSS = {
   function home() {
     setTitle('Sports', 'Med Toolbox'); backBtn.hidden = true;
     var tileDefs = [
-      { label: 'Arthroscopy', go: '#/top/arthroscopy', n: D.probes.length + D.shavers.length + pumpTubing().length },
+      { label: 'Arthroscopy', go: '#/top/arthroscopy', n: D.probes.length + D.shavers.length + pumpTubing().length + capArthro().length },
       { label: 'Allografts & Biologics', go: '#/cat/' + encodeURIComponent('Allografts & Biologics'), n: D.counts['Allografts & Biologics'] || 0 },
       { label: 'Disposables', go: '#/cat/' + encodeURIComponent('Disposables'), n: D.counts['Disposables'] || 0 },
       { label: 'Implants', go: '#/top/implants', n: implantCount() },
@@ -989,6 +993,9 @@ var GLOSS = {
     }
     setTitle('Arthroscopy', '');
     render('<div class="list">' +
+      '<button class="rowitem" data-go="#/dgrp/' + encodeURIComponent('Arthroscopy capital') + '">' +
+      '<div class="rl"><b class="ti">Arthroscopy Capital</b>' +
+      '<span class="ld dim2">' + capArthro().length + ' items</span></div><div class="ct">&#x203A;</div></button>' +
       '<button class="rowitem" data-go="#/fam/' + encodeURIComponent('Disposables') + '/' + encodeURIComponent('CrossFlow arthroscopy pump') + '">' +
       '<div class="rl"><b class="ti">Pump Tubing</b>' +
       '<span class="ld dim2">' + pumpTubing().length + ' items</span></div><div class="ct">&#x203A;</div></button>' +
@@ -1012,9 +1019,15 @@ var GLOSS = {
       'Ilium Tricortical', 'Structural Bone', 'UniCort Dowels', 'Wedges',
       'Matrix HD acellular human dermis', 'Fortiva porcine dermis']
   };
+  var CAP_GROUPS = {
+    'Arthroscopy capital': ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'Shaver handpieces'],
+    'Adaptable positioning system': ['Adaptable positioning system'],
+    'Guardian + DARTs': ['Guardian + DARTs']
+  };
   var GROUPED = {
     'Disposables': { groups: DISP_GROUPS, fallback: 'More disposables', title: ['Disposables', ''] },
-    'Allografts & Biologics': { groups: ALLO_GROUPS, fallback: 'More biologics', title: ['Allografts ', '& Biologics'] }
+    'Allografts & Biologics': { groups: ALLO_GROUPS, fallback: 'More biologics', title: ['Allografts ', '& Biologics'] },
+    'Capital': { groups: CAP_GROUPS, fallback: 'More capital', title: ['Capital', ''] }
   };
   function dispFamGroup(cat) {
     var m = {}, gs = GROUPED[cat || 'Disposables'].groups;
