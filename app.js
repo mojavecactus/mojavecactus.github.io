@@ -1238,7 +1238,7 @@ var GLOSS = {
     setTitle('Arthro ', 'Probes'); backBtn.hidden = false;
     CUR_IT = p;
     render(specCard({ name: p.name, fam: p.fam, sku: p.sku, uom: p.uom, tags: p.tags, specs: p.specs, imgs: p.imgs, note: p.note,
-      src: 'SERFAS energy probes guide 1000904464 Rev A (2023) — part numbers, diameters, lengths; RF settings from legacy Toolbox site, verify against console',
+      src: p.src || 'SERFAS energy probes guide 1000904464 Rev A (2023) — part numbers, diameters, lengths; RF settings from legacy Toolbox site, verify against console',
       fav: { route: pnRoute(p.sku), it: { t: p.name, sku: p.sku } } }));
   }
   function shaverCard(s) {
