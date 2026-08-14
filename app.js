@@ -220,7 +220,7 @@ var GLOSS = {
   });
 
   // ---- search index ----
-  var IMPLANT_CATS = ['Iconix', 'Artelon', 'Corkscrew Anchors', 'Hard Body Suture Anchors',
+  var IMPLANT_CATS = ['Iconix', 'Artelon', 'Corkscrew Anchors', 'NanoTack',
     'Knee/Meniscus Anchors', 'Knotless Hard Body Anchors', 'Other', 'Screws'];
   var INDEX = [];
   function wordsOf(s) {
@@ -409,7 +409,7 @@ var GLOSS = {
       (o.vars && o.vars.length ? '<div class="eyebrow vhead">Variants</div><div class="chips">' + o.vars.map(function (v) {
         return '<button class="chip link" data-go="' + v.go + '">' + esc(v.t) + '</button>';
       }).join('') + '</div>' : '') +
-      (rows ? '<div class="ledger">' + rows + '</div>' : (built ? '<div class="empty">Specs coming — part number and description confirmed from the 2026 catalog.</div>' : '')) +
+      (rows ? '<div class="ledger">' + rows + '</div>' : (built && !(o.imgs || []).length ? '<div class="empty">Specs coming — part number and description confirmed from the 2026 catalog.</div>' : '')) +
       (o.used && o.used.length ? '<div class="eyebrow vhead">Used with</div><div class="linkrow">' + o.used.map(function (u) {
         return '<button class="linkbtn" data-go="' + u.go + '">' + esc(u.t) + ' &#x203A;</button>';
       }).join('') + '</div>' : '') +
