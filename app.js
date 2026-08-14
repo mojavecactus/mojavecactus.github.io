@@ -415,7 +415,7 @@ var GLOSS = {
       }).join('') + '</div>' : '') +
       (o.bp ? '<div class="bp"><div class="bp-h">RFT Best Practice</div><div class="bp-b">' + esc(o.bp).replace(/\n/g, '<br>') + '</div></div>' : '') +
       ((o.imgs || []).map(function (im) {
-        return '<img class="photo' + ((im.indexOf('serfas-') > -1 || im.indexOf('shaver-') > -1) ? ' photo-sm' : '') + '" src="' + esc(im) + '" alt="Product reference photo" loading="lazy">';
+        return '<img class="photo' + ((im.indexOf('img/serfas-') === 0 || im.indexOf('img/shaver-') === 0) ? ' photo-sm' : '') + '" src="' + esc(im) + '" alt="Product reference photo" loading="lazy">';
       }).join('')) +
       (o.links && o.links.length ? '<div class="linkrow">' + o.links.map(function (l) {
         return '<button class="linkbtn" data-go="' + l.go + '">' + esc(l.t) + ' &#x203A;</button>';
