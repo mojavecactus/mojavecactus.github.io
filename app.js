@@ -538,7 +538,7 @@ var GLOSS = {
     return D.items.filter(function (i) { return i.fam === 'CrossFlow arthroscopy pump' && i.cat === 'Disposables'; });
   }
   function capArthro() {
-    var fams = ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'Shaver handpieces'];
+    var fams = ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'FloSteady arthroscopy pump', 'Shaver handpieces'];
     return D.items.filter(function (i) { return i.cat === 'Capital' && fams.indexOf(i.fam) !== -1; });
   }
   var TILE_ICONS = {
@@ -1020,7 +1020,7 @@ var GLOSS = {
       'Matrix HD acellular human dermis', 'Fortiva porcine dermis']
   };
   var CAP_GROUPS = {
-    'Arthroscopy capital': ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'Shaver handpieces'],
+    'Arthroscopy capital': ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'FloSteady arthroscopy pump', 'Shaver handpieces'],
     'Adaptable positioning system': ['Adaptable positioning system'],
     'Guardian + DARTs': ['Guardian + DARTs']
   };
