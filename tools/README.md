@@ -28,3 +28,33 @@ Losing this repo is not fatal as long as `payload.enc.json` and the team passwor
 also kept in the owner's private Claude project. If the password itself is lost, the encrypted
 payload is unrecoverable by design — restore from the project master copy and re-encrypt with
 a new password.
+
+## Deploy runbook (every release)
+
+1. `git fetch origin && git pull --ff-only origin main` — always start from remote HEAD.
+   If another chat/session is also deploying, finish one before starting the other.
+2. `node tools/decrypt-data.mjs <team-password>` — live payload is the ONLY source of truth
+   (any project-knowledge copy of data.js is a stale convenience snapshot).
+3. Edit data.js / gtin.js / whatsnew.js and/or app assets.
+4. `node tools/encrypt-data.mjs <team-password>`.
+5. Round-trip check: decrypt the fresh payload in a temp dir and sha256-compare
+   data.js / gtin.js / whatsnew.js against the working copies.
+6. **Version-at-push rule:** after a final `git fetch`, read `origin/main:sw.js` line 1 and set
+   the new CACHE to that number **+1** (`tbx-vNNN-YYYYMMDD`). Never reuse or guess a number —
+   this is what prevents two sessions colliding on the same version.
+7. `node tools/verify.mjs` — must print VERIFY PASSED. Fix any FAIL before committing.
+8. Commit payload.enc.json + sw.js (+ app.js/img as needed), push, then trigger a Pages build
+   (`POST /repos/<owner>/<repo>/pages/builds`) and poll `/pages/builds/latest` until
+   `status=built` on the pushed SHA; re-trigger if a stale SHA reports built.
+
+## Conventions
+
+- **Serialization:** `data.js` is written as `window.TOOLBOX=` + `JSON.stringify(D)` + `;\n`
+  (plain JSON, trailing newline). The old `\u002d` dash-escaping is retired; semantic JSON
+  comparison — not byte diff — is the correct round-trip test.
+- **Spec style:** metric values are written tight (`4mm`, not `4 mm`). verify.mjs enforces this.
+- **CACHE** bumps on every deploy. **APPVER** bumps only for user-visible feature changes.
+  **What's New** entries are added only with wording provided by the owner; releases are
+  otherwise silent.
+- One-shot migration scripts stay out of the repo (run them from a scratch directory);
+  `tools/` is for durable tooling only.
