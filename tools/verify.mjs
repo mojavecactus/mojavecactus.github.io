@@ -67,6 +67,7 @@ D.items.forEach(i => {
     (i.links || []).forEach(l => {
       if (l.sku && !BY[nrm(l.sku)]) FAIL('link sku unresolved: ' + i.sku + ' -> ' + l.sku);
       if (l.go && !/^#\//.test(l.go)) FAIL('link go malformed: ' + i.sku + ' -> ' + l.go);
+      (l.menu || []).forEach(m => { if (!BY[nrm(m.sku)]) FAIL('menu link unresolved: ' + i.sku + ' -> ' + m.sku); });
     });
     const ov = i.instr || {};
     (ov.incl || []).concat(ov.excl || []).forEach(s => { if (!BY[nrm(s)]) FAIL('instr ref unresolved: ' + i.sku + ' -> ' + s); });

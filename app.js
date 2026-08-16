@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.16';
+  var APPVER = '4.17';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -210,6 +210,8 @@ var GLOSS = {
       fv.textContent = isFav(f.route) ? '★ Favorited' : '☆ Favorite';
       return;
     }
+    var lm = e.target.closest('[data-lmenu]');
+    if (lm) { openLinkMenu(JSON.parse(lm.getAttribute('data-lmenu'))); return; }
     var nav = e.target.closest('[data-go]');
     if (nav) {
       var go = nav.getAttribute('data-go');
@@ -407,6 +409,10 @@ var GLOSS = {
       '<button class="copy" data-copy="' + esc(o.sku) + '">Copy</button></div>' +
       (o.uom ? '<div class="uomline">Unit: <b>' + esc(o.uom) + '</b></div>' : '') +
       (fav ? '<div class="favrow">' + fav + '</div>' : '') +
+      (o.refs && o.refs.length ? '<div class="reflinkrow">' + o.refs.map(function (r) {
+        return r.menu ? '<button class="refbtn" data-lmenu=\'' + esc(JSON.stringify({ t: r.t, items: r.menu })) + '\'>' + esc(r.t) + '</button>'
+          : '<button class="refbtn" data-go="' + r.go + '">' + esc(r.t) + '</button>';
+      }).join('') + '</div>' : '') +
       (chips ? '<div class="chips">' + chips + '</div>' : '') +
       (o.vars && o.vars.length ? '<div class="eyebrow vhead">Variants</div><div class="chips">' + o.vars.map(function (v) {
         return '<button class="chip link" data-go="' + v.go + '">' + esc(v.t) + '</button>';
@@ -832,6 +838,30 @@ var GLOSS = {
     sh.hidden = false;
   }
 
+  function openLinkMenu(cfg) {
+    var sh = document.getElementById('ug-sheet');
+    if (!sh) {
+      sh = document.createElement('div');
+      sh.id = 'ug-sheet';
+      document.body.appendChild(sh);
+      sh.addEventListener('click', function (e) {
+        if (e.target === sh || e.target.closest('.as-close')) { sh.hidden = true; return; }
+        var opt = e.target.closest('[data-ug]');
+        if (!opt) return;
+        sh.hidden = true;
+        location.hash = opt.getAttribute('data-ug');
+      });
+    }
+    sh.innerHTML = '<div class="as-card"><h3>' + esc(cfg.t) + '</h3>' +
+      (cfg.items || []).map(function (m) {
+        return '<button class="shopt" data-ug="' + pnRoute(m.sku) + '"><span class="si">' +
+          '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></span>' +
+          '<span class="sl">' + esc(m.t) + '</span></button>';
+      }).join('') +
+      '<button class="as-close">Cancel</button></div>';
+    sh.hidden = false;
+  }
+
   // ---- welcome tour ----
   var TOUR_STEPS = [
     { t: 'Search anything', p: 'Type a product name or part number in the bar below — dashes optional.',
@@ -1214,7 +1244,7 @@ var GLOSS = {
     if (it.sz) chips.push({ t: it.sz });
     if (it.sub) chips.push({ t: it.sub, k: 'k-sub' });
     if (it.grp) chips.push({ t: it.grp, k: 'k-grp' });
-    var links = [];
+    var links = [], refs = [];
     var relAll = instrFor(it).filter(function (x) { return x.it.sku !== it.sku; });
     var capFam = it.cat === 'Capital' || relAll.some(function (x) { return x.it.cat === 'Capital'; });
     if (it.parts && it.parts.length) links.push({ t: it.plabel || 'Parts', go: '#/parts/' + encodeURIComponent(it.sku) });
@@ -1229,21 +1259,25 @@ var GLOSS = {
             : '#/fam/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) });
       }
       (it.links || []).forEach(function (l) {
+        if (l.menu) { refs.push({ t: l.t, menu: l.menu }); return; }
         var e = l.sku ? BYPN[nrm(l.sku)] : null;
         var tgtHidden = e && e.kind === 'item' && D.items[e.idx].hidden;
         if (!it.hidden && !tgtHidden) return;
-        if (l.go) links.push({ t: l.t, go: l.go });
-        else if (e) links.push({ t: l.t, go: pnRoute(l.sku) });
+        var entry = l.go ? { t: l.t, go: l.go } : (e ? { t: l.t, go: pnRoute(l.sku) } : null);
+        if (entry) (tgtHidden ? refs : links).push(entry);
       });
     } else {
       if (relAll.length) links.push({ t: 'Instrumentation', go: '#/instr/' + encodeURIComponent(it.sku) });
       (it.links || []).forEach(function (l) {
-        if (l.go) links.push({ t: l.t, go: l.go });
-        else if (BYPN[nrm(l.sku)]) links.push({ t: l.t, go: pnRoute(l.sku) });
+        if (l.menu) { refs.push({ t: l.t, menu: l.menu }); return; }
+        var e = l.sku ? BYPN[nrm(l.sku)] : null;
+        var tgtHidden = e && e.kind === 'item' && D.items[e.idx].hidden;
+        var entry = l.go ? { t: l.t, go: l.go } : (e ? { t: l.t, go: pnRoute(l.sku) } : null);
+        if (entry) (tgtHidden ? refs : links).push(entry);
       });
     }
     render(specCard({ name: it.name, fam: it.fam, sku: it.sku, uom: it.uom, chips: chips, tags: it.tags,
-      specs: it.specs, note: it.note, src: it.src, imgs: it.imgs, imgFull: it.imgFull, warn: it.warn, links: links, bp: it.bp,
+      specs: it.specs, note: it.note, src: it.src, imgs: it.imgs, imgFull: it.imgFull, warn: it.warn, links: links, refs: refs, bp: it.bp,
       vars: variantsFor(it), used: usedWith(it),
       fav: { route: pnRoute(it.sku), it: { t: it.t || it.name, sz: it.sz || '', ld: it.ld || '', sku: it.sku } } }));
   }
