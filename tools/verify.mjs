@@ -40,7 +40,7 @@ for (const f of ['app.js', 'sw.js']) {
 // ---- 3 counts (cat-only formula) ----
 {
   const c = {};
-  D.catOrder.forEach(k => { c[k] = D.items.filter(i => i.cat === k).length; });
+  D.catOrder.forEach(k => { c[k] = D.items.filter(i => !i.hidden && i.cat === k).length; });
   D.catOrder.forEach(k => { if (D.counts[k] !== c[k]) FAIL('counts drift: ' + k + ' stored ' + D.counts[k] + ' vs actual ' + c[k]); });
 }
 

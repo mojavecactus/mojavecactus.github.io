@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.14';
+  var APPVER = '4.15';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -244,6 +244,7 @@ var GLOSS = {
     return b;
   }
   D.items.forEach(function (it) {
+    if (it.hidden) return;
     var sl = slOf(it);
     var extra = (it.specs || []).map(function (s) { return s[1]; }).join(' ') + ' ' + (it.alt || []).join(' ') +
       (sl === 'Sliding' ? ' sliding' : '') + (/^Non-sliding/.test(sl) ? ' nonsliding locked' : '');
@@ -454,7 +455,7 @@ var GLOSS = {
     });
     var out = [];
     D.items.forEach(function (x) {
-      if (fams.indexOf(x.fam) === -1) return;
+      if (x.hidden || fams.indexOf(x.fam) === -1) return;
       if (x.cat !== 'Disposables' && x.cat !== 'Instruments' && x.cat !== 'Capital') return;
       if (excl.indexOf(x.sku) !== -1) return;
       if (req && ((x.name || '') + ' ' + (x.ld || '')).indexOf(req) === -1) return;
@@ -539,7 +540,7 @@ var GLOSS = {
   }
   function capArthro() {
     var fams = ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'FloSteady arthroscopy pump', 'Shaver handpieces'];
-    return D.items.filter(function (i) { return i.cat === 'Capital' && fams.indexOf(i.fam) !== -1; });
+    return D.items.filter(function (i) { return !i.hidden && i.cat === 'Capital' && fams.indexOf(i.fam) !== -1; });
   }
   var TILE_ICONS = {
     'Arthroscopy': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l6-6"/><path d="M8 13l3 3 9-9-3-3-9 9z"/><path d="M14 4l6 6"/><circle cx="18.5" cy="5.5" r="1" fill="#FDB515" stroke="none"/></svg>',
@@ -1086,7 +1087,7 @@ var GLOSS = {
     if (GROUPED[c]) return dispGroupsScreen(c);
     var fams = {}, order = [];
     D.items.forEach(function (it) {
-      if (it.cat !== c && it.cat2 !== c) return;
+      if (it.hidden || (it.cat !== c && it.cat2 !== c)) return;
       if (!fams[it.fam]) { fams[it.fam] = 0; order.push(it.fam); }
       fams[it.fam]++;
     });
@@ -1129,14 +1130,14 @@ var GLOSS = {
     { t: 'Flat', f: function (it) { return /flat/i.test(it.name); } }
   ];
   function withFilters(baseFilter, famLabel) {
-    var base = D.items.filter(baseFilter);
+    var base = D.items.filter(function (it) { return !it.hidden && baseFilter(it); });
     var avail = FTOKENS.filter(function (tk) {
       if (famLabel && famLabel.indexOf(tk.t) !== -1) return false;
       var n = base.filter(tk.f).length; return n > 0 && n < base.length;
     });
     var active = avail.filter(function (tk) { return FILT[tk.t]; });
     var pass = function (it) {
-      if (!baseFilter(it)) return false;
+      if (it.hidden || !baseFilter(it)) return false;
       return active.every(function (tk) { return tk.f(it); });
     };
     CURCOUNT = function () {
@@ -1166,7 +1167,7 @@ var GLOSS = {
     backBtn.hidden = false;
     var subs = {}, order = [];
     D.items.forEach(function (it) {
-      if ((it.cat !== c && it.cat2 !== c) || it.fam !== f || !it.sub) return;
+      if (it.hidden || (it.cat !== c && it.cat2 !== c) || it.fam !== f || !it.sub) return;
       if (!subs[it.sub]) { subs[it.sub] = 0; order.push(it.sub); }
       subs[it.sub]++;
     });
@@ -1217,13 +1218,22 @@ var GLOSS = {
     var capFam = it.cat === 'Capital' || relAll.some(function (x) { return x.it.cat === 'Capital'; });
     if (it.parts && it.parts.length) links.push({ t: it.plabel || 'Parts', go: '#/parts/' + encodeURIComponent(it.sku) });
     if (capFam) {
-      var rel = it.sub ? relAll.filter(function (x) { return (x.it.sub || '') === it.sub; }) : relAll;
-      if (rel.some(function (x) { return x.it.cat === 'Disposables'; }))
-        links.push({ t: 'Associated disposables', go: '#/instr/' + encodeURIComponent(it.sku) + '/Disposables' });
-      if (rel.some(function (x) { return x.it.cat === 'Capital'; }))
-        links.push({ t: 'Associated capital', go: it.sub
-          ? '#/sub/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) + '/' + encodeURIComponent(it.sub)
-          : '#/fam/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) });
+      if (!it.hidden) {
+        var rel = it.sub ? relAll.filter(function (x) { return (x.it.sub || '') === it.sub; }) : relAll;
+        if (rel.some(function (x) { return x.it.cat === 'Disposables'; }))
+          links.push({ t: 'Associated disposables', go: '#/instr/' + encodeURIComponent(it.sku) + '/Disposables' });
+        if (rel.some(function (x) { return x.it.cat === 'Capital'; }))
+          links.push({ t: 'Associated capital', go: it.sub
+            ? '#/sub/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) + '/' + encodeURIComponent(it.sub)
+            : '#/fam/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) });
+      }
+      (it.links || []).forEach(function (l) {
+        var e = l.sku ? BYPN[nrm(l.sku)] : null;
+        var tgtHidden = e && e.kind === 'item' && D.items[e.idx].hidden;
+        if (!it.hidden && !tgtHidden) return;
+        if (l.go) links.push({ t: l.t, go: l.go });
+        else if (e) links.push({ t: l.t, go: pnRoute(l.sku) });
+      });
     } else {
       if (relAll.length) links.push({ t: 'Instrumentation', go: '#/instr/' + encodeURIComponent(it.sku) });
       (it.links || []).forEach(function (l) {
