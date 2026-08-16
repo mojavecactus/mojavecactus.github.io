@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.15';
+  var APPVER = '4.16';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -388,6 +388,7 @@ var GLOSS = {
     var chips = (o.chips || []).map(function (c) {
       return '<span class="chip' + (c.k ? ' ' + c.k : '') + (c.dim ? ' dim' : '') + '">' + esc(c.t) + '</span>'; }).join('');
     var rows = (o.specs || []).filter(function (s) { return s[1]; }).map(function (s) {
+      if (!s[0]) return '<div class="lhead">' + esc(s[1]) + '</div>';
       return '<div class="lr"><div class="lk">' + esc(s[0]) + '</div><div class="lv">' + mark(s[1]) + '</div></div>';
     }).join('');
     var built = !!rows || !!o.note || !!o.bp || !!(o.imgs && o.imgs.length);
