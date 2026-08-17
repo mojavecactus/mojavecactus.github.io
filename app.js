@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.27';
+  var APPVER = '4.28';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1425,7 +1425,7 @@ var GLOSS = {
   }
 
   // ---- cycle count (CT team) ----
-  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0, ms: 2600 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, worker: null, workerFailed: false, wcb: {}, wid: 0, miss: 0, stall: 0, camBusy: false, ac: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
+  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0, ms: 2600 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, camOff: false, worker: null, workerFailed: false, wcb: {}, wid: 0, miss: 0, stall: 0, camBusy: false, ac: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
   function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
   function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
@@ -1732,6 +1732,7 @@ var GLOSS = {
           '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
           '<div id="ccbar">' +
             '<button id="cc-manual" class="cc-mini">+ Manual</button>' +
+            '<button id="cc-cam" class="cc-mini">Camera off</button>' +
             '<button id="cc-end" class="cc-mini cc-endb">End</button>' +
           '</div>' +
         '</div>' +
@@ -1742,6 +1743,7 @@ var GLOSS = {
     CC.mode = 'single';
     document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccFlushSoon(CC.tgt === 'fa' ? 'fa' : 'cc', 100); if (CC.tgt === 'fa') { faScreen(); } else { ccScreen(); } });
     document.getElementById('cc-manual').addEventListener('click', function () { ccManual(); });
+    document.getElementById('cc-cam').addEventListener('click', function () { ccCamSet(CC.camOff); });
     document.getElementById('cc-help').addEventListener('click', function (e) { e.stopPropagation(); ccCamHelp(false); });
     document.getElementById('ccvid').addEventListener('click', function () { ccRefocus(true); });
     document.getElementById('cclist').addEventListener('click', function (e) {
@@ -1751,6 +1753,7 @@ var GLOSS = {
       if (r) ccEditor(r);
     });
     ccBeepInit();
+    CC.camOff = false;
     ccStartCam();
     ccHistLoad();
     ccWake();
@@ -1842,7 +1845,7 @@ var GLOSS = {
         }, function () { CC.miss++; ccSchedule(400); });
     } catch (e) { ccSchedule(300); }
   }
-  function ccSchedule(ms) { if (CC.tickTO) clearTimeout(CC.tickTO); CC.tickTO = setTimeout(ccTick, ms || 250); }
+  function ccSchedule(ms) { if (CC.tickTO) clearTimeout(CC.tickTO); if (CC.camOff) return; CC.tickTO = setTimeout(ccTick, ms || 250); }
   // Two decode profiles. Most frames run the cheap pass (the codes we actually
   // scan, no exhaustive search). Every third frame runs the full pass, so any
   // other symbology still decodes within about half a second.
@@ -1924,8 +1927,8 @@ var GLOSS = {
         ccChime(1175, t + 0.10, 0.09, 0.62);
       } else {
         // success: rising two-note chime, Apple Pay style
-        ccChime(1568, t, 0.09, 0.72);
-        ccChime(2093, t + 0.095, 0.20, 0.72);
+        ccChime(2093, t, 0.09, 0.72);
+        ccChime(2794, t + 0.095, 0.20, 0.72);
       }
     } catch (e) {}
   }
@@ -1948,9 +1951,24 @@ var GLOSS = {
     document.getElementById('cc-hx').onclick = function () { ccModalClose(sheet); CC.running = true; ccSchedule(300); };
     document.getElementById('cc-hr').onclick = function () { location.reload(); };
   }
+  function ccCamSet(on) {
+    CC.camOff = !on;
+    var b = document.getElementById('cc-cam');
+    if (b) { b.textContent = on ? 'Camera off' : 'Camera on'; b.classList.toggle('camoff', !on); }
+    var tgt = document.getElementById('cc-target'); if (tgt) tgt.style.display = on ? '' : 'none';
+    if (on) { ccStartCam(); return; }
+    CC.running = false;
+    if (CC.tickTO) { clearTimeout(CC.tickTO); CC.tickTO = null; }
+    if (CC.focusIv) { clearInterval(CC.focusIv); CC.focusIv = null; }
+    try { if (CC.stream) CC.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    CC.stream = null; CC.track = null;
+    var v = document.getElementById('ccvid'); if (v) { try { v.srcObject = null; } catch (e2) {} }
+    var tb = document.getElementById('cc-torch'); if (tb) { tb.hidden = true; tb.classList.remove('on'); }
+    ccStatus('Camera off \u2014 tap + Manual to add items');
+  }
   function ccCamAlive() { var t = CC.track; return !!(t && t.readyState === 'live' && !t.muted); }
   function ccCamRecover() {
-    if (CC.view !== 'count' || CC.camBusy || ccCamAlive()) return;
+    if (CC.camOff || CC.view !== 'count' || CC.camBusy || ccCamAlive()) return;
     CC.camBusy = true;
     ccStatus('Restarting camera\u2026');
     try { if (CC.stream) CC.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
