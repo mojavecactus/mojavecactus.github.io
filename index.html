@@ -231,6 +231,8 @@ main{padding-bottom:calc(env(safe-area-inset-bottom) + 96px);}
   width:46px; height:46px; border-radius:50%; border:1px solid #56524A; background:rgba(42,42,42,.94);
   color:var(--amber); font-size:20px; line-height:1; box-shadow:0 4px 14px rgba(0,0,0,.5);}
 #fb-fab:active{background:#333;}
+/* CT Team screens are purely functional: no feedback bubble */
+body.ct-chrome-off #fb-fab{display:none;}
 #fb-ov{position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.62);
   -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px);
   display:flex; align-items:flex-start; justify-content:center; padding:12vh 18px 18px;}

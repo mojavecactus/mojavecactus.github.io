@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.23';
+  var APPVER = '4.24';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1436,7 +1436,10 @@ var GLOSS = {
     var end = d ? new Date(y, mo - 1, d, 23, 59, 59) : new Date(y, mo, 0, 23, 59, 59);
     return Date.now() > end.getTime();
   }
-  function ccBar(hide) { var b = document.getElementById('bottombar'); if (b) b.style.display = hide ? 'none' : ''; }
+  function ccBar(hide) {
+    var b = document.getElementById('bottombar'); if (b) b.style.display = hide ? 'none' : '';
+    if (document.body) document.body.classList.toggle('ct-chrome-off', !!hide);
+  }
   function ccStop() {
     if (!CC) return;
     CC.running = false;
