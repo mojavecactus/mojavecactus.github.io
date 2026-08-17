@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.19';
+  var APPVER = '4.21';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1425,7 +1425,7 @@ var GLOSS = {
   }
 
   // ---- cycle count (CT team) ----
-  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
+  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
   function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
   function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
@@ -1445,6 +1445,7 @@ var GLOSS = {
     if (CC.stream) { try { CC.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} CC.stream = null; }
     CC.track = null;
     if (CC.poll) { clearInterval(CC.poll); CC.poll = null; }
+    if (CC.wake) { try { CC.wake.release(); } catch (e2) {} CC.wake = null; }
   }
   // ---- offline-first sync engine: scans land in a local ledger instantly and
   // ---- upload in the background as idempotent ops (opId-deduped server side).
@@ -1516,12 +1517,16 @@ var GLOSS = {
     if (!ep || !CC.dev) { ccPill(); return; }
     if (y.inflight || !st.ops.length) { ccPill(); return; }
     y.inflight = true; ccPill();
-    var batch = st.ops.slice(0, 150);
+    var batch = st.ops.slice(0, keep ? 25 : 150);
     fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: CC.dev, ops: batch }), keepalive: !!keep })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         y.inflight = false;
-        if (!j || !j.ok || !j.applied) { y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 5000 * Math.max(1, y.retry)); return; }
+        if (!j || !j.ok || !j.applied) {
+          if (j && j.err === 'dev') ccStatus('This device isn\u2019t on the roster \u2014 tap change on CT Team');
+          if (j && j.err === 'busy') { ccPill(); ccFlushSoon(t, 1500 + Math.floor(Math.random() * 2500)); return; }
+          y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 5000 * Math.max(1, y.retry)); return;
+        }
         var done = {}; j.applied.forEach(function (id) { done[id] = 1; });
         st.ops = st.ops.filter(function (o) { return !done[o.opId]; });
         if (j.rows) st.base = j.rows;
@@ -1537,11 +1542,18 @@ var GLOSS = {
   function ccPull(t) {
     var ep = ccEndpoint(t);
     if (!ep) return Promise.reject(new Error('nocreds'));
+    var y = SY[t], startOk = y.lastOk;
     var q = t === 'fa' ? '&action=list' : '&action=pull&dev=' + encodeURIComponent(CC.dev || '');
     return fetch(ep.url + '?token=' + encodeURIComponent(ep.token) + q)
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        if (j && j.ok && j.rows) { ccSyncSt(t).base = j.rows; ccSyncSave(t); ccDerive(t); ccPill(); return j; }
+        if (j && j.ok && j.rows) {
+          // A flush that landed (or is in flight) while this GET ran has fresher
+          // rows than this snapshot — keep the flush's base in that case.
+          if (y.lastOk === startOk && !y.inflight) { ccSyncSt(t).base = j.rows; ccSyncSave(t); }
+          ccDerive(t); ccPill();
+          return j;
+        }
         throw new Error('pull');
       });
   }
@@ -1556,7 +1568,7 @@ var GLOSS = {
     else { el.textContent = n + ' to sync'; el.className = 'cc-pill wait'; }
   }
   window.addEventListener('online', function () { ccFlushSoon('cc', 300); ccFlushSoon('fa', 600); });
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush('cc', true); ccFlush('fa', true); } catch (e) {} } });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush('cc', true); ccFlush('fa', true); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') ccWake(); ccFlushSoon('cc', 800); ccFlushSoon('fa', 1200); } catch (e2) {} } });
   // Boot: if this phone has queued scans from a previous session, load creds and push them out silently.
   // Deferred a tick so the whole module (incl. FA below) has evaluated first.
   setTimeout(function () {
@@ -1722,6 +1734,7 @@ var GLOSS = {
     });
     ccStartCam();
     ccHistLoad();
+    ccWake();
     var t0 = CC.tgt === 'fa' ? 'fa' : 'cc';
     ccDerive(t0); ccRenderList(); ccPill();
     ccPull(t0).then(function () { ccRenderList(); }).catch(function () {});
@@ -1799,6 +1812,16 @@ var GLOSS = {
   }
   function ccSchedule(ms) { if (CC.tickTO) clearTimeout(CC.tickTO); CC.tickTO = setTimeout(ccTick, ms || 250); }
   function ccResume(ms) { ccSchedule(ms || 250); }
+  function ccRearm() { CC.cool.t = Date.now(); }
+  function ccWake() {
+    try {
+      if (!navigator.wakeLock || CC.wake) return;
+      navigator.wakeLock.request('screen').then(function (wl) {
+        CC.wake = wl;
+        if (wl.addEventListener) wl.addEventListener('release', function () { CC.wake = null; });
+      }).catch(function () {});
+    } catch (e) {}
+  }
   function ccFlashGreen() {
     var f = document.getElementById('cc-flash'); if (!f) return;
     f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
@@ -1821,10 +1844,11 @@ var GLOSS = {
   function ccModalClose(sheet) {
     sheet.hidden = true; sheet.classList.remove('cc-modal');
     var bd = document.getElementById('cc-backdrop'); if (bd) bd.hidden = true;
+    ccRearm();
   }
   function ccOnCode(txt) {
     var now = Date.now();
-    if (txt === CC.cool.code && now - CC.cool.t < 2000) { ccSchedule(200); return; }
+    if (txt === CC.cool.code && now - CC.cool.t < 2600) { ccSchedule(200); return; }
     CC.cool = { code: txt, t: now };
     var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
     var lot = (r.p && r.p.lot) || '', exp = ccExp(r.p && r.p.exp);
@@ -1909,10 +1933,10 @@ var GLOSS = {
       var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = descv, fam = '', ref = v;
       if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; if (!desc) desc = it.t || it.name || ''; fam = it.fam || ''; }
-      sheet.hidden = true; CC.running = true;
+      sheet.hidden = true; CC.running = true; ccRearm();
       ccAdd(ref, desc, fam, lotv || lot, exp); ccSchedule(400);
     });
-    document.getElementById('cc-uskip').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccSchedule(300); });
+    document.getElementById('cc-uskip').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccRearm(); ccSchedule(300); });
   }
   function ccManual() {
     CC.running = false;
@@ -1941,10 +1965,10 @@ var GLOSS = {
       var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = '', fam = '', ref = v;
       if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
-      sheet.hidden = true; CC.running = true;
+      sheet.hidden = true; CC.running = true; ccRearm();
       ccAdd(ref, desc, fam, lot, ''); ccSchedule(400);
     });
-    document.getElementById('cc-mx').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccSchedule(300); });
+    document.getElementById('cc-mx').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccRearm(); ccSchedule(300); });
   }
   function ccEditor(r) {
     CC.running = false;
@@ -2046,8 +2070,8 @@ var GLOSS = {
     return ccNLoc(x.loc) === ccNLoc(CC.loc) && ccNRef(x.ref) === ccNRef(ref) && ccNLot(x.lot) === ccNLot(lot);
   }
   function ccHK(o) {
-    if (CC.tgt === 'fa') return 'fa|' + String(o.sid || (FA.sess && FA.sess.sid) || '') + '|' + String(o.ref) + '|' + String(o.lot || '');
-    return ccHistKey(o.loc !== undefined ? o.loc : CC.loc, o.ref, o.lot);
+    if (CC.tgt === 'fa') return 'fa|' + String(o.sid || (FA.sess && FA.sess.sid) || '') + '|' + ccNRef(o.ref) + '|' + ccNLot(o.lot);
+    return ccHistKey(ccNLoc(o.loc !== undefined ? o.loc : CC.loc), ccNRef(o.ref), ccNLot(o.lot));
   }
   function ctScreen() {
     setTitle('CT Team', ''); backBtn.hidden = false;
