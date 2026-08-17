@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.24';
+  var APPVER = '4.25';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1425,7 +1425,7 @@ var GLOSS = {
   }
 
   // ---- cycle count (CT team) ----
-  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
+  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, worker: null, workerFailed: false, wcb: {}, wid: 0, miss: 0, stall: 0, camBusy: false, ac: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
   function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
   function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
@@ -1585,7 +1585,7 @@ var GLOSS = {
     else { el.textContent = n + ' to sync'; el.className = 'cc-pill wait'; }
   }
   window.addEventListener('online', function () { ccFlushSoon('cc', 300); ccFlushSoon('fa', 600); });
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush('cc', true); ccFlush('fa', true); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') ccWake(); ccFlushSoon('cc', 800); ccFlushSoon('fa', 1200); } catch (e2) {} } });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush('cc', true); ccFlush('fa', true); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') { ccWake(); ccBeepInit(); setTimeout(function () { ccCamRecover(); }, 500); } ccFlushSoon('cc', 800); ccFlushSoon('fa', 1200); } catch (e2) {} } });
   window.addEventListener('pagehide', function () { try { ccSaveBaseNow('cc'); ccSaveBaseNow('fa'); } catch (e) {} });
   // Boot: if this phone has queued scans from a previous session, load creds and push them out silently.
   // Deferred a tick so the whole module (incl. FA below) has evaluated first.
@@ -1750,6 +1750,7 @@ var GLOSS = {
       var r = ccRowsSrc().filter(function (x) { return x.id === row.dataset.id; })[0];
       if (r) ccEditor(r);
     });
+    ccBeepInit();
     ccStartCam();
     ccHistLoad();
     ccWake();
@@ -1780,15 +1781,22 @@ var GLOSS = {
   function ccStartCam() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { ccStatus('Camera not available'); return; }
     if (window.__TBX_PREPZX) window.__TBX_PREPZX();
+    ccWorkerInit();
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
       .then(function (st) {
-        CC.stream = st; CC.running = true; CC.ctx = null;
+        CC.stream = st; CC.running = true; CC.ctx = null; CC.stall = 0; CC.miss = 0;
         var v = document.getElementById('ccvid');
         if (!v) { ccStop(); return; }
         v.srcObject = st; v.play && v.play().catch(function () {});
         try {
           var track = st.getVideoTracks()[0];
           CC.track = track;
+          // iOS ends or mutes the track when the phone locks or the app is
+          // backgrounded; without this the preview silently freezes.
+          try {
+            track.addEventListener('ended', function () { ccCamRecover(); });
+            track.addEventListener('mute', function () { setTimeout(function () { ccCamRecover(); }, 1500); });
+          } catch (e0) {}
           if (track && track.applyConstraints) track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
           var tb = document.getElementById('cc-torch');
           var caps = track && track.getCapabilities ? track.getCapabilities() : null;
@@ -1807,7 +1815,12 @@ var GLOSS = {
   function ccTick() {
     if (!CC.running || CC.view !== 'count') return;
     var v = document.getElementById('ccvid');
-    if (!v || v.readyState < 2 || !v.videoWidth) { ccSchedule(250); return; }
+    if (!v || v.readyState < 2 || !v.videoWidth) {
+      CC.stall++;
+      if (CC.stall > 10) { CC.stall = 0; ccCamRecover(); return; }
+      ccSchedule(250); return;
+    }
+    CC.stall = 0;
     try {
       var w = v.videoWidth, h = v.videoHeight, sc = Math.min(1, 1100 / w);
       // Decode a generous central region (matches the on-screen targeting box) —
@@ -1820,15 +1833,90 @@ var GLOSS = {
       var c2 = CC.ctx;
       c2.drawImage(v, sx, sy, cw, ch, 0, 0, dw, dh);
       var img = c2.getImageData(0, 0, dw, dh);
-      ZXingWASM.readBarcodes(img, { formats: ['DataMatrix', 'Code128', 'QRCode', 'EAN-13', 'UPC-A', 'PDF417'], maxNumberOfSymbols: 1, tryHarder: true })
+      ccDecode(img, (CC.miss % 3) === 2 ? CC_FULL : CC_FAST)
         .then(function (res) {
           if (!CC.running) return;
-          if (res && res.length && res[0].text) ccOnCode(res[0].text);
-          else ccSchedule(150);
-        }, function () { ccSchedule(400); });
+          if (res && res.length && res[0].text) { CC.miss = 0; ccOnCode(res[0].text); }
+          else { CC.miss++; ccSchedule(150); }
+        }, function () { CC.miss++; ccSchedule(400); });
     } catch (e) { ccSchedule(300); }
   }
   function ccSchedule(ms) { if (CC.tickTO) clearTimeout(CC.tickTO); CC.tickTO = setTimeout(ccTick, ms || 250); }
+  // Two decode profiles. Most frames run the cheap pass (the codes we actually
+  // scan, no exhaustive search). Every third frame runs the full pass, so any
+  // other symbology still decodes within about half a second.
+  var CC_FAST = { formats: ['DataMatrix', 'Code128'], maxNumberOfSymbols: 1, tryHarder: false, tryRotate: true, tryInvert: false, tryDownscale: false };
+  var CC_FULL = { formats: ['DataMatrix', 'Code128', 'QRCode', 'EAN-13', 'UPC-A', 'PDF417'], maxNumberOfSymbols: 1, tryHarder: true, tryRotate: true, tryInvert: true, tryDownscale: false };
+  function ccWorkerInit() {
+    if (CC.worker || CC.workerFailed || typeof Worker === 'undefined') return;
+    try {
+      var wk = new Worker('ccscan.js');
+      wk.onmessage = function (e) {
+        var d = e.data || {};
+        var cb = CC.wcb[d.id];
+        if (cb) { delete CC.wcb[d.id]; cb(d.err ? null : d.result); }
+      };
+      wk.onerror = function () { CC.workerFailed = true; try { wk.terminate(); } catch (e2) {} if (CC.worker === wk) CC.worker = null; };
+      CC.worker = wk;
+    } catch (e) { CC.workerFailed = true; CC.worker = null; }
+  }
+  function ccWorkerDrop() {
+    try { if (CC.worker) CC.worker.terminate(); } catch (e) {}
+    CC.worker = null; CC.workerFailed = true; CC.wcb = {};
+  }
+  function ccDecode(img, opts) {
+    if (!CC.worker) return ZXingWASM.readBarcodes(img, opts);
+    return new Promise(function (resolve) {
+      var id = ++CC.wid, done = false;
+      var wd = setTimeout(function () {
+        if (done) return; done = true; delete CC.wcb[id];
+        ccWorkerDrop(); // unresponsive worker: fall back to the main thread
+        resolve(null);
+      }, 5000);
+      CC.wcb[id] = function (res) { if (done) return; done = true; clearTimeout(wd); resolve(res); };
+      try {
+        CC.worker.postMessage({ id: id, buf: img.data.buffer, w: img.width, h: img.height, opts: opts }, [img.data.buffer]);
+      } catch (e) {
+        if (!done) { done = true; clearTimeout(wd); delete CC.wcb[id]; ccWorkerDrop(); resolve(null); }
+      }
+    });
+  }
+  // Audible confirmation: iOS ignores navigator.vibrate, so a scan needs a sound
+  // for anyone counting without watching the screen.
+  function ccBeepInit() {
+    try {
+      if (!CC.ac) { var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; CC.ac = new AC(); }
+      if (CC.ac.state === 'suspended' && CC.ac.resume) CC.ac.resume();
+    } catch (e) {}
+  }
+  function ccBeep(kind) {
+    try {
+      if (!CC.ac || CC.ac.state !== 'running') return;
+      var t = CC.ac.currentTime;
+      var mk = function (freq, at, dur) {
+        var o = CC.ac.createOscillator(), g = CC.ac.createGain();
+        o.type = 'sine'; o.frequency.setValueAtTime(freq, at);
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(0.3, at + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+        o.connect(g); g.connect(CC.ac.destination);
+        o.start(at); o.stop(at + dur + 0.02);
+      };
+      if (kind === 'dup') { mk(720, t, 0.09); mk(720, t + 0.13, 0.09); }
+      else if (kind === 'warn') { mk(340, t, 0.20); }
+      else { mk(950, t, 0.10); }
+    } catch (e) {}
+  }
+  function ccCamAlive() { var t = CC.track; return !!(t && t.readyState === 'live' && !t.muted); }
+  function ccCamRecover() {
+    if (CC.view !== 'count' || CC.camBusy || ccCamAlive()) return;
+    CC.camBusy = true;
+    ccStatus('Restarting camera\u2026');
+    try { if (CC.stream) CC.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    CC.stream = null; CC.track = null; CC.running = false;
+    if (CC.tickTO) { clearTimeout(CC.tickTO); CC.tickTO = null; }
+    setTimeout(function () { CC.camBusy = false; if (CC.view === 'count') ccStartCam(); }, 300);
+  }
   function ccResume(ms) { ccSchedule(ms || 250); }
   function ccRearm() { CC.cool.t = Date.now(); }
   function ccWake() {
@@ -1894,6 +1982,7 @@ var GLOSS = {
     var ex = ccRowsSrc().filter(function (x) { return ccMatch(x, ref, lot); })[0];
     if (ex) ccFlash(ex.id);
     ccModalOpen(sheet);
+    ccBeep(ex ? 'dup' : 'ok');
     try { navigator.vibrate && navigator.vibrate(ex ? [30, 60, 30] : 35); } catch (ev) {}
     function closeModal() { ccModalClose(sheet); }
     sheet.innerHTML =
@@ -1932,6 +2021,7 @@ var GLOSS = {
   }
   function ccUnknown(r, lot, exp) {
     CC.running = false;
+    ccBeep('warn');
     var sheet = document.getElementById('cc-sheet');
     sheet.classList.remove('cc-modal');
     sheet.hidden = false;
