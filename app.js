@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.33';
+  var APPVER = '4.34';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1425,7 +1425,7 @@ var GLOSS = {
   }
 
   // ---- cycle count (CT team) ----
-  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0, ms: 2600 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, camOff: false, worker: null, workerFailed: false, wcb: {}, wid: 0, miss: 0, stall: 0, camBusy: false, ac: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
+  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0, ms: 2600 }, pend: null, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, camOff: false, worker: null, workerFailed: false, wcb: {}, wid: 0, miss: 0, stall: 0, camBusy: false, ac: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
   function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
   function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
@@ -2027,6 +2027,16 @@ var GLOSS = {
     var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
     var lot = (r.p && r.p.lot) || '', exp = ccExp(r.p && r.p.exp);
     var ref = null, desc = '', fam = '';
+    // A barcode carrying only lot/expiry identifies no product. Hold it for the
+    // product scan rather than mistaking the digits for a part number.
+    if (!r.sku && !(r.p && r.p.gtin) && (lot || exp)) {
+      CC.pend = { lot: lot, exp: exp, t: now };
+      ccFlashGreen();
+      ccBeep('dup');
+      ccStatus('Lot ' + (lot || '\u2014') + (exp ? ' \u00b7 Exp ' + exp : '') + ' held \u2014 now scan the product barcode');
+      ccSchedule(700);
+      return;
+    }
     if (r.sku) {
       ref = r.sku;
       var e = BYPN[nrm(r.sku)];
@@ -2041,6 +2051,10 @@ var GLOSS = {
       else { ccStatus('Not a product barcode \u2014 keep aiming'); ccSchedule(500); return; }
     }
     ccFlashGreen();
+    if (CC.pend && (now - CC.pend.t) < 120000) {
+      if (!lot) lot = CC.pend.lot;
+      if (!exp) exp = CC.pend.exp;
+    }
     ccConfirm(ref, desc, fam, lot, exp);
   }
   function ccConfirm(ref, desc, fam, lot, exp) {
@@ -2083,6 +2097,7 @@ var GLOSS = {
     var op = { t: 'add', ref: ref, desc: desc || '', fam: fam || '', lot: lot || '', exp: exp || '', expired: ccIsExpired(exp), qty: qty };
     if (t === 'fa') { var fs = FA.sess || {}; op.sid = fs.sid; op.started = fs.started; op.cname = fs.cname; op.from = fs.from; op.drop = fs.drop; op.snotes = fs.snotes; op.sby = fs.sby; }
     else { op.loc = CC.loc; op.notes = CC.notes || ''; }
+    CC.pend = null;
     var key = ccHK({ ref: ref, lot: lot });
     if (!CC.hist[key]) CC.hist[key] = [];
     CC.hist[key].push(qty); ccHistSave();
