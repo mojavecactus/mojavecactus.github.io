@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.31';
+  var APPVER = '4.32';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2103,7 +2103,18 @@ var GLOSS = {
       var descv = document.getElementById('cc-udesc').value.trim();
       var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = descv, fam = '', ref = v;
-      if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; if (!desc) desc = it.t || it.name || ''; fam = it.fam || ''; }
+      if (e) {
+        var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx];
+        ref = it.sku; if (!desc) desc = it.t || it.name || ''; fam = it.fam || '';
+        // Only remember it when the typed number matched a real catalogue item,
+        // and key it on the full GTIN so packaging levels stay distinct.
+        if (r.p && r.p.gtin && r.p.gtin.length === 14) {
+          try {
+            var L = JSON.parse(localStorage.getItem('tbx_learned') || '{}');
+            if (!L[r.p.gtin]) { L[r.p.gtin] = ref; localStorage.setItem('tbx_learned', JSON.stringify(L)); }
+          } catch (eL) {}
+        }
+      }
       sheet.hidden = true; CC.running = true; ccRearm();
       ccAdd(ref, desc, fam, lotv || lot, exp); ccSchedule(400);
     });
@@ -2669,7 +2680,7 @@ var GLOSS = {
       var p = parseGS1(txt), sku = null, key = '';
       if (p.gtin && p.gtin.length === 14) {
         key = p.gtin.slice(1, 13);
-        sku = (window.TBX_GTIN14 || {})[p.gtin] || (window.TBX_GTIN || {})[key] || learned()[key] || null;
+        sku = (window.TBX_GTIN14 || {})[p.gtin] || learned()[p.gtin] || (window.TBX_GTIN || {})[key] || learned()[key] || null;
       }
       if (!sku && !p.gtin) {
         var th = String(txt).replace(/^\][A-Za-z]\d/, '');
