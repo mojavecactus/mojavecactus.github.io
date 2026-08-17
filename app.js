@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.34';
+  var APPVER = '4.35';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2032,9 +2032,7 @@ var GLOSS = {
     if (!r.sku && !(r.p && r.p.gtin) && (lot || exp)) {
       CC.pend = { lot: lot, exp: exp, t: now };
       ccFlashGreen();
-      ccBeep('dup');
-      ccStatus('Lot ' + (lot || '\u2014') + (exp ? ' \u00b7 Exp ' + exp : '') + ' held \u2014 now scan the product barcode');
-      ccSchedule(700);
+      ccLotEntry(lot, exp);
       return;
     }
     if (r.sku) {
@@ -2069,8 +2067,9 @@ var GLOSS = {
     function closeModal() { ccModalClose(sheet); }
     sheet.innerHTML =
       '<div class="cc-sh-h">' + esc(ref) + (desc ? ' \u2014 ' + esc(desc) : '') + '</div>' +
-      '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
+      '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot on this barcode') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
       (ccIsExpired(exp) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
+      (lot ? '' : '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box (optional)">') +
       (ex ? '<div class="cc-note">Already in list here: <b>' + (+ex.qty || 0) + '</b> \u00b7 this adds on top</div>' : '') +
       '<div class="cc-qlabel">' + (ex ? 'Add quantity' : 'Quantity') + '</div>' +
       '<div class="cc-qtyrow"><button id="cc-cqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
@@ -2082,10 +2081,12 @@ var GLOSS = {
     document.getElementById('cc-cqp').onclick = function () { qv.value = Math.max(1, (+qv.value || 0) + 1); };
     document.getElementById('cc-cok').onclick = function () {
       var q = Math.max(1, Math.round(+qv.value || 1));
+      var lv = document.getElementById('cc-clot');
+      var useLot = lot || (lv ? lv.value.trim() : '');
       closeModal(); CC.running = true;
-      ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
+      ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (useLot ? ' \u00b7 Lot ' + useLot : ''));
       ccRearm(600); // counted it: allow the very next scan of the same item quickly
-      ccAdd(ref, desc, fam, lot, exp, q); ccSchedule(220);
+      ccAdd(ref, desc, fam, useLot, exp, q); ccSchedule(220);
     };
     document.getElementById('cc-cx').onclick = function () {
       closeModal(); ccRearm(2200); CC.running = true; ccStatus('Cancelled \u2014 keep scanning'); ccSchedule(300);
@@ -2102,6 +2103,47 @@ var GLOSS = {
     if (!CC.hist[key]) CC.hist[key] = [];
     CC.hist[key].push(qty); ccHistSave();
     ccEnqueue(t, op);
+  }
+  // A lot/expiry barcode with no product code: keep what it gave us and ask for
+  // the part number, rather than relying on a second scan arriving in order.
+  function ccLotEntry(lot, exp) {
+    CC.running = false;
+    var sheet = document.getElementById('cc-sheet');
+    if (!sheet) { CC.running = true; ccSchedule(300); return; }
+    ccModalOpen(sheet);
+    ccBeep(ccIsExpired(exp) ? 'expired' : 'dup');
+    sheet.innerHTML =
+      '<div class="cc-sh-h">Lot barcode</div>' +
+      '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
+      (ccIsExpired(exp) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
+      '<div class="cc-sub2">No part number on this barcode. Type it below, or cancel and scan the product barcode \u2014 the lot is kept either way.</div>' +
+      '<input id="cc-lpn" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Part number">' +
+      '<div class="cc-qlabel">Quantity</div>' +
+      '<div class="cc-qtyrow"><button id="cc-lqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
+        '<input id="cc-lqv" class="cc-qin" type="number" inputmode="numeric" min="1" value="1">' +
+        '<button id="cc-lqp" class="cc-qbtn" aria-label="Increase">+</button></div>' +
+      '<div class="cc-sh-row"><button id="cc-lx" class="cc-cancel">Cancel</button><button id="cc-lok" class="cc-btn">Add</button></div>';
+    var qv = document.getElementById('cc-lqv'), pn = document.getElementById('cc-lpn');
+    document.getElementById('cc-lqm').onclick = function () { qv.value = Math.max(1, (+qv.value || 1) - 1); };
+    document.getElementById('cc-lqp').onclick = function () { qv.value = Math.max(1, (+qv.value || 0) + 1); };
+    try { pn.focus(); } catch (e) {}
+    document.getElementById('cc-lok').onclick = function () {
+      var v = nrm(pn.value);
+      if (!v) { pn.classList.add('cc-need'); try { pn.focus(); } catch (e2) {} return; }
+      var q = Math.max(1, Math.round(+qv.value || 1));
+      var e3 = BYPN[v] || BYPN[v.replace(/^0+/, '')];
+      var desc = '', fam = '', ref = v;
+      if (e3) { var it = e3.kind === 'item' ? D.items[e3.idx] : e3.kind === 'probe' ? D.probes[e3.idx] : D.shavers[e3.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
+      ccModalClose(sheet); CC.running = true;
+      ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
+      ccRearm(600);
+      ccAdd(ref, desc, fam, lot, exp, q); ccSchedule(220);
+    };
+    document.getElementById('cc-lx').onclick = function () {
+      ccModalClose(sheet); CC.running = true;
+      ccStatus('Lot held \u2014 scan the product barcode');
+      ccSchedule(300);
+    };
   }
   function ccUnknown(r, lot, exp) {
     CC.running = false;
