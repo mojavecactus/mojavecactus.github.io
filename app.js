@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.29';
+  var APPVER = '4.30';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1449,6 +1449,7 @@ var GLOSS = {
     CC.track = null;
     if (CC.poll) { clearInterval(CC.poll); CC.poll = null; }
     if (CC.wake) { try { CC.wake.release(); } catch (e2) {} CC.wake = null; }
+    if (document.body) document.body.classList.remove('cc-fixed');
   }
   // ---- offline-first sync engine: scans land in a local ledger instantly and
   // ---- upload in the background as idempotent ops (opId-deduped server side).
@@ -1721,6 +1722,8 @@ var GLOSS = {
     CC.view = 'count';
     CC.listSig = '';
     ccBar(true);
+    // Pin the camera and running totals; only the scanned list scrolls.
+    if (document.body) document.body.classList.add('cc-fixed');
     render(
       '<div id="ccwrap">' +
         '<div id="cctop">' +
