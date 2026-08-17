@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.21';
+  var APPVER = '4.23';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1456,7 +1456,16 @@ var GLOSS = {
   function ccKeyCC(loc, ref, lot) { return ccNLoc(loc) + '||' + ccNRef(ref) + '||' + ccNLot(lot); }
   function ccKeyFA(sid, ref, lot) { return String(sid == null ? '' : sid).trim() + '||' + ccNRef(ref) + '||' + ccNLot(lot); }
   function ccSyncSt(t) { return t === 'fa' ? FA : CC; }
-  function ccSyncSave(t) { try { var st = ccSyncSt(t); localStorage.setItem('tbx_' + t + '_base', JSON.stringify(st.base)); localStorage.setItem('tbx_' + t + '_ops', JSON.stringify(st.ops)); } catch (e) {} }
+  var BSAVE = { cc: null, fa: null };
+  function ccSaveBaseNow(t) {
+    if (BSAVE[t]) { clearTimeout(BSAVE[t]); BSAVE[t] = null; }
+    try { localStorage.setItem('tbx_' + t + '_base', JSON.stringify(ccSyncSt(t).base)); } catch (e) {}
+  }
+  function ccSyncSave(t, baseChanged) {
+    try { localStorage.setItem('tbx_' + t + '_ops', JSON.stringify(ccSyncSt(t).ops)); } catch (e) {}
+    if (baseChanged) ccSaveBaseNow(t);
+    else if (!BSAVE[t]) BSAVE[t] = setTimeout(function () { BSAVE[t] = null; ccSaveBaseNow(t); }, 4000);
+  }
   function ccSyncLoad(t) {
     var st = ccSyncSt(t);
     try { st.base = JSON.parse(localStorage.getItem('tbx_' + t + '_base') || '[]') || []; } catch (e) { st.base = []; }
@@ -1518,7 +1527,7 @@ var GLOSS = {
     if (y.inflight || !st.ops.length) { ccPill(); return; }
     y.inflight = true; ccPill();
     var batch = st.ops.slice(0, keep ? 25 : 150);
-    fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: CC.dev, ops: batch }), keepalive: !!keep })
+    fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: CC.dev, ops: batch, norows: 1 }), keepalive: !!keep })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         y.inflight = false;
@@ -1528,10 +1537,15 @@ var GLOSS = {
           y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 5000 * Math.max(1, y.retry)); return;
         }
         var done = {}; j.applied.forEach(function (id) { done[id] = 1; });
+        var fresh = {}; (j.fresh || j.applied).forEach(function (id) { fresh[id] = 1; });
+        var settled = st.ops.filter(function (o) { return fresh[o.opId]; });
         st.ops = st.ops.filter(function (o) { return !done[o.opId]; });
         if (j.rows) st.base = j.rows;
+        else if (settled.length) {
+          st.base = ccDeriveCore(st.base, settled, t, CC.dev).map(function (r) { if (r.pending) { var c = {}; for (var k in r) c[k] = r[k]; delete c.pending; return c; } return r; });
+        }
         y.retry = 0; y.lastOk = Date.now();
-        ccSyncSave(t); ccDerive(t); ccRenderList();
+        ccSyncSave(t, true); ccDerive(t); ccRenderList();
         if (CC.view === 'cchome' && t === 'cc') ccHomeCards();
         if (CC.view === 'fahome' && t === 'fa') faCards();
         ccPill();
@@ -1550,7 +1564,7 @@ var GLOSS = {
         if (j && j.ok && j.rows) {
           // A flush that landed (or is in flight) while this GET ran has fresher
           // rows than this snapshot — keep the flush's base in that case.
-          if (y.lastOk === startOk && !y.inflight) { ccSyncSt(t).base = j.rows; ccSyncSave(t); }
+          if (y.lastOk === startOk && !y.inflight) { ccSyncSt(t).base = j.rows; ccSyncSave(t, true); }
           ccDerive(t); ccPill();
           return j;
         }
@@ -1569,6 +1583,7 @@ var GLOSS = {
   }
   window.addEventListener('online', function () { ccFlushSoon('cc', 300); ccFlushSoon('fa', 600); });
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush('cc', true); ccFlush('fa', true); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') ccWake(); ccFlushSoon('cc', 800); ccFlushSoon('fa', 1200); } catch (e2) {} } });
+  window.addEventListener('pagehide', function () { try { ccSaveBaseNow('cc'); ccSaveBaseNow('fa'); } catch (e) {} });
   // Boot: if this phone has queued scans from a previous session, load creds and push them out silently.
   // Deferred a tick so the whole module (incl. FA below) has evaluated first.
   setTimeout(function () {
@@ -2031,10 +2046,12 @@ var GLOSS = {
     var totEl = document.getElementById('cc-tot');
     if (totEl) totEl.textContent = rows.length + ' lines \u00b7 ' + tot + ' units';
     if (!rows.length) { if (CC.listSig !== 'empty') { list.innerHTML = '<div class="cc-empty">' + (CC.tgt === 'fa' ? 'No scans in this count yet' : 'No scans yet at this location') + ' \u2014 point the camera at a barcode.</div>'; CC.listSig = 'empty'; } return; }
-    var sig = rows.map(function (x) { return x.id + ':' + x.qty + ':' + (x.lot || '') + ':' + (x.exp || '') + ':' + (x.pending ? 1 : 0) + ':' + (x.desc || ''); }).join('|');
+    var CAP = 150;
+    var shown = rows.length > CAP ? rows.slice(0, CAP) : rows;
+    var sig = shown.map(function (x) { return x.id + ':' + x.qty + ':' + (x.lot || '') + ':' + (x.exp || '') + ':' + (x.pending ? 1 : 0) + ':' + (x.desc || ''); }).join('|') + '#' + rows.length;
     if (sig === CC.listSig) return;
     CC.listSig = sig;
-    list.innerHTML = rows.map(function (x) {
+    list.innerHTML = (rows.length > CAP ? '<div class="cc-empty">Showing the ' + CAP + ' most recent of ' + rows.length + ' lines \u2014 all are counted and synced.</div>' : '') + shown.map(function (x) {
       var expd = x.expired || ccIsExpired(x.exp);
       return '<div class="ccrow' + (x.pending ? ' pend' : '') + '" data-id="' + esc(x.id) + '">' +
         '<div class="ccr-main"><div class="ccr-ref">' + esc(x.ref) + (expd ? '<span class="ccr-exp">EXPIRED</span>' : '') + '</div>' +
