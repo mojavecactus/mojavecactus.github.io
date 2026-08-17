@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.25';
+  var APPVER = '4.26';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1425,7 +1425,7 @@ var GLOSS = {
   }
 
   // ---- cycle count (CT team) ----
-  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, worker: null, workerFailed: false, wcb: {}, wid: 0, miss: 0, stall: 0, camBusy: false, ac: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
+  var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0, ms: 2600 }, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, worker: null, workerFailed: false, wcb: {}, wid: 0, miss: 0, stall: 0, camBusy: false, ac: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
   function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
   function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
@@ -1728,7 +1728,7 @@ var GLOSS = {
           '<div id="cc-target" aria-hidden="true"><i></i><i></i><i></i><i></i></div>' +
           '<div id="cc-flash" aria-hidden="true"></div>' +
           '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
-          '<button id="cc-focus" class="cc-focus" aria-label="Refocus camera" title="Tap to refocus">&#9678;</button>' +
+          '<button id="cc-help" class="cc-help" aria-label="Camera help" title="Camera not working?">?</button>' +
           '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
           '<div id="ccbar">' +
             '<button id="cc-manual" class="cc-mini">+ Manual</button>' +
@@ -1742,7 +1742,7 @@ var GLOSS = {
     CC.mode = 'single';
     document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccFlushSoon(CC.tgt === 'fa' ? 'fa' : 'cc', 100); if (CC.tgt === 'fa') { faScreen(); } else { ccScreen(); } });
     document.getElementById('cc-manual').addEventListener('click', function () { ccManual(); });
-    document.getElementById('cc-focus').addEventListener('click', function (e) { e.stopPropagation(); ccRefocus(true); ccStatus('Refocusing\u2026'); });
+    document.getElementById('cc-help').addEventListener('click', function (e) { e.stopPropagation(); ccCamHelp(false); });
     document.getElementById('ccvid').addEventListener('click', function () { ccRefocus(true); });
     document.getElementById('cclist').addEventListener('click', function (e) {
       var row = e.target.closest ? e.target.closest('.ccrow') : null;
@@ -1804,13 +1804,14 @@ var GLOSS = {
             tb.hidden = false; var on = false;
             tb.onclick = function (e) { if (e) e.stopPropagation(); on = !on; tb.classList.toggle('on', on); track.applyConstraints({ advanced: [{ torch: on }] }).catch(function () {}); };
           }
-          // keep the label crisp: gentle single-shot refocus nudge every few seconds
-          if (CC.focusIv) clearInterval(CC.focusIv);
-          CC.focusIv = setInterval(function () { if (CC.running && CC.view === 'count') ccRefocus(false); }, 4500);
         } catch (e) {}
         ccModeUI();
         ccSchedule(400);
-      }, function () { ccStatus('Camera permission needed \u2014 allow in Settings'); });
+      }, function (err) {
+        var blocked = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+        ccStatus(blocked ? 'Camera blocked \u2014 tap ? to fix' : 'Camera unavailable \u2014 tap ? for help');
+        ccCamHelp(true);
+      });
   }
   function ccTick() {
     if (!CC.running || CC.view !== 'count') return;
@@ -1889,23 +1890,56 @@ var GLOSS = {
       if (CC.ac.state === 'suspended' && CC.ac.resume) CC.ac.resume();
     } catch (e) {}
   }
+  function ccTone(f1, f2, at, dur, type, vol) {
+    var o = CC.ac.createOscillator(), g = CC.ac.createGain();
+    o.type = type || 'square';
+    o.frequency.setValueAtTime(f1, at);
+    if (f2 && f2 !== f1) o.frequency.exponentialRampToValueAtTime(f2, at + dur);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(vol == null ? 0.85 : vol, at + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g); g.connect(CC.ac.destination);
+    o.start(at); o.stop(at + dur + 0.03);
+  }
   function ccBeep(kind) {
     try {
       if (!CC.ac || CC.ac.state !== 'running') return;
-      var t = CC.ac.currentTime;
-      var mk = function (freq, at, dur) {
-        var o = CC.ac.createOscillator(), g = CC.ac.createGain();
-        o.type = 'sine'; o.frequency.setValueAtTime(freq, at);
-        g.gain.setValueAtTime(0.0001, at);
-        g.gain.exponentialRampToValueAtTime(0.3, at + 0.008);
-        g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-        o.connect(g); g.connect(CC.ac.destination);
-        o.start(at); o.stop(at + dur + 0.02);
-      };
-      if (kind === 'dup') { mk(720, t, 0.09); mk(720, t + 0.13, 0.09); }
-      else if (kind === 'warn') { mk(340, t, 0.20); }
-      else { mk(950, t, 0.10); }
+      var t = CC.ac.currentTime + 0.01;
+      if (kind === 'expired') {
+        // alarm: three descending wails, impossible to mistake for a good scan
+        for (var i = 0; i < 3; i++) ccTone(780, 380, t + i * 0.26, 0.22, 'sawtooth', 0.85);
+      } else if (kind === 'warn') {
+        // unknown barcode: long and low, same loudness as a success
+        ccTone(200, 175, t, 0.45, 'sawtooth', 0.9);
+      } else if (kind === 'dup') {
+        // already on the list here: same crisp register, doubled
+        ccTone(2400, 2400, t, 0.05, 'square', 0.8);
+        ccTone(2400, 2400, t + 0.10, 0.06, 'square', 0.8);
+      } else {
+        // success: short, crisp, high electronic cha-ching
+        ccTone(2700, 2700, t, 0.045, 'square', 0.85);
+        ccTone(3600, 3600, t + 0.055, 0.085, 'square', 0.85);
+      }
     } catch (e) {}
+  }
+  // iOS gives a web app no way to open the Settings app, so the best we can do
+  // is show the exact tap-path and offer a reload once it has been changed.
+  function ccCamHelp(blocked) {
+    var sheet = document.getElementById('cc-sheet');
+    if (!sheet) return;
+    CC.running = false;
+    ccModalOpen(sheet);
+    sheet.innerHTML =
+      '<div class="cc-sh-h">' + (blocked ? 'Camera is blocked' : 'Camera not working?') + '</div>' +
+      '<div class="cc-sub">' + (blocked ? 'Permission was denied for this site.' : 'If the preview stays black, permission is usually the cause.') + '</div>' +
+      '<div class="cc-help-steps">' +
+        '<b>In Safari</b><br>Tap <b>aA</b> in the address bar &rarr; <b>Website Settings</b> &rarr; set <b>Camera</b> to <b>Allow</b> &rarr; tap Reload below.' +
+        '<br><br><b>From the Home Screen icon</b><br>Settings app &rarr; <b>Apps</b> &rarr; <b>Safari</b> &rarr; <b>Camera</b> &rarr; <b>Allow</b>, then reopen the app.' +
+        '<br><br>Counting still works without the camera \u2014 use <b>+ Manual</b> to type a part number and lot.' +
+      '</div>' +
+      '<div class="cc-sh-row"><button id="cc-hx" class="cc-cancel">Close</button><button id="cc-hr" class="cc-btn">Reload</button></div>';
+    document.getElementById('cc-hx').onclick = function () { ccModalClose(sheet); CC.running = true; ccSchedule(300); };
+    document.getElementById('cc-hr').onclick = function () { location.reload(); };
   }
   function ccCamAlive() { var t = CC.track; return !!(t && t.readyState === 'live' && !t.muted); }
   function ccCamRecover() {
@@ -1918,7 +1952,7 @@ var GLOSS = {
     setTimeout(function () { CC.camBusy = false; if (CC.view === 'count') ccStartCam(); }, 300);
   }
   function ccResume(ms) { ccSchedule(ms || 250); }
-  function ccRearm() { CC.cool.t = Date.now(); }
+  function ccRearm(ms) { CC.cool.t = Date.now(); CC.cool.ms = ms || 2200; }
   function ccWake() {
     try {
       if (!navigator.wakeLock || CC.wake) return;
@@ -1954,8 +1988,8 @@ var GLOSS = {
   }
   function ccOnCode(txt) {
     var now = Date.now();
-    if (txt === CC.cool.code && now - CC.cool.t < 2600) { ccSchedule(200); return; }
-    CC.cool = { code: txt, t: now };
+    if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(120); return; }
+    CC.cool = { code: txt, t: now, ms: 2200 };
     var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
     var lot = (r.p && r.p.lot) || '', exp = ccExp(r.p && r.p.exp);
     var ref = null, desc = '', fam = '';
@@ -1982,7 +2016,7 @@ var GLOSS = {
     var ex = ccRowsSrc().filter(function (x) { return ccMatch(x, ref, lot); })[0];
     if (ex) ccFlash(ex.id);
     ccModalOpen(sheet);
-    ccBeep(ex ? 'dup' : 'ok');
+    ccBeep(ccIsExpired(exp) ? 'expired' : (ex ? 'dup' : 'ok'));
     try { navigator.vibrate && navigator.vibrate(ex ? [30, 60, 30] : 35); } catch (ev) {}
     function closeModal() { ccModalClose(sheet); }
     sheet.innerHTML =
@@ -2002,10 +2036,11 @@ var GLOSS = {
       var q = Math.max(1, Math.round(+qv.value || 1));
       closeModal(); CC.running = true;
       ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
-      ccAdd(ref, desc, fam, lot, exp, q); ccSchedule(500);
+      ccRearm(600); // counted it: allow the very next scan of the same item quickly
+      ccAdd(ref, desc, fam, lot, exp, q); ccSchedule(220);
     };
     document.getElementById('cc-cx').onclick = function () {
-      closeModal(); CC.running = true; ccStatus('Cancelled \u2014 keep scanning'); ccSchedule(350);
+      closeModal(); ccRearm(2200); CC.running = true; ccStatus('Cancelled \u2014 keep scanning'); ccSchedule(300);
     };
   }
   function ccAdd(ref, desc, fam, lot, exp, qty) {
