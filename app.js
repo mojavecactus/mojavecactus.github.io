@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.28';
+  var APPVER = '4.29';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1727,13 +1727,13 @@ var GLOSS = {
           '<video id="ccvid" playsinline muted autoplay></video>' +
           '<div id="cc-target" aria-hidden="true"><i></i><i></i><i></i><i></i></div>' +
           '<div id="cc-flash" aria-hidden="true"></div>' +
+          '<button id="cc-end" class="cc-endtop">End</button>' +
           '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
           '<button id="cc-help" class="cc-help" aria-label="Camera help" title="Camera not working?">?</button>' +
           '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
           '<div id="ccbar">' +
             '<button id="cc-manual" class="cc-mini">+ Manual</button>' +
             '<button id="cc-cam" class="cc-mini">Camera off</button>' +
-            '<button id="cc-end" class="cc-mini cc-endb">End</button>' +
           '</div>' +
         '</div>' +
         '<div id="cchead"><span id="cc-locname">' + (CC.tgt === 'fa' && FA.sess ? esc(FA.sess.cname || ((FA.sess.from || '?') + ' \u2192 ' + (FA.sess.drop || '?'))) : esc(CC.loc)) + '</span><span id="cc-pill" class="cc-pill"></span><span id="cc-tot"></span></div>' +
