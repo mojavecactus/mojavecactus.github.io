@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.26';
+  var APPVER = '4.27';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1901,24 +1901,31 @@ var GLOSS = {
     o.connect(g); g.connect(CC.ac.destination);
     o.start(at); o.stop(at + dur + 0.03);
   }
+  // Bell-like note: triangle fundamental plus a quiet octave above, which is what
+  // gives a payment-terminal chime its rounded rather than buzzy character.
+  function ccChime(f, at, dur, vol) {
+    ccTone(f, f, at, dur, 'triangle', vol);
+    ccTone(f * 2, f * 2, at, dur * 0.55, 'sine', vol * 0.28);
+  }
   function ccBeep(kind) {
     try {
       if (!CC.ac || CC.ac.state !== 'running') return;
       var t = CC.ac.currentTime + 0.01;
       if (kind === 'expired') {
-        // alarm: three descending wails, impossible to mistake for a good scan
-        for (var i = 0; i < 3; i++) ccTone(780, 380, t + i * 0.26, 0.22, 'sawtooth', 0.85);
+        // alarm: three descending wails
+        for (var i = 0; i < 3; i++) ccTone(900, 340, t + i * 0.28, 0.24, 'sawtooth', 0.85);
       } else if (kind === 'warn') {
-        // unknown barcode: long and low, same loudness as a success
-        ccTone(200, 175, t, 0.45, 'sawtooth', 0.9);
+        // not recognised: two mid-low thuds
+        ccTone(380, 290, t, 0.13, 'triangle', 0.9);
+        ccTone(380, 290, t + 0.19, 0.15, 'triangle', 0.9);
       } else if (kind === 'dup') {
-        // already on the list here: same crisp register, doubled
-        ccTone(2400, 2400, t, 0.05, 'square', 0.8);
-        ccTone(2400, 2400, t + 0.10, 0.06, 'square', 0.8);
+        // already on the list here: same chime family, doubled and a step down
+        ccChime(1175, t, 0.07, 0.62);
+        ccChime(1175, t + 0.10, 0.09, 0.62);
       } else {
-        // success: short, crisp, high electronic cha-ching
-        ccTone(2700, 2700, t, 0.045, 'square', 0.85);
-        ccTone(3600, 3600, t + 0.055, 0.085, 'square', 0.85);
+        // success: rising two-note chime, Apple Pay style
+        ccChime(1568, t, 0.09, 0.72);
+        ccChime(2093, t + 0.095, 0.20, 0.72);
       }
     } catch (e) {}
   }
