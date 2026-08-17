@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.32';
+  var APPVER = '4.33';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1954,6 +1954,12 @@ var GLOSS = {
     document.getElementById('cc-hx').onclick = function () { ccModalClose(sheet); CC.running = true; ccSchedule(300); };
     document.getElementById('cc-hr').onclick = function () { location.reload(); };
   }
+  function ccLearnMap() { try { return JSON.parse(localStorage.getItem('tbx_learned') || '{}'); } catch (e) { return {}; } }
+  function ccLearnCount() { return Object.keys(ccLearnMap()).length; }
+  function ccLearnText() {
+    var m = ccLearnMap();
+    return Object.keys(m).map(function (k) { return k + '  ' + m[k]; }).join('\n');
+  }
   function ccCamSet(on) {
     CC.camOff = !on;
     var b = document.getElementById('cc-cam');
@@ -2266,11 +2272,21 @@ var GLOSS = {
       '<div class="card cc-card">' +
         '<h2 class="cc-h">CT Team</h2>' +
         '<div class="cc-sub">Device: <b>' + esc(CC.dev) + '</b> <button id="ct-devchg" class="cc-link" type="button">change</button></div>' +
+        (ccLearnCount() ? '<div class="cc-sub">' + ccLearnCount() + ' new barcode' + (ccLearnCount() > 1 ? 's' : '') + ' learned on this phone <button id="ct-learn" class="cc-link" type="button">copy</button></div>' : '') +
         '<button id="ct-cc" class="ct-big">Cycle Count<span>Trunk &amp; closet counts by location</span></button>' +
         '<button id="ct-fa" class="ct-big">F&amp;A Inventory<span>Product handed off to the Foot &amp; Ankle team</span></button>' +
       '</div>');
     document.getElementById('ct-cc').addEventListener('click', function () { location.hash = '#/cc'; });
     document.getElementById('ct-fa').addEventListener('click', function () { location.hash = '#/fa'; });
+    var lb = document.getElementById('ct-learn');
+    if (lb) lb.addEventListener('click', function () {
+      var t = ccLearnText();
+      function done() { lb.textContent = 'copied'; setTimeout(function () { lb.textContent = 'copy'; }, 1800); }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, function () { prompt('Copy these and send them over:', t); }); return; }
+      } catch (e) {}
+      prompt('Copy these and send them over:', t);
+    });
     document.getElementById('ct-devchg').addEventListener('click', function () {
       var pend = (CC.ops || []).length + (FA.ops || []).length;
       if (pend) { alert('This phone still has ' + pend + ' unsent scan' + (pend > 1 ? 's' : '') + '. Get signal so they finish syncing, then change the device.'); ccFlushSoon('cc', 200); ccFlushSoon('fa', 500); return; }
