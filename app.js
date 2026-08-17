@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.18';
+  var APPVER = '4.19';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1445,7 +1445,6 @@ var GLOSS = {
     if (CC.stream) { try { CC.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} CC.stream = null; }
     CC.track = null;
     if (CC.poll) { clearInterval(CC.poll); CC.poll = null; }
-    ccBar(false);
   }
   // ---- offline-first sync engine: scans land in a local ledger instantly and
   // ---- upload in the background as idempotent ops (opId-deduped server side).
@@ -1659,7 +1658,6 @@ var GLOSS = {
   }
   function ccSession() {
     CC.view = 'session';
-    ccBar(false);
     var locs = [], sublocs = [];
     try { locs = JSON.parse(ccLS('tbx_cc_locs') || '[]'); } catch (e) {}
     try { sublocs = JSON.parse(ccLS('tbx_cc_sublocs') || '[]'); } catch (e) {}
@@ -2241,7 +2239,9 @@ var GLOSS = {
     FILT = {}; CURVIEW = null;
     var fpFilt = qparam(query, 'fp'); if (fpFilt) FILT.fp = fpFilt;
     var gp0 = document.getElementById('glosspanel'); if (gp0) gp0.hidden = true;
-    if (h !== '#/cc' && h !== '#/fa' && h !== '#/ct') ccStop();
+    var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct');
+    if (!inCT) ccStop();
+    ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
     if (h === '#/cc') return ccScreen();
     if (h === '#/ct') return ctScreen();
     if (h === '#/fa') return faScreen();
