@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.35';
+  var APPVER = '4.36';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1321,7 +1321,7 @@ var GLOSS = {
         '<div style="color:var(--muted); font-size:13px; margin-top:5px">v' + APPVER + ' &middot; data updated ' + esc(D.built) + '</div>' +
         '<div style="margin-top:6px"><button class="footlink" data-act="checkupd">Check for updates</button>' +
         '<span class="footsep">&middot;</span><button class="footlink" data-act="cyclecount">CT Team</button>' +
-        '<span class="footsep">&middot;</span><button class="footlink" data-act="lockdev">Lock this device</button></div>' +
+        '<span class="footsep">&middot;</span><button class="footlink" data-act="otherteams">Other Teams</button></div>' +
       '</div>' +
       '<div class="grouphead ab-gh">Tips</div>' +
       '<div class="card about-card">' +
@@ -1337,7 +1337,8 @@ var GLOSS = {
         '<div class="tip"><b style="color:var(--bone)">Created by Nate Merrell</b><br>Built for the CT Sports Medicine Team.</div>' +
         '<div class="tip">Questions, corrections, or a product you want added? Use the feedback bubble on any screen.</div>' +
       '</div>' +
-      '<div class="about-quote">\u201cIf your tools don\u2019t work, make them work. If you can\u2019t make them work, make some that do work.\u201d<span class="aq-by">\u2014 Homer Stryker</span></div>');
+      '<div class="about-quote">\u201cIf your tools don\u2019t work, make them work. If you can\u2019t make them work, make some that do work.\u201d<span class="aq-by">\u2014 Homer Stryker</span></div>' +
+      '<div style="text-align:center; margin:18px 0 6px"><button class="footlink" data-act="lockdev">Lock this device</button></div>');
   }
   function instrScreen(sku, cat) {
     var e = BYPN[nrm(sku)];
@@ -1427,6 +1428,48 @@ var GLOSS = {
   // ---- cycle count (CT team) ----
   var CC = { creds: null, dev: '', loc: '', locBase: '', subloc: '', notes: '', mode: 'single', rows: [], base: [], ops: [], syncLoaded: false, wake: null, hist: {}, stream: null, running: false, poll: null, cool: { code: '', t: 0, ms: 2600 }, pend: null, canvas: document.createElement('canvas'), ctx: null, tickTO: null, track: null, focusIv: null, camOff: false, worker: null, workerFailed: false, wcb: {}, wid: 0, miss: 0, stall: 0, camBusy: false, ac: null, listSig: '', busy: false, view: 'gate', tgt: 'cc', ret: null, gateMsg: '' };
   function ccLS(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+  var TERR = {
+    ct:  { id: 'ct',  name: 'CT Team',     enc: 'cc.enc.json',     tgt: 'cc',     gate: 'CT team access \u2014 enter the password.', fa: true },
+    buf: { id: 'buf', name: 'Buffalo',     enc: 'cc-buf.enc.json', tgt: 'buf_cc', gate: 'Buffalo team access \u2014 enter the password.', fa: false },
+    la:  { id: 'la',  name: 'Los Angeles', enc: 'cc-la.enc.json',  tgt: 'la_cc',  gate: 'Los Angeles team access \u2014 enter the password.', fa: false },
+    syr: { id: 'syr', name: 'Syracuse',    enc: 'cc-syr.enc.json', tgt: 'syr_cc', gate: 'Syracuse team access \u2014 enter the password.', fa: false }
+  };
+  var TORDER = ['buf', 'la', 'syr'];
+  CC.terr = 'ct';
+  var TDET = {};
+  function terrTgt() { return TERR[CC.terr].tgt; }
+  function terrKey(suf) { return 'tbx_' + terrTgt() + suf; }
+  function terrByTgt(t) { for (var k in TERR) if (TERR[k].tgt === t) return TERR[k]; return TERR.ct; }
+  function ccAllCcTgts() { var a = ['cc']; TORDER.forEach(function (k) { a.push(TERR[k].tgt); }); return a; }
+  function ccPendingLS(t) { try { return (localStorage.getItem('tbx_' + t + '_ops') || '[]') !== '[]'; } catch (e) { return false; } }
+  function ccCredsFor(t) {
+    var st = ccSyncSt(t);
+    if (st === CC) { if (!CC.creds) { var raw = ccLS('tbx_' + t); if (raw) { try { CC.creds = JSON.parse(raw); } catch (e) {} } } return CC.creds; }
+    if (!st.creds) { var r2 = ccLS('tbx_' + t); if (r2) { try { st.creds = JSON.parse(r2); } catch (e2) {} } }
+    return st.creds || null;
+  }
+  function ccDevFor(t) {
+    var st = ccSyncSt(t);
+    if (st === CC) { if (!CC.dev) CC.dev = ccLS('tbx_' + t + '_dev') || ''; return CC.dev; }
+    if (!st.dev) st.dev = ccLS('tbx_' + t + '_dev') || '';
+    return st.dev;
+  }
+  function ccSY(t) { var y = SY[t]; if (!y) y = SY[t] = { timer: null, inflight: false, retry: 0, lastOk: 0 }; return y; }
+  function terrSet(id) {
+    if (!TERR[id] || CC.terr === id) return;
+    var oldTgt = terrTgt();
+    ccSaveBaseNow(oldTgt);
+    try { localStorage.setItem('tbx_' + oldTgt + '_ops', JSON.stringify(CC.ops)); } catch (e) {}
+    delete TDET[oldTgt];
+    CC.terr = id;
+    delete TDET[TERR[id].tgt];
+    CC.creds = null; CC.dev = '';
+    CC.loc = ''; CC.locBase = ''; CC.subloc = ''; CC.notes = '';
+    CC.rows = []; CC.base = []; CC.ops = [];
+    CC.syncLoaded = false;
+    CC.tgt = TERR[id].tgt;
+    ccHistLoad();
+  }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
   function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
   function ccIsExpired(exp) {
@@ -1459,7 +1502,18 @@ var GLOSS = {
   function ccNLoc(x) { return String(x == null ? '' : x).trim().toLowerCase(); }
   function ccKeyCC(loc, ref, lot) { return ccNLoc(loc) + '||' + ccNRef(ref) + '||' + ccNLot(lot); }
   function ccKeyFA(sid, ref, lot) { return String(sid == null ? '' : sid).trim() + '||' + ccNRef(ref) + '||' + ccNLot(lot); }
-  function ccSyncSt(t) { return t === 'fa' ? FA : CC; }
+  function ccSyncSt(t) {
+    if (t === 'fa') return FA;
+    if (t === terrTgt()) return CC;
+    var s = TDET[t];
+    if (!s) { s = TDET[t] = { rows: [], base: [], ops: [], creds: null, dev: '', loaded: false }; }
+    if (!s.loaded) {
+      s.loaded = true;
+      try { s.base = JSON.parse(localStorage.getItem('tbx_' + t + '_base') || '[]') || []; } catch (e) { s.base = []; }
+      try { s.ops = JSON.parse(localStorage.getItem('tbx_' + t + '_ops') || '[]') || []; } catch (e2) { s.ops = []; }
+    }
+    return s;
+  }
   var BSAVE = { cc: null, fa: null };
   function ccSaveBaseNow(t) {
     if (BSAVE[t]) { clearTimeout(BSAVE[t]); BSAVE[t] = null; }
@@ -1507,11 +1561,14 @@ var GLOSS = {
   }
   function ccDerive(t) {
     var st = ccSyncSt(t);
-    var rows = ccDeriveCore(st.base || [], st.ops || [], t, CC.dev);
-    if (t === 'fa') FA.rows = rows; else CC.rows = rows;
+    var rows = ccDeriveCore(st.base || [], st.ops || [], t, t === 'fa' ? ccDevFor('cc') : ccDevFor(t));
+    st.rows = rows;
     return rows;
   }
-  function ccEndpoint(t) { if (!CC.creds) return null; return t === 'fa' ? CC.creds.fa : CC.creds; }
+  function ccEndpoint(t) {
+    if (t === 'fa') { var c = ccCredsFor('cc'); return (c && c.fa) ? c.fa : null; }
+    return ccCredsFor(t);
+  }
   function ccEnqueue(t, op) {
     op.opId = 'o' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     if (!op.ts) op.ts = new Date().toISOString();
@@ -1519,24 +1576,25 @@ var GLOSS = {
     ccSyncSave(t);
     ccDerive(t);
     ccRenderList();
-    if (CC.view === 'cchome' && t === 'cc') ccHomeCards();
+    if (CC.view === 'cchome' && t === CC.tgt) ccHomeCards();
     if (CC.view === 'fahome' && t === 'fa') faCards();
     ccPill();
     ccFlushSoon(t, 1200);
   }
-  function ccFlushSoon(t, ms) { var y = SY[t]; if (!y) return; if (y.timer) clearTimeout(y.timer); y.timer = setTimeout(function () { ccFlush(t); }, ms || 800); }
+  function ccFlushSoon(t, ms) { var y = ccSY(t); if (y.timer) clearTimeout(y.timer); y.timer = setTimeout(function () { ccFlush(t); }, ms || 800); }
   function ccFlush(t, keep) {
-    var y = SY[t], st = ccSyncSt(t), ep = ccEndpoint(t);
-    if (!ep || !CC.dev) { ccPill(); return; }
+    var y = ccSY(t), st = ccSyncSt(t), ep = ccEndpoint(t);
+    var dv = t === 'fa' ? ccDevFor('cc') : ccDevFor(t);
+    if (!ep || !dv) { ccPill(); return; }
     if (y.inflight || !st.ops.length) { ccPill(); return; }
     y.inflight = true; ccPill();
     var batch = st.ops.slice(0, keep ? 25 : 150);
-    fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: CC.dev, ops: batch, norows: 1 }), keepalive: !!keep })
+    fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: dv, ops: batch, norows: 1 }), keepalive: !!keep })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         y.inflight = false;
         if (!j || !j.ok || !j.applied) {
-          if (j && j.err === 'dev') ccStatus('This device isn\u2019t on the roster \u2014 tap change on CT Team');
+          if (j && j.err === 'dev') ccStatus('This device isn\u2019t on the roster \u2014 tap change on ' + terrByTgt(t === 'fa' ? 'cc' : t).name);
           if (j && j.err === 'busy') { ccPill(); ccFlushSoon(t, 1500 + Math.floor(Math.random() * 2500)); return; }
           y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 5000 * Math.max(1, y.retry)); return;
         }
@@ -1546,11 +1604,11 @@ var GLOSS = {
         st.ops = st.ops.filter(function (o) { return !done[o.opId]; });
         if (j.rows) st.base = j.rows;
         else if (settled.length) {
-          st.base = ccDeriveCore(st.base, settled, t, CC.dev).map(function (r) { if (r.pending) { var c = {}; for (var k in r) c[k] = r[k]; delete c.pending; return c; } return r; });
+          st.base = ccDeriveCore(st.base, settled, t, dv).map(function (r) { if (r.pending) { var c = {}; for (var k in r) c[k] = r[k]; delete c.pending; return c; } return r; });
         }
         y.retry = 0; y.lastOk = Date.now();
         ccSyncSave(t, true); ccDerive(t); ccRenderList();
-        if (CC.view === 'cchome' && t === 'cc') ccHomeCards();
+        if (CC.view === 'cchome' && t === CC.tgt) ccHomeCards();
         if (CC.view === 'fahome' && t === 'fa') faCards();
         ccPill();
         if (st.ops.length) ccFlushSoon(t, 400);
@@ -1560,8 +1618,8 @@ var GLOSS = {
   function ccPull(t) {
     var ep = ccEndpoint(t);
     if (!ep) return Promise.reject(new Error('nocreds'));
-    var y = SY[t], startOk = y.lastOk;
-    var q = t === 'fa' ? '&action=list' : '&action=pull&dev=' + encodeURIComponent(CC.dev || '');
+    var y = ccSY(t), startOk = y.lastOk;
+    var q = t === 'fa' ? '&action=list' : '&action=pull&dev=' + encodeURIComponent((t === 'fa' ? ccDevFor('cc') : ccDevFor(t)) || '');
     return fetch(ep.url + '?token=' + encodeURIComponent(ep.token) + q)
       .then(function (r) { return r.json(); })
       .then(function (j) {
@@ -1577,34 +1635,43 @@ var GLOSS = {
   }
   function ccPill() {
     var el = document.getElementById('cc-pill'); if (!el) return;
-    var cur = CC.tgt === 'fa' ? 'fa' : 'cc';
-    var st = ccSyncSt(cur), y = SY[cur];
+    var cur = CC.tgt;
+    var st = ccSyncSt(cur), y = ccSY(cur);
     var n = st.ops.length;
     if (!n) { el.textContent = 'Saved \u2713'; el.className = 'cc-pill ok'; }
     else if (y.inflight) { el.textContent = 'Syncing\u2026'; el.className = 'cc-pill busy'; }
     else if (!navigator.onLine) { el.textContent = n + ' queued \u2014 offline'; el.className = 'cc-pill wait'; }
     else { el.textContent = n + ' to sync'; el.className = 'cc-pill wait'; }
   }
-  window.addEventListener('online', function () { ccFlushSoon('cc', 300); ccFlushSoon('fa', 600); });
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush('cc', true); ccFlush('fa', true); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') { ccWake(); ccBeepInit(); setTimeout(function () { ccCamRecover(); }, 500); } ccFlushSoon('cc', 800); ccFlushSoon('fa', 1200); } catch (e2) {} } });
-  window.addEventListener('pagehide', function () { try { ccSaveBaseNow('cc'); ccSaveBaseNow('fa'); } catch (e) {} });
+  window.addEventListener('online', function () {
+    ccFlushSoon(terrTgt(), 300); ccFlushSoon('fa', 600);
+    ccAllCcTgts().forEach(function (tg, i) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 900 + i * 300); });
+  });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush(terrTgt(), true); ccFlush('fa', true); ccAllCcTgts().forEach(function (tg) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlush(tg, true); }); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') { ccWake(); ccBeepInit(); setTimeout(function () { ccCamRecover(); }, 500); } ccFlushSoon(terrTgt(), 800); ccFlushSoon('fa', 1200); ccAllCcTgts().forEach(function (tg, i2) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 1600 + i2 * 300); }); } catch (e2) {} } });
+  window.addEventListener('pagehide', function () { try { ccSaveBaseNow(terrTgt()); ccSaveBaseNow('fa'); } catch (e) {} });
   // Boot: if this phone has queued scans from a previous session, load creds and push them out silently.
   // Deferred a tick so the whole module (incl. FA below) has evaluated first.
   setTimeout(function () {
     try {
       if (ccLS('tbx_cc') && ((ccLS('tbx_cc_ops') || '[]') !== '[]' || (ccLS('tbx_fa_ops') || '[]') !== '[]')) {
-        if (!CC.creds) CC.creds = JSON.parse(ccLS('tbx_cc'));
-        if (!CC.dev) CC.dev = ccLS('tbx_cc_dev') || '';
-        if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad('cc'); ccSyncLoad('fa'); }
+        if (CC.terr === 'ct') {
+          if (!CC.creds) CC.creds = JSON.parse(ccLS('tbx_cc'));
+          if (!CC.dev) CC.dev = ccLS('tbx_cc_dev') || '';
+          if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad('cc'); ccSyncLoad('fa'); }
+        }
         ccFlushSoon('cc', 2000); ccFlushSoon('fa', 3000);
       }
+      TORDER.forEach(function (k, i) {
+        var tg = TERR[k].tgt;
+        if (tg !== terrTgt() && ccPendingLS(tg) && ccLS('tbx_' + tg)) ccFlushSoon(tg, 4000 + i * 500);
+      });
     } catch (eBoot) {}
   }, 0);
   function ccScreen() {
     setTitle('Cycle Count', ''); backBtn.hidden = false;
     ccStop();
     if (!ctEnsure(ccScreen)) return;
-    CC.tgt = 'cc'; CC.view = 'cchome';
+    CC.tgt = terrTgt(); CC.view = 'cchome';
     render(
       '<div class="card cc-card cc-home">' +
         '<button id="cc-rf" class="cc-rfb" aria-label="Refresh counts">&#x21bb;</button>' +
@@ -1615,22 +1682,23 @@ var GLOSS = {
         '<div id="cc-cards" class="ctc-wrap"><div class="cc-empty">Loading counts\u2026</div></div>' +
       '</div>');
     document.getElementById('cc-new').addEventListener('click', function () { ccSession(); });
-    document.getElementById('cc-rf').addEventListener('click', function () { ccHomeLoad('cc', true); });
+    document.getElementById('cc-rf').addEventListener('click', function () { ccHomeLoad(terrTgt(), true); });
     document.getElementById('cc-cards').addEventListener('click', function (e) {
       var c = e.target.closest ? e.target.closest('.ctc') : null; if (!c) return;
       var loc = c.dataset.loc; if (!loc) return;
       CC.loc = loc;
       var p = loc.split(' \u2014 '); CC.locBase = p[0]; CC.subloc = p.slice(1).join(' \u2014 ');
-      CC.notes = ''; CC.tgt = 'cc'; ccCount();
+      CC.notes = ''; CC.tgt = terrTgt(); ccCount();
     });
-    ccHomeLoad('cc', false);
+    ccHomeLoad(terrTgt(), false);
   }
   function ccGate() {
     CC.view = 'gate';
-    var gm = CC.gateMsg || 'CT team access \u2014 enter the password.'; CC.gateMsg = '';
+    var TR = TERR[CC.terr];
+    var gm = CC.gateMsg || TR.gate; CC.gateMsg = '';
     render(
       '<div class="card cc-card">' +
-        '<h2 class="cc-h">CT Team</h2>' +
+        '<h2 class="cc-h">' + esc(TR.name) + '</h2>' +
         '<div class="cc-sub">' + esc(gm) + '</div>' +
         '<input id="cc-pw" class="cc-in" type="password" autocomplete="off" placeholder="Password">' +
         '<div id="cc-err" class="cc-err" hidden>Wrong password.</div>' +
@@ -1640,13 +1708,13 @@ var GLOSS = {
     function tryPw() {
       var v = pw.value; if (!v) return;
       go.disabled = true; go.textContent = 'Checking\u2026';
-      fetch('cc.enc.json').then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (P) {
+      fetch(TR.enc).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (P) {
         return crypto.subtle.importKey('raw', new TextEncoder().encode(v), 'PBKDF2', false, ['deriveKey'])
           .then(function (km) { return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: ccB64d(P.salt), iterations: P.it }, km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']); })
           .then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: ccB64d(P.iv) }, key, ccB64d(P.ct)); });
       }).then(function (buf) {
         CC.creds = JSON.parse(new TextDecoder().decode(buf));
-        ccLS('tbx_cc', JSON.stringify(CC.creds));
+        ccLS(terrKey(''), JSON.stringify(CC.creds));
         var nx = CC.ret || ccScreen; CC.ret = null; nx();
       }).catch(function () {
         go.disabled = false; go.textContent = 'Unlock';
@@ -1670,28 +1738,29 @@ var GLOSS = {
       document.getElementById('cc-devgo').addEventListener('click', function () {
         var v = document.getElementById('cc-dev').value;
         if (!v) return;
-        CC.dev = v; ccLS('tbx_cc_dev', v); var nx = CC.ret || ccScreen; CC.ret = null; nx();
+        CC.dev = v; ccLS(terrKey('_dev'), v); var nx = CC.ret || ccScreen; CC.ret = null; nx();
       });
     }
     draw(ccRoster());
     if (CC.creds) {
       fetch(CC.creds.url + '?token=' + encodeURIComponent(CC.creds.token) + '&action=roster')
         .then(function (r) { return r.json(); })
-        .then(function (j) { if (j && j.devices && j.devices.length) { ccLS('tbx_cc_roster', JSON.stringify(j.devices)); if (CC.view === 'device') draw(j.devices); } })
+        .then(function (j) { if (j && j.devices && j.devices.length) { ccLS(terrKey('_roster'), JSON.stringify(j.devices)); if (CC.view === 'device') draw(j.devices); } })
         .catch(function () {});
     }
   }
   function ccRoster() {
     var list = [];
-    try { list = JSON.parse(ccLS('tbx_cc_roster') || '[]') || []; } catch (e) {}
-    if (!list.length) list = ["Matt's iPhone", "Nate's iPhone", "Mia's iPhone", "Manny's iPhone", "Isabella's iPhone", "Megan's iPhone"];
+    try { list = JSON.parse(ccLS(terrKey('_roster')) || '[]') || []; } catch (e) {}
+    if (!list.length && CC.creds && CC.creds.devices && CC.creds.devices.length) list = CC.creds.devices.slice();
+    if (!list.length && CC.terr === 'ct') list = ["Matt's iPhone", "Nate's iPhone", "Mia's iPhone", "Manny's iPhone", "Isabella's iPhone", "Megan's iPhone"];
     return list;
   }
   function ccSession() {
     CC.view = 'session';
     var locs = [], sublocs = [];
-    try { locs = JSON.parse(ccLS('tbx_cc_locs') || '[]'); } catch (e) {}
-    try { sublocs = JSON.parse(ccLS('tbx_cc_sublocs') || '[]'); } catch (e) {}
+    try { locs = JSON.parse(ccLS(terrKey('_locs')) || '[]'); } catch (e) {}
+    try { sublocs = JSON.parse(ccLS(terrKey('_sublocs')) || '[]'); } catch (e) {}
     render(
       '<div class="card cc-card">' +
         '<h2 class="cc-h">Start a count</h2>' +
@@ -1712,8 +1781,8 @@ var GLOSS = {
       CC.loc = subloc ? loc + ' \u2014 ' + subloc : loc;
       CC.notes = document.getElementById('cc-notes').value.trim();
       var ls = [loc].concat(locs.filter(function (l) { return l !== loc; })).slice(0, 8);
-      ccLS('tbx_cc_locs', JSON.stringify(ls));
-      if (subloc) { var ss = [subloc].concat(sublocs.filter(function (l) { return l !== subloc; })).slice(0, 12); ccLS('tbx_cc_sublocs', JSON.stringify(ss)); }
+      ccLS(terrKey('_locs'), JSON.stringify(ls));
+      if (subloc) { var ss = [subloc].concat(sublocs.filter(function (l) { return l !== subloc; })).slice(0, 12); ccLS(terrKey('_sublocs'), JSON.stringify(ss)); }
       ccCount();
     });
   }
@@ -2001,8 +2070,8 @@ var GLOSS = {
     f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
   }
   function ccHistKey(loc, ref, lot) { return String(loc) + '|' + String(ref) + '|' + String(lot || ''); }
-  function ccHistSave() { try { localStorage.setItem('tbx_cc_hist', JSON.stringify(CC.hist)); } catch (e) {} }
-  function ccHistLoad() { try { CC.hist = JSON.parse(localStorage.getItem('tbx_cc_hist') || '{}') || {}; } catch (e) { CC.hist = {}; } }
+  function ccHistSave() { try { localStorage.setItem(terrKey('_hist'), JSON.stringify(CC.hist)); } catch (e) {} }
+  function ccHistLoad() { try { CC.hist = JSON.parse(localStorage.getItem(terrKey('_hist')) || '{}') || {}; } catch (e) { CC.hist = {}; } }
   function ccHistText(arr) {
     if (!arr || !arr.length) return '';
     var s = String(arr[0]);
@@ -2295,20 +2364,20 @@ var GLOSS = {
   // ---- CT team hub + F&A inventory (shares the cycle-count scan pipeline via CC.tgt) ----
   var FA = { rows: [], base: [], ops: [], sess: null, byId: {} };
   function ctEnsure(then) {
-    if (!CC.creds) { var st = ccLS('tbx_cc'); if (st) { try { CC.creds = JSON.parse(st); } catch (e) {} } }
+    if (!CC.creds) { var st = ccLS(terrKey('')); if (st) { try { CC.creds = JSON.parse(st); } catch (e) {} } }
     if (!CC.creds) { CC.ret = then; ccGate(); return false; }
-    if (!CC.dev) CC.dev = ccLS('tbx_cc_dev') || '';
+    if (!CC.dev) CC.dev = ccLS(terrKey('_dev')) || '';
     var ros = [];
-    try { ros = JSON.parse(ccLS('tbx_cc_roster') || '[]') || []; } catch (e2) {}
-    if (CC.dev && ros.length && ros.indexOf(CC.dev) === -1) { CC.dev = ''; try { localStorage.removeItem('tbx_cc_dev'); } catch (e3) {} }
+    try { ros = JSON.parse(ccLS(terrKey('_roster')) || '[]') || []; } catch (e2) {}
+    if (CC.dev && ros.length && ros.indexOf(CC.dev) === -1) { CC.dev = ''; try { localStorage.removeItem(terrKey('_dev')); } catch (e3) {} }
     if (!ros.length && CC.creds) {
       fetch(CC.creds.url + '?token=' + encodeURIComponent(CC.creds.token) + '&action=roster')
         .then(function (r) { return r.json(); })
-        .then(function (j) { if (j && j.devices && j.devices.length) ccLS('tbx_cc_roster', JSON.stringify(j.devices)); })
+        .then(function (j) { if (j && j.devices && j.devices.length) ccLS(terrKey('_roster'), JSON.stringify(j.devices)); })
         .catch(function () {});
     }
     if (!CC.dev) { CC.ret = then; ccDevice(); return false; }
-    if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad('cc'); ccSyncLoad('fa'); }
+    if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad(terrTgt()); if (TERR[CC.terr].fa) ccSyncLoad('fa'); }
     return true;
   }
   function ccRowsSrc() { return CC.tgt === 'fa' ? FA.rows : CC.rows; }
@@ -2321,20 +2390,22 @@ var GLOSS = {
     return ccHistKey(ccNLoc(o.loc !== undefined ? o.loc : CC.loc), ccNRef(o.ref), ccNLot(o.lot));
   }
   function ctScreen() {
-    setTitle('CT Team', ''); backBtn.hidden = false;
+    var TR = TERR[CC.terr];
+    setTitle(TR.name, ''); backBtn.hidden = false;
     ccStop();
     if (!ctEnsure(ctScreen)) return;
     CC.view = 'hub';
     render(
       '<div class="card cc-card">' +
-        '<h2 class="cc-h">CT Team</h2>' +
+        '<h2 class="cc-h">' + esc(TR.name) + '</h2>' +
         '<div class="cc-sub">Device: <b>' + esc(CC.dev) + '</b> <button id="ct-devchg" class="cc-link" type="button">change</button></div>' +
         (ccLearnCount() ? '<div class="cc-sub">' + ccLearnCount() + ' new barcode' + (ccLearnCount() > 1 ? 's' : '') + ' learned on this phone <button id="ct-learn" class="cc-link" type="button">copy</button></div>' : '') +
         '<button id="ct-cc" class="ct-big">Cycle Count<span>Trunk &amp; closet counts by location</span></button>' +
-        '<button id="ct-fa" class="ct-big">F&amp;A Inventory<span>Product handed off to the Foot &amp; Ankle team</span></button>' +
+        (TR.fa ? '<button id="ct-fa" class="ct-big">F&amp;A Inventory<span>Product handed off to the Foot &amp; Ankle team</span></button>' : '') +
       '</div>');
-    document.getElementById('ct-cc').addEventListener('click', function () { location.hash = '#/cc'; });
-    document.getElementById('ct-fa').addEventListener('click', function () { location.hash = '#/fa'; });
+    document.getElementById('ct-cc').addEventListener('click', function () { location.hash = TR.id === 'ct' ? '#/cc' : '#/team/' + TR.id + '/cc'; });
+    var fb = document.getElementById('ct-fa');
+    if (fb) fb.addEventListener('click', function () { location.hash = '#/fa'; });
     var lb = document.getElementById('ct-learn');
     if (lb) lb.addEventListener('click', function () {
       var t = ccLearnText();
@@ -2345,10 +2416,25 @@ var GLOSS = {
       prompt('Copy these and send them over:', t);
     });
     document.getElementById('ct-devchg').addEventListener('click', function () {
-      var pend = (CC.ops || []).length + (FA.ops || []).length;
-      if (pend) { alert('This phone still has ' + pend + ' unsent scan' + (pend > 1 ? 's' : '') + '. Get signal so they finish syncing, then change the device.'); ccFlushSoon('cc', 200); ccFlushSoon('fa', 500); return; }
-      try { localStorage.removeItem('tbx_cc_dev'); } catch (e) {}
+      var pend = (CC.ops || []).length + (TR.fa ? (FA.ops || []).length : 0);
+      if (pend) { alert('This phone still has ' + pend + ' unsent scan' + (pend > 1 ? 's' : '') + '. Get signal so they finish syncing, then change the device.'); ccFlushSoon(terrTgt(), 200); if (TR.fa) ccFlushSoon('fa', 500); return; }
+      try { localStorage.removeItem(terrKey('_dev')); } catch (e) {}
       CC.dev = ''; CC.ret = ctScreen; ccDevice();
+    });
+  }
+  function teamsScreen() {
+    setTitle('Other Teams', ''); backBtn.hidden = false;
+    ccStop();
+    CC.view = 'teams';
+    render(
+      '<div class="card cc-card">' +
+        '<h2 class="cc-h">Other Teams</h2>' +
+        '<div class="cc-sub">Pick a territory to open its cycle count.</div>' +
+        TORDER.map(function (k) { return '<button class="ct-big" data-terr="' + k + '">' + esc(TERR[k].name) + '<span>Cycle counts by location</span></button>'; }).join('') +
+      '</div>');
+    document.querySelector('.cc-card').addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('[data-terr]') : null; if (!b) return;
+      location.hash = '#/team/' + b.dataset.terr;
     });
   }
   function ccHomeCards() {
@@ -2520,12 +2606,14 @@ var GLOSS = {
     FILT = {}; CURVIEW = null;
     var fpFilt = qparam(query, 'fp'); if (fpFilt) FILT.fp = fpFilt;
     var gp0 = document.getElementById('glosspanel'); if (gp0) gp0.hidden = true;
-    var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct');
+    var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h.indexOf('#/team/') === 0);
     if (!inCT) ccStop();
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
-    if (h === '#/cc') return ccScreen();
-    if (h === '#/ct') return ctScreen();
-    if (h === '#/fa') return faScreen();
+    if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
+    if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
+    if (h === '#/fa') { terrSet('ct'); return faScreen(); }
+    if (h === '#/teams') return teamsScreen();
+    if ((m = h.match(/^#\/team\/(buf|la|syr)(\/cc)?$/))) { terrSet(m[1]); return m[2] ? ccScreen() : ctScreen(); }
     if ((m = h.match(/^#\/top\/(implants|arthroscopy)$/))) return topScreen(m[1]);
     if ((m = h.match(/^#\/cat\/(.+)$/))) return catScreen(dec(m[1]));
     if ((m = h.match(/^#\/dgrp\/(.+)$/))) return dispGroupScreen(dec(m[1]));
@@ -3013,6 +3101,7 @@ var GLOSS = {
   document.addEventListener('click', function (e) {
     if (e.target.closest && e.target.closest('[data-act="checkupd"]')) { checkForUpdate(); return; }
     if (e.target.closest && e.target.closest('[data-act="cyclecount"]')) { location.hash = '#/ct'; return; }
+    if (e.target.closest && e.target.closest('[data-act="otherteams"]')) { location.hash = '#/teams'; return; }
     if (e.target.closest && e.target.closest('[data-act="lockdev"]')) {
       try { sessionStorage.removeItem('tbx_k2'); sessionStorage.removeItem('tbx_key'); } catch (e2) {}
       try { localStorage.removeItem('tbx_k2'); localStorage.removeItem('tbx_key'); localStorage.removeItem('tbx_rm'); } catch (e3) {}
