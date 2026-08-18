@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.38';
+  var APPVER = '4.39';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1818,7 +1818,7 @@ var GLOSS = {
         '<div id="cc-sheet" hidden></div>' +
       '</div>');
     CC.mode = 'single';
-    document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccFlushSoon(CC.tgt === 'fa' ? 'fa' : 'cc', 100); if (CC.tgt === 'fa') { faScreen(); } else { ccScreen(); } });
+    document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccFlushSoon(CC.tgt, 100); if (CC.tgt === 'fa') { faScreen(); } else { ccScreen(); } });
     document.getElementById('cc-manual').addEventListener('click', function () { ccManual(); });
     document.getElementById('cc-cam').addEventListener('click', function () { ccCamSet(CC.camOff); });
     document.getElementById('cc-help').addEventListener('click', function (e) { e.stopPropagation(); ccCamHelp(false); });
@@ -1834,7 +1834,7 @@ var GLOSS = {
     ccStartCam();
     ccHistLoad();
     ccWake();
-    var t0 = CC.tgt === 'fa' ? 'fa' : 'cc';
+    var t0 = CC.tgt;
     ccDerive(t0); ccRenderList(); ccPill();
     ccPull(t0).then(function () { ccRenderList(); }).catch(function () {});
     ccFlushSoon(t0, 600);
@@ -2168,7 +2168,7 @@ var GLOSS = {
   }
   function ccAdd(ref, desc, fam, lot, exp, qty) {
     qty = Math.max(1, Math.round(+qty || 1));
-    var t = CC.tgt === 'fa' ? 'fa' : 'cc';
+    var t = CC.tgt;
     var op = { t: 'add', ref: ref, desc: desc || '', fam: fam || '', lot: lot || '', exp: exp || '', expired: ccIsExpired(exp), qty: qty };
     if (t === 'fa') { var fs = FA.sess || {}; op.sid = fs.sid; op.started = fs.started; op.cname = fs.cname; op.from = fs.from; op.drop = fs.drop; op.snotes = fs.snotes; op.sby = fs.sby; }
     else { op.loc = CC.loc; op.notes = CC.notes || ''; }
@@ -2317,7 +2317,7 @@ var GLOSS = {
         var delta = nq - (+r.qty || 0);
         if (!CC.hist[key]) CC.hist[key] = [];
         CC.hist[key].push(delta); ccHistSave();
-        var t = CC.tgt === 'fa' ? 'fa' : 'cc';
+        var t = CC.tgt;
         var op = { t: 'set', ref: r.ref, lot: r.lot || '', qty: nq, desc: r.desc || '', fam: r.fam || '', exp: r.exp || '', expired: !!(r.expired || ccIsExpired(r.exp)) };
         if (t === 'fa') { op.sid = r.sid; op.started = r.started; op.cname = r.cname; op.from = r.from; op.drop = r.drop; op.snotes = r.snotes; op.sby = r.sby; }
         else { op.loc = r.loc; op.notes = r.notes || ''; }
@@ -2327,7 +2327,7 @@ var GLOSS = {
         if (!confirm('Delete ' + r.ref + (r.lot ? ' lot ' + r.lot : '') + ' from the count?')) return;
         closeModal(); CC.running = true; ccSchedule(300);
         delete CC.hist[key]; ccHistSave();
-        var t = CC.tgt === 'fa' ? 'fa' : 'cc';
+        var t = CC.tgt;
         var op = { t: 'del', ref: r.ref, lot: r.lot || '' };
         if (t === 'fa') { op.sid = r.sid; } else { op.loc = r.loc; }
         ccEnqueue(t, op);
