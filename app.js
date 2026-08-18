@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.37';
+  var APPVER = '4.38';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1432,9 +1432,10 @@ var GLOSS = {
     ct:  { id: 'ct',  name: 'CT Team',     enc: 'cc.enc.json',     tgt: 'cc',     gate: 'CT team access \u2014 enter the password.', fa: true },
     buf: { id: 'buf', name: 'Buffalo',     enc: 'cc-buf.enc.json', tgt: 'buf_cc', gate: 'Buffalo team access \u2014 enter the password.', fa: false },
     la:  { id: 'la',  name: 'Los Angeles', enc: 'cc-la.enc.json',  tgt: 'la_cc',  gate: 'Los Angeles team access \u2014 enter the password.', fa: false },
-    syr: { id: 'syr', name: 'Syracuse',    enc: 'cc-syr.enc.json', tgt: 'syr_cc', gate: 'Syracuse team access \u2014 enter the password.', fa: false }
+    syr: { id: 'syr', name: 'Syracuse',    enc: 'cc-syr.enc.json', tgt: 'syr_cc', gate: 'Syracuse team access \u2014 enter the password.', fa: false },
+    ri:  { id: 'ri',  name: 'Rhode Island', enc: 'cc-ri.enc.json',  tgt: 'ri_cc',  gate: 'Rhode Island team access \u2014 enter the password.', fa: false }
   };
-  var TORDER = ['buf', 'la', 'syr'];
+  var TORDER = ['buf', 'la', 'ri', 'syr'];
   CC.terr = 'ct';
   var TDET = {};
   function terrTgt() { return TERR[CC.terr].tgt; }
@@ -2617,7 +2618,7 @@ var GLOSS = {
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
     if (h === '#/fa') { terrSet('ct'); return faScreen(); }
     if (h === '#/teams') return teamsScreen();
-    if ((m = h.match(/^#\/team\/(buf|la|syr)(\/cc)?$/))) { terrSet(m[1]); return m[2] ? ccScreen() : ctScreen(); }
+    if ((m = h.match(/^#\/team\/(buf|la|ri|syr)(\/cc)?$/))) { terrSet(m[1]); return m[2] ? ccScreen() : ctScreen(); }
     if ((m = h.match(/^#\/top\/(implants|arthroscopy)$/))) return topScreen(m[1]);
     if ((m = h.match(/^#\/cat\/(.+)$/))) return catScreen(dec(m[1]));
     if ((m = h.match(/^#\/dgrp\/(.+)$/))) return dispGroupScreen(dec(m[1]));
