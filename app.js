@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.36';
+  var APPVER = '4.37';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1454,7 +1454,7 @@ var GLOSS = {
     if (!st.dev) st.dev = ccLS('tbx_' + t + '_dev') || '';
     return st.dev;
   }
-  function ccSY(t) { var y = SY[t]; if (!y) y = SY[t] = { timer: null, inflight: false, retry: 0, lastOk: 0 }; return y; }
+  function ccSY(t) { var y = SY[t]; if (!y) y = SY[t] = { timer: null, inflight: false, retry: 0, lastOk: 0, inAt: 0 }; return y; }
   function terrSet(id) {
     if (!TERR[id] || CC.terr === id) return;
     var oldTgt = terrTgt();
@@ -1586,8 +1586,12 @@ var GLOSS = {
     var y = ccSY(t), st = ccSyncSt(t), ep = ccEndpoint(t);
     var dv = t === 'fa' ? ccDevFor('cc') : ccDevFor(t);
     if (!ep || !dv) { ccPill(); return; }
-    if (y.inflight || !st.ops.length) { ccPill(); return; }
-    y.inflight = true; ccPill();
+    if (y.inflight) {
+      if (Date.now() - (y.inAt || 0) < 25000) { ccPill(); ccFlushSoon(t, 6000); return; }
+      y.inflight = false;
+    }
+    if (!st.ops.length) { ccPill(); return; }
+    y.inflight = true; y.inAt = Date.now(); ccPill();
     var batch = st.ops.slice(0, keep ? 25 : 150);
     fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: dv, ops: batch, norows: 1 }), keepalive: !!keep })
       .then(function (r) { return r.json(); })
@@ -1647,7 +1651,7 @@ var GLOSS = {
     ccFlushSoon(terrTgt(), 300); ccFlushSoon('fa', 600);
     ccAllCcTgts().forEach(function (tg, i) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 900 + i * 300); });
   });
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush(terrTgt(), true); ccFlush('fa', true); ccAllCcTgts().forEach(function (tg) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlush(tg, true); }); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') { ccWake(); ccBeepInit(); setTimeout(function () { ccCamRecover(); }, 500); } ccFlushSoon(terrTgt(), 800); ccFlushSoon('fa', 1200); ccAllCcTgts().forEach(function (tg, i2) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 1600 + i2 * 300); }); } catch (e2) {} } });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush(terrTgt(), true); ccFlush('fa', true); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') { ccWake(); ccBeepInit(); setTimeout(function () { ccCamRecover(); }, 500); } ccFlushSoon(terrTgt(), 800); ccFlushSoon('fa', 1200); ccAllCcTgts().forEach(function (tg, i2) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 1600 + i2 * 300); }); } catch (e2) {} } });
   window.addEventListener('pagehide', function () { try { ccSaveBaseNow(terrTgt()); ccSaveBaseNow('fa'); } catch (e) {} });
   // Boot: if this phone has queued scans from a previous session, load creds and push them out silently.
   // Deferred a tick so the whole module (incl. FA below) has evaluated first.
