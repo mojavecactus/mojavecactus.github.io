@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.40';
+  var APPVER = '4.41';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2267,11 +2267,18 @@ var GLOSS = {
       '<div class="cc-sh-h">Manual add</div>' +
       '<input id="cc-mpn" class="cc-in" type="text" autocomplete="off" placeholder="Part number">' +
       '<input id="cc-mlot" class="cc-in" type="text" autocomplete="off" placeholder="Lot">' +
+      '<div class="cc-qlabel">Quantity</div>' +
+      '<div class="cc-qtyrow"><button id="cc-mqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
+        '<input id="cc-mqv" class="cc-qin" type="number" inputmode="numeric" min="1" value="1">' +
+        '<button id="cc-mqp" class="cc-qbtn" aria-label="Increase">+</button></div>' +
       '<div id="cc-mhint" class="cc-hint" hidden>Part number and lot are both required.</div>' +
       '<div class="cc-sh-row"><button id="cc-madd" class="cc-btn">Add to count</button><button id="cc-mx" class="cc-mini">Cancel</button></div>';
     var pnEl = document.getElementById('cc-mpn'), lotEl = document.getElementById('cc-mlot'), hintEl = document.getElementById('cc-mhint');
     function clearNeed() { hintEl.hidden = true; pnEl.classList.remove('cc-need'); lotEl.classList.remove('cc-need'); }
     pnEl.addEventListener('input', clearNeed); lotEl.addEventListener('input', clearNeed);
+    var qvEl = document.getElementById('cc-mqv');
+    document.getElementById('cc-mqm').addEventListener('click', function () { qvEl.value = Math.max(1, (+qvEl.value || 1) - 1); });
+    document.getElementById('cc-mqp').addEventListener('click', function () { qvEl.value = Math.max(1, (+qvEl.value || 0) + 1); });
     document.getElementById('cc-madd').addEventListener('click', function () {
       var v = nrm(pnEl.value);
       var lot = lotEl.value.trim();
@@ -2286,7 +2293,8 @@ var GLOSS = {
       var desc = '', fam = '', ref = v;
       if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
       sheet.hidden = true; CC.running = true; ccRearm();
-      ccAdd(ref, desc, fam, lot, ''); ccSchedule(400);
+      var q = Math.max(1, Math.round(+qvEl.value || 1));
+      ccAdd(ref, desc, fam, lot, '', q); ccSchedule(400);
     });
     document.getElementById('cc-mx').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccRearm(); ccSchedule(300); });
   }
