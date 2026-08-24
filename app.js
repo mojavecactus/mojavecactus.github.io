@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.41';
+  var APPVER = '4.50';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1437,12 +1437,31 @@ var GLOSS = {
     wm:  { id: 'wm',  name: 'Western Mass', enc: 'cc-wm.enc.json',  tgt: 'wm_cc',  gate: 'Western Mass team access \u2014 enter the password.', fa: false }
   };
   var TORDER = ['buf', 'la', 'ri', 'syr', 'wm'];
+  // ---- Hub: self-serve territories (served by the syksmtoolbox Apps Script) ----
+  var HUB = { url: '', key: '' };
+  try { if (window.TOOLBOX && window.TOOLBOX.hub && window.TOOLBOX.hub.url) HUB = window.TOOLBOX.hub; } catch (eHub) {}
+  var HORDER = [];
+  var GMRE = /^[^@\s]+@(gmail|googlemail)\.com$/i;
+  function hubOn() { return !!(HUB && HUB.url); }
+  function hubTerrAdd(t, save) {
+    if (!t || !t.slug) return;
+    if (TERR[t.slug]) { if (t.name) TERR[t.slug].name = t.name; return; }
+    TERR[t.slug] = { id: t.slug, name: t.name || t.slug, enc: '', tgt: t.slug + '_cc', gate: (t.name || t.slug) + ' team access \u2014 enter the password.', fa: false, hub: true };
+    HORDER.push(t.slug);
+    if (save) hubTerrSave();
+  }
+  function hubTerrSave() { try { localStorage.setItem('tbx_hubterrs', JSON.stringify(HORDER.map(function (k) { return { slug: k, name: TERR[k].name }; }))); } catch (e) {} }
+  (function () { try { (JSON.parse(localStorage.getItem('tbx_hubterrs') || '[]') || []).forEach(function (t) { hubTerrAdd(t, false); }); } catch (e) {} })();
+  function hubCall(action, body) {
+    var b = body || {}; b.action = action; b.key = HUB.key;
+    return fetch(HUB.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(b) }).then(function (r) { return r.json(); });
+  }
   CC.terr = 'ct';
   var TDET = {};
   function terrTgt() { return TERR[CC.terr].tgt; }
   function terrKey(suf) { return 'tbx_' + terrTgt() + suf; }
   function terrByTgt(t) { for (var k in TERR) if (TERR[k].tgt === t) return TERR[k]; return TERR.ct; }
-  function ccAllCcTgts() { var a = ['cc']; TORDER.forEach(function (k) { a.push(TERR[k].tgt); }); return a; }
+  function ccAllCcTgts() { var a = ['cc']; TORDER.concat(HORDER).forEach(function (k) { a.push(TERR[k].tgt); }); return a; }
   function ccPendingLS(t) { try { return (localStorage.getItem('tbx_' + t + '_ops') || '[]') !== '[]'; } catch (e) { return false; } }
   function ccCredsFor(t) {
     var st = ccSyncSt(t);
@@ -1667,7 +1686,7 @@ var GLOSS = {
         }
         ccFlushSoon('cc', 2000); ccFlushSoon('fa', 3000);
       }
-      TORDER.forEach(function (k, i) {
+      TORDER.concat(HORDER).forEach(function (k, i) {
         var tg = TERR[k].tgt;
         if (tg !== terrTgt() && ccPendingLS(tg) && ccLS('tbx_' + tg)) ccFlushSoon(tg, 4000 + i * 500);
       });
@@ -1714,17 +1733,32 @@ var GLOSS = {
     function tryPw() {
       var v = pw.value; if (!v) return;
       go.disabled = true; go.textContent = 'Checking\u2026';
+      function okc(creds) {
+        CC.creds = creds;
+        ccLS(terrKey(''), JSON.stringify(CC.creds));
+        if (creds.devices && creds.devices.length) ccLS(terrKey('_roster'), JSON.stringify(creds.devices));
+        var nx = CC.ret || ccScreen; CC.ret = null; nx();
+      }
+      function bad(msg) {
+        go.disabled = false; go.textContent = 'Unlock';
+        var er = document.getElementById('cc-err'); if (er) { er.textContent = msg || 'Wrong password.'; er.hidden = false; }
+      }
+      if (TR.hub) {
+        if (!hubOn()) { bad('Update the app first \u2014 tap Check for updates on the home screen.'); return; }
+        hubCall('join', { slug: TR.id, pw: v }).then(function (j) {
+          if (j && j.ok && j.creds) { if (j.name && j.name !== TERR[TR.id].name) { TERR[TR.id].name = j.name; hubTerrSave(); } okc(j.creds); return; }
+          bad(j && j.err === 'off' ? 'This territory is paused \u2014 check with Nate.' : 'Wrong password.');
+        }).catch(function () { bad('Couldn\u2019t reach the server \u2014 check signal and try again.'); });
+        return;
+      }
       fetch(TR.enc).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (P) {
         return crypto.subtle.importKey('raw', new TextEncoder().encode(v), 'PBKDF2', false, ['deriveKey'])
           .then(function (km) { return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: ccB64d(P.salt), iterations: P.it }, km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']); })
           .then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: ccB64d(P.iv) }, key, ccB64d(P.ct)); });
       }).then(function (buf) {
-        CC.creds = JSON.parse(new TextDecoder().decode(buf));
-        ccLS(terrKey(''), JSON.stringify(CC.creds));
-        var nx = CC.ret || ccScreen; CC.ret = null; nx();
+        okc(JSON.parse(new TextDecoder().decode(buf)));
       }).catch(function () {
-        go.disabled = false; go.textContent = 'Unlock';
-        var er = document.getElementById('cc-err'); if (er) er.hidden = false;
+        bad();
       });
     }
     go.addEventListener('click', tryPw);
@@ -2413,11 +2447,14 @@ var GLOSS = {
       '<div class="card cc-card">' +
         '<h2 class="cc-h">' + esc(TR.name) + '</h2>' +
         '<div class="cc-sub">Device: <b>' + esc(CC.dev) + '</b> <button id="ct-devchg" class="cc-link" type="button">change</button></div>' +
+        (TR.hub ? '<div class="cc-sub"><button id="ct-mg" class="cc-link" type="button">Manage this team</button></div>' : '') +
         (ccLearnCount() ? '<div class="cc-sub">' + ccLearnCount() + ' new barcode' + (ccLearnCount() > 1 ? 's' : '') + ' learned on this phone <button id="ct-learn" class="cc-link" type="button">copy</button></div>' : '') +
         '<button id="ct-cc" class="ct-big">Cycle Count<span>Trunk &amp; closet counts by location</span></button>' +
         (TR.fa ? '<button id="ct-fa" class="ct-big">F&amp;A Inventory<span>Product handed off to the Foot &amp; Ankle team</span></button>' : '') +
       '</div>');
     document.getElementById('ct-cc').addEventListener('click', function () { location.hash = TR.id === 'ct' ? '#/cc' : '#/team/' + TR.id + '/cc'; });
+    var mg = document.getElementById('ct-mg');
+    if (mg) mg.addEventListener('click', function () { location.hash = '#/team/' + TR.id + '/manage'; });
     var fb = document.getElementById('ct-fa');
     if (fb) fb.addEventListener('click', function () { location.hash = '#/fa'; });
     var lb = document.getElementById('ct-learn');
@@ -2436,6 +2473,208 @@ var GLOSS = {
       CC.dev = ''; CC.ret = ctScreen; ccDevice();
     });
   }
+  function signupScreen() {
+    setTitle('New Territory', ''); backBtn.hidden = false;
+    ccStop();
+    CC.view = 'signup';
+    if (!hubOn()) { render('<div class="card cc-card"><h2 class="cc-h">New Territory</h2><div class="cc-sub">Update the app first \u2014 tap Check for updates on the home screen, then come back.</div></div>'); return; }
+    render(
+      '<div class="card cc-card">' +
+        '<h2 class="cc-h">New Territory</h2>' +
+        '<div class="cc-sub">Set your team up with its own cycle count. This creates a Google Sheet on the ToolBox account and shares it with everyone below.</div>' +
+        '<input id="su-name" class="cc-in" type="text" autocomplete="off" placeholder="Your name">' +
+        '<input id="su-email" class="cc-in" type="email" autocomplete="off" autocapitalize="off" placeholder="Your Gmail (no Stryker email)">' +
+        '<input id="su-terr" class="cc-in" type="text" autocomplete="off" placeholder="Territory name (e.g. Boston)">' +
+        '<input id="su-pw" class="cc-in" type="password" autocomplete="new-password" placeholder="Territory password (6+ characters)">' +
+        '<input id="su-pw2" class="cc-in" type="password" autocomplete="new-password" placeholder="Confirm password">' +
+        '<div id="su-rows"></div>' +
+        '<button id="su-add" class="cc-link" type="button" style="margin-top:10px">\u2795 Add a teammate</button>' +
+        '<div id="su-err" class="cc-err" hidden></div>' +
+        '<button id="su-go" class="cc-btn">Done \u2014 create my territory</button>' +
+        '<div class="cc-sub2">Everyone gets edit access to the sheet, and each phone gets its own tab.</div>' +
+      '</div>');
+    var rowsEl = document.getElementById('su-rows'), go = document.getElementById('su-go');
+    document.getElementById('su-add').addEventListener('click', function () {
+      var d = document.createElement('div');
+      d.innerHTML = '<div class="su-row">' +
+        '<div class="cc-sub" style="margin-top:10px">Teammate <button class="cc-link" type="button" data-del="1">remove</button></div>' +
+        '<input class="cc-in su-nm" type="text" autocomplete="off" placeholder="Teammate name">' +
+        '<input class="cc-in su-em" type="email" autocomplete="off" autocapitalize="off" placeholder="Teammate Gmail">' +
+      '</div>';
+      rowsEl.appendChild(d.firstChild);
+    });
+    rowsEl.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('[data-del]') : null; if (!b) return;
+      var r = b.closest('.su-row'); if (r) r.remove();
+    });
+    function serr(m, el) {
+      var e2 = document.getElementById('su-err'); e2.textContent = m; e2.hidden = false;
+      if (el) el.focus();
+      go.disabled = false; go.textContent = 'Done \u2014 create my territory';
+    }
+    go.addEventListener('click', function () {
+      document.getElementById('su-err').hidden = true;
+      var name = document.getElementById('su-name').value.trim();
+      var email = document.getElementById('su-email').value.trim().toLowerCase();
+      var terr = document.getElementById('su-terr').value.trim();
+      var pw1 = document.getElementById('su-pw').value, pw2 = document.getElementById('su-pw2').value;
+      if (!name) return serr('Enter your name.', document.getElementById('su-name'));
+      if (/stryker/i.test(email)) return serr('Use a personal Gmail \u2014 Stryker emails can\u2019t be used here.', document.getElementById('su-email'));
+      if (!GMRE.test(email)) return serr('Enter a valid Gmail address.', document.getElementById('su-email'));
+      if (terr.length < 2) return serr('Enter a territory name.', document.getElementById('su-terr'));
+      if (pw1.length < 6) return serr('Password needs at least 6 characters.', document.getElementById('su-pw'));
+      if (pw1 !== pw2) return serr('Passwords don\u2019t match.', document.getElementById('su-pw2'));
+      var members = [], dup = {}; dup[email] = 1; var badf = null;
+      Array.prototype.forEach.call(rowsEl.querySelectorAll('.su-row'), function (r) {
+        if (badf) return;
+        var n2 = r.querySelector('.su-nm').value.trim(), m2 = r.querySelector('.su-em').value.trim().toLowerCase();
+        if (!n2) { badf = ['Every teammate needs a name.', r.querySelector('.su-nm')]; return; }
+        if (/stryker/i.test(m2)) { badf = ['Teammates need personal Gmails \u2014 no Stryker emails.', r.querySelector('.su-em')]; return; }
+        if (!GMRE.test(m2)) { badf = ['Enter a valid Gmail for every teammate.', r.querySelector('.su-em')]; return; }
+        if (dup[m2]) { badf = [m2 + ' is entered twice.', r.querySelector('.su-em')]; return; }
+        dup[m2] = 1; members.push({ name: n2, email: m2 });
+      });
+      if (badf) return serr(badf[0], badf[1]);
+      go.disabled = true; go.textContent = 'Creating your Google Sheet\u2026';
+      hubCall('signup', { terr: terr, pw: pw1, owner: { name: name, email: email }, members: members }).then(function (j) {
+        if (!j || !j.ok) {
+          if (j && j.err === 'dupname') return serr('That territory name is already taken \u2014 try another.', document.getElementById('su-terr'));
+          if (j && String(j.err).indexOf('dupemail:') === 0) return serr(String(j.err).slice(9) + ' is already on another territory.');
+          if (j && j.err === 'cap') return serr('Signups are capped for today \u2014 try again tomorrow.');
+          if (j && j.err === 'busy') return serr('The server is busy \u2014 try again in a few seconds.');
+          return serr('Couldn\u2019t create the territory \u2014 try again, or text Nate.');
+        }
+        hubTerrAdd({ slug: j.slug, name: j.name }, true);
+        ccLS('tbx_' + j.tgt, JSON.stringify(j.creds));
+        ccLS('tbx_' + j.tgt + '_dev', j.selfDev);
+        ccLS('tbx_' + j.tgt + '_roster', JSON.stringify(j.creds.devices || []));
+        location.hash = '#/team/' + j.slug + '/cc';
+      }).catch(function () { serr('Couldn\u2019t reach the server \u2014 check signal and try again.'); });
+    });
+    setTimeout(function () { var f = document.getElementById('su-name'); if (f) f.focus(); }, 60);
+  }
+  function manageScreen() {
+    var TR = TERR[CC.terr];
+    setTitle('Manage \u2014 ' + TR.name, ''); backBtn.hidden = false;
+    ccStop();
+    CC.view = 'manage';
+    var mpw = '';
+    function mcall(body, btn, done) {
+      body.slug = TR.id; body.pw = mpw;
+      if (btn) btn.disabled = true;
+      hubCall('edit', body).then(function (j) {
+        if (btn) btn.disabled = false;
+        if (j && j.ok) {
+          if (j.devices) ccLS('tbx_' + TR.tgt + '_roster', JSON.stringify(j.devices));
+          if (body.op === 'setpw') mpw = body.newpw;
+          done(null, j);
+        } else done((j && j.err) || 'server', j);
+      }).catch(function () { if (btn) btn.disabled = false; done('net'); });
+    }
+    function eMsg(err) {
+      if (err === 'dupname') return 'That territory name is taken.';
+      if (String(err).indexOf('dupemail:') === 0) return String(err).slice(9) + ' is already on another territory.';
+      if (String(err).indexOf('bad:email') === 0) return 'That doesn\u2019t look like a valid Gmail (no Stryker emails).';
+      if (err === 'bad:pw') return 'Password needs 6\u201364 characters.';
+      if (err === 'owner') return 'The owner can\u2019t be removed.';
+      if (err === 'net') return 'Couldn\u2019t reach the server \u2014 try again.';
+      return 'That didn\u2019t work \u2014 try again.';
+    }
+    function show(j) {
+      var P = j.profile;
+      TERR[TR.id].name = P.name; hubTerrSave();
+      render(
+        '<div class="card cc-card">' +
+          '<h2 class="cc-h">Manage ' + esc(P.name) + '</h2>' +
+          '<div id="mg-msg" class="cc-sub2" hidden></div>' +
+          '<div class="cc-sub" style="margin-top:12px"><b>Territory name</b></div>' +
+          '<input id="mg-name" class="cc-in" type="text" autocomplete="off" value="' + esc(P.name) + '">' +
+          '<button id="mg-rename" class="cc-btn">Save name</button>' +
+          '<div class="cc-sub" style="margin-top:16px"><b>Territory password</b></div>' +
+          '<input id="mg-np1" class="cc-in" type="password" autocomplete="new-password" placeholder="New password (6+ characters)">' +
+          '<input id="mg-np2" class="cc-in" type="password" autocomplete="new-password" placeholder="Confirm new password">' +
+          '<button id="mg-setpw" class="cc-btn">Change password</button>' +
+          '<div class="cc-sub" style="margin-top:16px"><b>Team</b></div>' +
+          '<div id="mg-list"></div>' +
+          '<div class="cc-sub" style="margin-top:12px"><b>Add a teammate</b></div>' +
+          '<input id="mg-an" class="cc-in" type="text" autocomplete="off" placeholder="Name">' +
+          '<input id="mg-ae" class="cc-in" type="email" autocomplete="off" autocapitalize="off" placeholder="Gmail">' +
+          '<button id="mg-add" class="cc-btn">Add teammate</button>' +
+          '<div class="cc-sub2">Adding someone creates their tab and shares the sheet with them. Removing someone keeps their tab and scans.</div>' +
+        '</div>');
+      var lp = document.getElementById('mg-list');
+      lp.innerHTML = P.members.map(function (m2) {
+        var off = m2.status !== 'active';
+        return '<div class="cc-sub mg-m"' + (off ? ' style="opacity:.5"' : '') + '>' + esc(m2.name) + ' \u2014 ' + esc(m2.email) + ' (' + esc(m2.dev) + ')' +
+          (off ? ' \u2014 removed' : ' <button class="cc-link" type="button" data-fx="' + esc(m2.email) + '">fix</button>' + (m2.role === 'owner' ? '' : ' <button class="cc-link" type="button" data-rm="' + esc(m2.email) + '">remove</button>')) +
+        '</div>';
+      }).join('');
+      function msg(t, isErr) { var m3 = document.getElementById('mg-msg'); if (!m3) return; m3.hidden = false; m3.textContent = t; m3.style.color = isErr ? '#e66' : ''; window.scrollTo(0, 0); }
+      document.getElementById('mg-rename').addEventListener('click', function () {
+        var v2 = document.getElementById('mg-name').value.trim();
+        if (v2.length < 2) return msg('Enter a territory name.', true);
+        mcall({ op: 'rename', name: v2 }, this, function (e2, r) { if (e2) return msg(eMsg(e2), true); show(r); });
+      });
+      document.getElementById('mg-setpw').addEventListener('click', function () {
+        var a = document.getElementById('mg-np1').value, b2 = document.getElementById('mg-np2').value;
+        if (a.length < 6) return msg('New password needs at least 6 characters.', true);
+        if (a !== b2) return msg('Passwords don\u2019t match.', true);
+        mcall({ op: 'setpw', newpw: a }, this, function (e2, r) { if (e2) return msg(eMsg(e2), true); show(r); });
+      });
+      document.getElementById('mg-add').addEventListener('click', function () {
+        var n2 = document.getElementById('mg-an').value.trim(), e3 = document.getElementById('mg-ae').value.trim().toLowerCase();
+        if (!n2) return msg('Enter the teammate\u2019s name.', true);
+        if (!GMRE.test(e3) || /stryker/i.test(e3)) return msg('Enter a valid Gmail (no Stryker emails).', true);
+        mcall({ op: 'addmember', name: n2, email: e3 }, this, function (e2, r) { if (e2) return msg(eMsg(e2), true); show(r); });
+      });
+      lp.addEventListener('click', function (e4) {
+        var fx = e4.target.closest ? e4.target.closest('[data-fx]') : null;
+        if (fx) {
+          var row = fx.closest('.mg-m'), oe = fx.dataset.fx, mm = null;
+          P.members.forEach(function (x) { if (x.email === oe) mm = x; });
+          if (!mm) return;
+          row.innerHTML = '<input class="cc-in mg-fn" type="text" value="' + esc(mm.name) + '">' +
+            '<input class="cc-in mg-fe" type="email" autocapitalize="off" value="' + esc(mm.email) + '">' +
+            '<button class="cc-btn mg-fs" type="button">Save</button>';
+          row.querySelector('.mg-fs').addEventListener('click', function () {
+            var n3 = row.querySelector('.mg-fn').value.trim(), e5 = row.querySelector('.mg-fe').value.trim().toLowerCase();
+            if (!n3) return msg('Name can\u2019t be blank.', true);
+            if (!GMRE.test(e5) || /stryker/i.test(e5)) return msg('Enter a valid Gmail (no Stryker emails).', true);
+            mcall({ op: 'editmember', oldEmail: oe, name: n3, email: e5 }, this, function (e2, r) { if (e2) return msg(eMsg(e2), true); show(r); });
+          });
+          return;
+        }
+        var b3 = e4.target.closest ? e4.target.closest('[data-rm]') : null; if (!b3) return;
+        if (!confirm('Remove ' + b3.dataset.rm + ' from ' + P.name + '? Their tab and scans stay on the sheet.')) return;
+        mcall({ op: 'removemember', email: b3.dataset.rm }, b3, function (e2, r) { if (e2) return msg(eMsg(e2), true); show(r); });
+      });
+    }
+    (function ask() {
+      render(
+        '<div class="card cc-card">' +
+          '<h2 class="cc-h">Manage ' + esc(TR.name) + '</h2>' +
+          '<div class="cc-sub">Enter the territory password to edit the team.</div>' +
+          '<input id="mg-pw" class="cc-in" type="password" autocomplete="off" placeholder="Territory password">' +
+          '<div id="mg-err" class="cc-err" hidden>Wrong password.</div>' +
+          '<button id="mg-go" class="cc-btn">Continue</button>' +
+        '</div>');
+      var go = document.getElementById('mg-go'), pw = document.getElementById('mg-pw');
+      function tryIt() {
+        var v = pw.value; if (!v) return;
+        go.disabled = true; go.textContent = 'Checking\u2026';
+        mpw = v;
+        mcall({ op: 'profile' }, go, function (e2, j) {
+          if (!e2) { show(j); return; }
+          go.textContent = 'Continue';
+          var er = document.getElementById('mg-err');
+          if (er) { er.textContent = e2 === 'off' ? 'This territory is paused \u2014 check with Nate.' : (e2 === 'net' ? 'Couldn\u2019t reach the server.' : 'Wrong password.'); er.hidden = false; }
+        });
+      }
+      go.addEventListener('click', tryIt);
+      pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryIt(); });
+      setTimeout(function () { pw.focus(); }, 60);
+    })();
+  }
   function teamsScreen() {
     setTitle('Other Teams', ''); backBtn.hidden = false;
     ccStop();
@@ -2444,12 +2683,43 @@ var GLOSS = {
       '<div class="card cc-card">' +
         '<h2 class="cc-h">Other Teams</h2>' +
         '<div class="cc-sub">Pick a territory to open its cycle count.</div>' +
-        TORDER.map(function (k) { return '<button class="ct-big" data-terr="' + k + '">' + esc(TERR[k].name) + '<span>Cycle counts by location</span></button>'; }).join('') +
+        (hubOn() ? '<input id="tm-q" class="cc-in" type="search" autocomplete="off" placeholder="Search territories\u2026">' +
+          '<button id="tm-new" class="ct-big">\u2795 New Territory<span>Set your team up with its own count sheet</span></button>' : '') +
+        '<div id="tm-list"></div>' +
+        '<div id="tm-note" class="cc-sub2" hidden></div>' +
       '</div>');
+    function items() {
+      var a = TORDER.map(function (k) { return TERR[k]; });
+      HORDER.forEach(function (k) { a.push(TERR[k]); });
+      a.sort(function (x, y) { return x.name.localeCompare(y.name); });
+      return a;
+    }
+    function draw() {
+      var qEl = document.getElementById('tm-q');
+      var q = qEl ? qEl.value.trim().toLowerCase() : '';
+      var el = document.getElementById('tm-list'); if (!el) return;
+      var a = items().filter(function (t) { return !q || t.name.toLowerCase().indexOf(q) >= 0; });
+      el.innerHTML = a.length ? a.map(function (t) { return '<button class="ct-big" data-terr="' + esc(t.id) + '">' + esc(t.name) + '<span>Cycle counts by location</span></button>'; }).join('') : '<div class="cc-empty">No territory matches.</div>';
+    }
+    draw();
+    var qi = document.getElementById('tm-q');
+    if (qi) qi.addEventListener('input', draw);
+    var nb = document.getElementById('tm-new');
+    if (nb) nb.addEventListener('click', function () { location.hash = '#/signup'; });
     document.querySelector('.cc-card').addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('[data-terr]') : null; if (!b) return;
       location.hash = '#/team/' + b.dataset.terr;
     });
+    if (hubOn()) {
+      hubCall('teams').then(function (j) {
+        if (!j || !j.ok || !j.teams) throw 0;
+        j.teams.forEach(function (t) { hubTerrAdd(t, false); });
+        hubTerrSave(); draw();
+      }).catch(function () {
+        var nt = document.getElementById('tm-note');
+        if (nt && !navigator.onLine) { nt.hidden = false; nt.textContent = 'Offline \u2014 showing territories this phone has seen.'; }
+      });
+    }
   }
   function ccHomeCards() {
     var el = document.getElementById('cc-cards'); if (!el) return;
@@ -2620,14 +2890,16 @@ var GLOSS = {
     FILT = {}; CURVIEW = null;
     var fpFilt = qparam(query, 'fp'); if (fpFilt) FILT.fp = fpFilt;
     var gp0 = document.getElementById('glosspanel'); if (gp0) gp0.hidden = true;
-    var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h.indexOf('#/team/') === 0);
+    var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0);
     if (!inCT) ccStop();
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
     if (h === '#/fa') { terrSet('ct'); return faScreen(); }
     if (h === '#/teams') return teamsScreen();
-    if ((m = h.match(/^#\/team\/(buf|la|ri|syr|wm)(\/cc)?$/))) { terrSet(m[1]); return m[2] ? ccScreen() : ctScreen(); }
+    if (h === '#/signup') return signupScreen();
+    if ((m = h.match(/^#\/team\/([a-z0-9]+)\/manage$/))) { if (!TERR[m[1]] || !TERR[m[1]].hub) return teamsScreen(); terrSet(m[1]); return manageScreen(); }
+    if ((m = h.match(/^#\/team\/([a-z0-9]+)(\/cc)?$/))) { if (!TERR[m[1]]) return teamsScreen(); terrSet(m[1]); return m[2] ? ccScreen() : ctScreen(); }
     if ((m = h.match(/^#\/top\/(implants|arthroscopy)$/))) return topScreen(m[1]);
     if ((m = h.match(/^#\/cat\/(.+)$/))) return catScreen(dec(m[1]));
     if ((m = h.match(/^#\/dgrp\/(.+)$/))) return dispGroupScreen(dec(m[1]));
