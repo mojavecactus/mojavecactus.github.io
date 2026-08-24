@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.63';
+  var APPVER = '4.64';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -567,7 +567,40 @@ var GLOSS = {
     el.classList.add('bye');
     setTimeout(function () { el.remove(); }, 260);
   }
+  var ANN_ID = 'cc-launch';
+  function annMetric(ev) {
+    try {
+      if (!hubOn()) return;
+      fetch(HUB.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ key: HUB.key, action: 'metric', ev: ev, ann: ANN_ID, ver: APPVER }) }).catch(function () {});
+    } catch (e) {}
+  }
+  function showAnn() {
+    try {
+      if (!hubOn()) return;
+      if (localStorage.getItem('tbx_ann_' + ANN_ID)) return;
+    } catch (e) { return; }
+    if (document.getElementById('annov')) return;
+    var ov = document.createElement('div');
+    ov.id = 'annov';
+    ov.innerHTML = '<div class="ann-card">' +
+      '<button id="ann-x" aria-label="Dismiss">&#x2715;</button>' +
+      '<div class="ann-t">What&#8217;s new</div>' +
+      '<div class="ann-b">Cycle count scanner functionality now available! Sign up your territory in the Inventory Management tab on the Home Screen. &#8220;How it works&#8221; document located <button id="ann-here" class="ann-link" type="button">HERE</button></div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    function fin(ev) {
+      try {
+        localStorage.setItem('tbx_ann_' + ANN_ID, ev);
+        localStorage.setItem('tbx_wn_seen', String((window.TBX_WN || {}).v || 1));
+      } catch (e) {}
+      annMetric(ev);
+      ov.remove();
+    }
+    document.getElementById('ann-x').addEventListener('click', function () { fin('x'); });
+    document.getElementById('ann-here').addEventListener('click', function () { fin('here'); location.hash = '#/teams/help'; });
+  }
   function showWN() {
+    if (document.getElementById('annov')) return;
     try {
       var WN = window.TBX_WN;
       if (!WN || !WN.items || !WN.items.length) return;
@@ -581,10 +614,11 @@ var GLOSS = {
     el.innerHTML = '<div class="wn-h"><span>What&#8217;s new</span>' +
       '<button id="wndismiss" aria-label="Dismiss">&#x2715;</button></div>' +
       WN2.items.map(function (i, idx) {
-        var inner = '<b>' + esc(i.d) + '</b>' + esc(i.t);
+        var inner = '<b>' + esc(i.d) + '</b>' + esc(i.t) + (i.link ? '<span class="wn-link">' + esc(i.link) + '</span>' : '');
         var cls = 'wn-i' + (idx ? ' wn-x' : '');
-        return i.sku ? '<button class="' + cls + '" data-go="' + pnRoute(i.sku) + '">' + inner + '</button>'
-                     : '<div class="' + cls + '">' + inner + '</div>';
+        var go = i.sku ? pnRoute(i.sku) : (i.go || '');
+        return go ? '<button class="' + cls + '" data-go="' + esc(go) + '">' + inner + '</button>'
+                  : '<div class="' + cls + '">' + inner + '</div>';
       }).join('') +
       (WN2.items.length > 1 ? '<button id="wnmore">Show all ' + WN2.items.length + ' &#x203A;</button>' : '');
     document.body.appendChild(el);
@@ -1005,6 +1039,7 @@ var GLOSS = {
       '<button class="footlink" data-act="checkupd">Check for updates</button></div>');
     content.classList.add('homeview');
     homeBtn.classList.remove('away');
+    showAnn();
     showWN();
   }
   function topScreen(which) {
