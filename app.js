@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.57';
+  var APPVER = '4.58';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1450,6 +1450,18 @@ var GLOSS = {
     HORDER.push(t.slug);
     if (save) hubTerrSave();
   }
+  function hubTerrPrune(liveSlugs) {
+    var gone = 0;
+    for (var i = HORDER.length - 1; i >= 0; i--) {
+      var k = HORDER[i];
+      if (liveSlugs.indexOf(k) < 0) {
+        HORDER.splice(i, 1); delete TERR[k];
+        ['tbx_' + k + '_cc', 'tbx_' + k + '_cc_dev', 'tbx_' + k + '_cc_roster'].forEach(function (kk) { try { localStorage.removeItem(kk); } catch (e) {} });
+        gone++;
+      }
+    }
+    return gone;
+  }
   function hubTerrSave() { try { localStorage.setItem('tbx_hubterrs', JSON.stringify(HORDER.map(function (k) { return { slug: k, name: TERR[k].name }; }))); } catch (e) {} }
   (function () { try { (JSON.parse(localStorage.getItem('tbx_hubterrs') || '[]') || []).forEach(function (t) { hubTerrAdd(t, false); }); } catch (e) {} })();
   function hubCall(action, body) {
@@ -2691,7 +2703,8 @@ var GLOSS = {
     CC.view = 'teams';
     render(
       '<div class="card cc-card" style="position:relative">' +
-        '<button id="tm-help" class="ct-help" type="button" aria-label="How it works">?</button>' +
+        '<button id="tm-help" class="ct-help" type="button" style="left:12px; right:auto" aria-label="How it works">?</button>' +
+        (hubOn() ? '<button id="tm-refresh" class="ct-help" type="button" aria-label="Refresh territories">\u21BB</button>' : '') +
         '<h2 class="cc-h">Territory Cycle Counts</h2>' +
         '<div class="cc-sub">Pick a territory to open its cycle count.</div>' +
         (hubOn() ? '<input id="tm-q" class="cc-in" type="search" autocomplete="off" placeholder="Search territories\u2026">' +
@@ -2723,16 +2736,29 @@ var GLOSS = {
       var b = e.target.closest ? e.target.closest('[data-terr]') : null; if (!b) return;
       location.hash = '#/team/' + b.dataset.terr;
     });
-    if (hubOn()) {
+    var rb = document.getElementById('tm-refresh');
+    function hubRefresh(manual) {
+      if (!hubOn()) return;
+      if (rb && manual) { rb.disabled = true; rb.style.opacity = '.45'; }
+      var done = function () { if (rb) { rb.disabled = false; rb.style.opacity = ''; } };
       hubCall('teams').then(function (j) {
         if (!j || !j.ok || !j.teams) throw 0;
         j.teams.forEach(function (t) { hubTerrAdd(t, false); });
-        hubTerrSave(); draw();
-      }).catch(function () {
+        var gone = hubTerrPrune(j.teams.map(function (t) { return t.slug; }));
+        hubTerrSave(); draw(); done();
         var nt = document.getElementById('tm-note');
-        if (nt && !navigator.onLine) { nt.hidden = false; nt.textContent = 'Offline \u2014 showing territories this phone has seen.'; }
+        if (nt && manual) { nt.hidden = false; nt.textContent = gone ? 'Updated \u2014 removed ' + gone + ' old territor' + (gone === 1 ? 'y' : 'ies') + '.' : 'Up to date.'; }
+      }).catch(function () {
+        done();
+        var nt = document.getElementById('tm-note');
+        if (nt) {
+          if (!navigator.onLine) { nt.hidden = false; nt.textContent = 'Offline \u2014 showing territories this phone has seen.'; }
+          else if (manual) { nt.hidden = false; nt.textContent = 'Couldn\u2019t reach the hub \u2014 try again.'; }
+        }
       });
     }
+    if (rb) rb.addEventListener('click', function () { hubRefresh(true); });
+    hubRefresh(false);
   }
   function ccHomeCards() {
     var el = document.getElementById('cc-cards'); if (!el) return;
