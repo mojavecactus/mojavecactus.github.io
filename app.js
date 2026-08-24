@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.55';
+  var APPVER = '4.56';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1445,7 +1445,7 @@ var GLOSS = {
   function hubOn() { return !!(HUB && HUB.url); }
   function hubTerrAdd(t, save) {
     if (!t || !t.slug) return;
-    if (TERR[t.slug]) { if (t.name) TERR[t.slug].name = t.name; return; }
+    if (TERR[t.slug]) { if (t.name) { TERR[t.slug].name = t.name; TERR[t.slug].gate = t.name + ' team access \u2014 enter the password.'; } return; }
     TERR[t.slug] = { id: t.slug, name: t.name || t.slug, enc: '', tgt: t.slug + '_cc', gate: (t.name || t.slug) + ' team access \u2014 enter the password.', fa: false, hub: true };
     HORDER.push(t.slug);
     if (save) hubTerrSave();
