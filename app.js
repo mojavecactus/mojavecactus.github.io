@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.64';
+  var APPVER = '4.65';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2225,7 +2225,8 @@ var GLOSS = {
       '<div class="cc-sh-h">' + esc(ref) + (desc ? ' \u2014 ' + esc(desc) : '') + '</div>' +
       '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot on this barcode') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
       (ccIsExpired(exp) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
-      (lot ? '' : '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box (optional)">') +
+      (lot ? '' : '<div class="cc-sub2">Type the lot from the box \u2014 or Cancel and scan the lot barcode first; it pairs automatically.</div>' +
+        '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box">') +
       (ex ? '<div class="cc-note">Already in list here: <b>' + (+ex.qty || 0) + '</b> \u00b7 this adds on top</div>' : '') +
       '<div class="cc-qlabel">' + (ex ? 'Add quantity' : 'Quantity') + '</div>' +
       '<div class="cc-qtyrow"><button id="cc-cqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
@@ -2235,10 +2236,13 @@ var GLOSS = {
     var qv = document.getElementById('cc-cqv');
     document.getElementById('cc-cqm').onclick = function () { qv.value = Math.max(1, (+qv.value || 1) - 1); };
     document.getElementById('cc-cqp').onclick = function () { qv.value = Math.max(1, (+qv.value || 0) + 1); };
+    var lv0 = document.getElementById('cc-clot');
+    if (lv0) lv0.addEventListener('input', function () { lv0.classList.remove('cc-need'); });
     document.getElementById('cc-cok').onclick = function () {
       var q = Math.max(1, Math.round(+qv.value || 1));
       var lv = document.getElementById('cc-clot');
       var useLot = lot || (lv ? lv.value.trim() : '');
+      if (!useLot) { if (lv) { lv.classList.add('cc-need'); try { lv.focus(); } catch (e4) {} } return; }
       closeModal(); CC.running = true;
       ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (useLot ? ' \u00b7 Lot ' + useLot : ''));
       ccRearm(600); // counted it: allow the very next scan of the same item quickly
@@ -2317,8 +2321,9 @@ var GLOSS = {
       '<div class="cc-sh-row"><button id="cc-uadd" class="cc-btn">Add to count</button><button id="cc-uskip" class="cc-mini">Skip</button></div>';
     document.getElementById('cc-uadd').addEventListener('click', function () {
       var v = nrm(document.getElementById('cc-upn').value);
-      if (!v) { document.getElementById('cc-upn').focus(); return; }
+      if (!v) { var up = document.getElementById('cc-upn'); up.classList.add('cc-need'); up.focus(); return; }
       var lotv = document.getElementById('cc-ulot').value.trim();
+      if (!lotv && !lot) { var ul = document.getElementById('cc-ulot'); ul.classList.add('cc-need'); try { ul.focus(); } catch (e5) {} return; }
       var descv = document.getElementById('cc-udesc').value.trim();
       var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = descv, fam = '', ref = v;
