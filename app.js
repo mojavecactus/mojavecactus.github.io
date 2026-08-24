@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.50';
+  var APPVER = '4.51';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2490,7 +2490,7 @@ var GLOSS = {
         '<div id="su-rows"></div>' +
         '<button id="su-add" class="cc-link" type="button" style="margin-top:10px">\u2795 Add a teammate</button>' +
         '<div id="su-err" class="cc-err" hidden></div>' +
-        '<button id="su-go" class="cc-btn">Done \u2014 create my territory</button>' +
+        '<button id="su-go" class="cc-btn" style="display:block; margin:14px auto 0">Done \u2014 create my territory</button>' +
         '<div class="cc-sub2">Everyone gets edit access to the sheet, and each phone gets its own tab.</div>' +
       '</div>');
     var rowsEl = document.getElementById('su-rows'), go = document.getElementById('su-go');
@@ -2675,16 +2675,23 @@ var GLOSS = {
       setTimeout(function () { pw.focus(); }, 60);
     })();
   }
+  function helpScreen() {
+    setTitle('How it works', ''); backBtn.hidden = false;
+    ccStop();
+    CC.view = 'help';
+    render('<div class="card cc-card"><h2 class="cc-h">How it works</h2><div id="help-body"></div></div>');
+  }
   function teamsScreen() {
     setTitle('Other Teams', ''); backBtn.hidden = false;
     ccStop();
     CC.view = 'teams';
     render(
-      '<div class="card cc-card">' +
+      '<div class="card cc-card" style="position:relative">' +
+        '<button id="tm-help" class="ct-help" type="button" aria-label="How it works">?</button>' +
         '<h2 class="cc-h">Other Teams</h2>' +
         '<div class="cc-sub">Pick a territory to open its cycle count.</div>' +
         (hubOn() ? '<input id="tm-q" class="cc-in" type="search" autocomplete="off" placeholder="Search territories\u2026">' +
-          '<button id="tm-new" class="ct-big">\u2795 New Territory<span>Set your team up with its own count sheet</span></button>' : '') +
+          '<button id="tm-new" class="ct-big ct-gold">\u2795 New Territory<span>Set your team up with its own count sheet</span></button>' : '') +
         '<div id="tm-list"></div>' +
         '<div id="tm-note" class="cc-sub2" hidden></div>' +
       '</div>');
@@ -2706,6 +2713,8 @@ var GLOSS = {
     if (qi) qi.addEventListener('input', draw);
     var nb = document.getElementById('tm-new');
     if (nb) nb.addEventListener('click', function () { location.hash = '#/signup'; });
+    var hb = document.getElementById('tm-help');
+    if (hb) hb.addEventListener('click', function () { location.hash = '#/teams/help'; });
     document.querySelector('.cc-card').addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('[data-terr]') : null; if (!b) return;
       location.hash = '#/team/' + b.dataset.terr;
@@ -2896,6 +2905,7 @@ var GLOSS = {
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
     if (h === '#/fa') { terrSet('ct'); return faScreen(); }
+    if (h === '#/teams/help') return helpScreen();
     if (h === '#/teams') return teamsScreen();
     if (h === '#/signup') return signupScreen();
     if ((m = h.match(/^#\/team\/([a-z0-9]+)\/manage$/))) { if (!TERR[m[1]] || !TERR[m[1]].hub) return teamsScreen(); terrSet(m[1]); return manageScreen(); }
