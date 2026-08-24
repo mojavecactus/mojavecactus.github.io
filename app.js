@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.62';
+  var APPVER = '4.63';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2713,7 +2713,7 @@ var GLOSS = {
     var done = function () { btn.disabled = false; btn.textContent = orig; };
     guidePdfBlob().then(function (b) {
       var f = null;
-      try { f = new File([b], 'SMToolBox_Cycle_Count_Scanner_Guide.pdf', { type: 'application/pdf' }); } catch (e) {}
+      try { f = new File([b], 'SMToolBox Cycle Count Guide.pdf', { type: 'application/pdf' }); } catch (e) {}
       if (f && navigator.canShare && navigator.share && navigator.canShare({ files: [f] })) {
         return navigator.share({ files: [f] }).catch(function (err) {
           if (err && err.name === 'AbortError') return;
@@ -2724,7 +2724,7 @@ var GLOSS = {
     }).catch(function () {
       guidePdfBlob().then(function (b) {
         var u = URL.createObjectURL(b), a = document.createElement('a');
-        a.href = u; a.download = 'SMToolBox_Cycle_Count_Scanner_Guide.pdf';
+        a.href = u; a.download = 'SMToolBox Cycle Count Guide.pdf';
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
         done();
