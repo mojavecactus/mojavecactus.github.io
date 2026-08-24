@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.51';
+  var APPVER = '4.52';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -986,6 +986,10 @@ var GLOSS = {
       '<span class="tico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10.5 8v8M13.5 8v5M13.5 16v0M16.5 8v8"/></svg></span>' +
       '<span class="tl"><b>Scan</b><span class="n">barcode &#8594; card</span></span>' +
       '<span class="ct">&#x203A;</span></button>';
+    tiles += '<button class="tile tile-inv" data-act="otherteams">' +
+      '<span class="tico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#141414" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>' +
+      '<span class="tl"><b>Inventory Management</b><span class="n">team cycle counts</span></span>' +
+      '<span class="ct">&#x203A;</span></button>';
     var fv = favs();
     var favHTML = fv.length ? '<div class="eyebrow">Favorites</div><div class="list">' + fv.map(function (f) {
       var it = f.it || { t: f.label, sku: f.pn };
@@ -1321,7 +1325,7 @@ var GLOSS = {
         '<div style="color:var(--muted); font-size:13px; margin-top:5px">v' + APPVER + ' &middot; data updated ' + esc(D.built) + '</div>' +
         '<div style="margin-top:6px"><button class="footlink" data-act="checkupd">Check for updates</button>' +
         '<span class="footsep">&middot;</span><button class="footlink" data-act="cyclecount">CT Team</button>' +
-        '<span class="footsep">&middot;</span><button class="footlink" data-act="otherteams">Other Teams</button></div>' +
+        '</div>' +
       '</div>' +
       '<div class="grouphead ab-gh">Tips</div>' +
       '<div class="card about-card">' +
@@ -2682,13 +2686,13 @@ var GLOSS = {
     render('<div class="card cc-card"><h2 class="cc-h">How it works</h2><div id="help-body"></div></div>');
   }
   function teamsScreen() {
-    setTitle('Other Teams', ''); backBtn.hidden = false;
+    setTitle('Inventory Management', ''); backBtn.hidden = false;
     ccStop();
     CC.view = 'teams';
     render(
       '<div class="card cc-card" style="position:relative">' +
         '<button id="tm-help" class="ct-help" type="button" aria-label="How it works">?</button>' +
-        '<h2 class="cc-h">Other Teams</h2>' +
+        '<h2 class="cc-h">Inventory Management</h2>' +
         '<div class="cc-sub">Pick a territory to open its cycle count.</div>' +
         (hubOn() ? '<input id="tm-q" class="cc-in" type="search" autocomplete="off" placeholder="Search territories\u2026">' +
           '<button id="tm-new" class="ct-big ct-gold">\u2795 New Territory<span>Set your team up with its own count sheet</span></button>' : '') +
