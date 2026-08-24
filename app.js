@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.59';
+  var APPVER = '4.60';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2694,7 +2694,6 @@ var GLOSS = {
     render('<div class="card cc-card"><h2 class="cc-h">How it works</h2>' +
       '<div class="cc-sub">The full cycle-count guide \u2014 setup, scanning, syncing, and the team sheet.</div>' +
       '<button id="help-view" class="cc-btn" type="button" style="margin-top:14px">View the guide</button>' +
-      '<div class="cc-sub2">Opens right here in the app \u2014 use the back arrow to return. Needs signal the first time.</div>' +
       '<div class="cc-sub2" style="margin-top:12px"><a class="cc-link" href="guide/SMToolBox_Cycle_Count_Scanner_Guide.pdf" target="_blank" rel="noopener">Download as PDF</a> \u2014 for printing or sharing.</div>' +
       '<div id="help-body"></div></div>');
     var hv = document.getElementById('help-view');
