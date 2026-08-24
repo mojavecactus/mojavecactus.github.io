@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.60';
+  var APPVER = '4.61';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2694,10 +2694,42 @@ var GLOSS = {
     render('<div class="card cc-card"><h2 class="cc-h">How it works</h2>' +
       '<div class="cc-sub">The full cycle-count guide \u2014 setup, scanning, syncing, and the team sheet.</div>' +
       '<button id="help-view" class="cc-btn" type="button" style="margin-top:14px">View the guide</button>' +
-      '<div class="cc-sub2" style="margin-top:12px"><a class="cc-link" href="guide/SMToolBox_Cycle_Count_Scanner_Guide.pdf" target="_blank" rel="noopener">Download as PDF</a> \u2014 for printing or sharing.</div>' +
+      '<div class="cc-sub2" style="margin-top:12px"><button id="help-dl" class="cc-link" type="button">Download as PDF</button> \u2014 save it to Files or share it.</div>' +
       '<div id="help-body"></div></div>');
     var hv = document.getElementById('help-view');
     if (hv) hv.addEventListener('click', function () { location.hash = '#/teams/help/view'; });
+    var hd = document.getElementById('help-dl');
+    if (hd) hd.addEventListener('click', function () { guideShare(hd); });
+    try { guidePdfBlob(); } catch (e) {}
+  }
+  var GUIDE_PDF = 'guide/SMToolBox_Cycle_Count_Scanner_Guide.pdf';
+  function guidePdfBlob() {
+    if (!window.__gpdf) window.__gpdf = fetch(GUIDE_PDF).then(function (r) { if (!r.ok) throw 0; return r.blob(); }).catch(function (e) { window.__gpdf = null; throw e; });
+    return window.__gpdf;
+  }
+  function guideShare(btn) {
+    var orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Preparing\u2026';
+    var done = function () { btn.disabled = false; btn.textContent = orig; };
+    guidePdfBlob().then(function (b) {
+      var f = null;
+      try { f = new File([b], 'SMToolBox_Cycle_Count_Scanner_Guide.pdf', { type: 'application/pdf' }); } catch (e) {}
+      if (f && navigator.canShare && navigator.share && navigator.canShare({ files: [f] })) {
+        return navigator.share({ files: [f], title: 'SM ToolBox Cycle Count Guide' }).catch(function (err) {
+          if (err && err.name === 'AbortError') return;
+          throw err;
+        }).then(done);
+      }
+      throw 0;
+    }).catch(function () {
+      guidePdfBlob().then(function (b) {
+        var u = URL.createObjectURL(b), a = document.createElement('a');
+        a.href = u; a.download = 'SMToolBox_Cycle_Count_Scanner_Guide.pdf';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+        done();
+      }).catch(function () { done(); location.href = GUIDE_PDF; });
+    });
   }
   function helpViewScreen() {
     setTitle('How it works', ''); backBtn.hidden = false;
@@ -2706,7 +2738,10 @@ var GLOSS = {
     var pages = '';
     for (var i = 1; i <= 6; i++) pages += '<img src="guide/pages/p' + i + '.webp" loading="lazy" alt="Guide page ' + i + '" style="display:block; width:100%; border-radius:10px; margin:0 0 12px; background:#fff">';
     render('<div style="max-width:560px; margin:10px auto; padding:0 10px">' + pages +
-      '<div class="cc-sub2" style="text-align:center; margin:6px 0 20px"><a class="cc-link" href="guide/SMToolBox_Cycle_Count_Scanner_Guide.pdf" target="_blank" rel="noopener">Download as PDF</a></div></div>');
+      '<div class="cc-sub2" style="text-align:center; margin:6px 0 20px"><button id="hv-dl" class="cc-link" type="button">Download as PDF</button></div></div>');
+    var hd2 = document.getElementById('hv-dl');
+    if (hd2) hd2.addEventListener('click', function () { guideShare(hd2); });
+    try { guidePdfBlob(); } catch (e) {}
   }
   function teamsScreen() {
     setTitle('Territory Cycle Counts', ''); backBtn.hidden = false;
