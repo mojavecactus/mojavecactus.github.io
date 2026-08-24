@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.65';
+  var APPVER = '4.66';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2225,8 +2225,7 @@ var GLOSS = {
       '<div class="cc-sh-h">' + esc(ref) + (desc ? ' \u2014 ' + esc(desc) : '') + '</div>' +
       '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot on this barcode') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
       (ccIsExpired(exp) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
-      (lot ? '' : '<div class="cc-sub2">Type the lot from the box \u2014 or Cancel and scan the lot barcode first; it pairs automatically.</div>' +
-        '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box">') +
+      (lot ? '' : '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box">') +
       (ex ? '<div class="cc-note">Already in list here: <b>' + (+ex.qty || 0) + '</b> \u00b7 this adds on top</div>' : '') +
       '<div class="cc-qlabel">' + (ex ? 'Add quantity' : 'Quantity') + '</div>' +
       '<div class="cc-qtyrow"><button id="cc-cqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
@@ -2276,7 +2275,7 @@ var GLOSS = {
       '<div class="cc-sh-h">Lot barcode</div>' +
       '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
       (ccIsExpired(exp) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
-      '<div class="cc-sub2">No part number on this barcode. Type it below, or cancel and scan the product barcode \u2014 the lot is kept either way.</div>' +
+      '<div class="cc-sub2">No part number on this barcode \u2014 type it from the box.</div>' +
       '<input id="cc-lpn" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Part number">' +
       '<div class="cc-qlabel">Quantity</div>' +
       '<div class="cc-qtyrow"><button id="cc-lqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
@@ -2301,7 +2300,7 @@ var GLOSS = {
     };
     document.getElementById('cc-lx').onclick = function () {
       ccModalClose(sheet); CC.running = true;
-      ccStatus('Lot held \u2014 scan the product barcode');
+      ccStatus('Cancelled \u2014 keep scanning');
       ccSchedule(300);
     };
   }
