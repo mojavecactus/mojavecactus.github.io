@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.54';
+  var APPVER = '4.55';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -984,7 +984,7 @@ var GLOSS = {
     }).join('');
     tiles += '<button class="tile tile-inv" data-act="otherteams">' +
       '<span class="tico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#141414" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>' +
-      '<span class="tl"><b>Territory Cycle Counts</b><span class="n">pick your team</span></span>' +
+      '<span class="tl"><b>Inventory Management</b><span class="n">Territory Cycle Counts</span></span>' +
       '<span class="ct">&#x203A;</span></button>';
     var fv = favs();
     var favHTML = fv.length ? '<div class="eyebrow">Favorites</div><div class="list">' + fv.map(function (f) {
