@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.58';
+  var APPVER = '4.59';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2693,9 +2693,21 @@ var GLOSS = {
     CC.view = 'help';
     render('<div class="card cc-card"><h2 class="cc-h">How it works</h2>' +
       '<div class="cc-sub">The full cycle-count guide \u2014 setup, scanning, syncing, and the team sheet.</div>' +
-      '<a class="cc-btn" style="display:inline-block; text-decoration:none; margin-top:14px" href="guide/SMToolBox_Cycle_Count_Scanner_Guide.pdf" target="_blank" rel="noopener">Open the guide (PDF)</a>' +
-      '<div class="cc-sub2">Opens in a new tab \u2014 you can save or share it from there. Needs signal the first time.</div>' +
+      '<button id="help-view" class="cc-btn" type="button" style="margin-top:14px">View the guide</button>' +
+      '<div class="cc-sub2">Opens right here in the app \u2014 use the back arrow to return. Needs signal the first time.</div>' +
+      '<div class="cc-sub2" style="margin-top:12px"><a class="cc-link" href="guide/SMToolBox_Cycle_Count_Scanner_Guide.pdf" target="_blank" rel="noopener">Download as PDF</a> \u2014 for printing or sharing.</div>' +
       '<div id="help-body"></div></div>');
+    var hv = document.getElementById('help-view');
+    if (hv) hv.addEventListener('click', function () { location.hash = '#/teams/help/view'; });
+  }
+  function helpViewScreen() {
+    setTitle('How it works', ''); backBtn.hidden = false;
+    ccStop();
+    CC.view = 'helpview';
+    var pages = '';
+    for (var i = 1; i <= 6; i++) pages += '<img src="guide/pages/p' + i + '.webp" loading="lazy" alt="Guide page ' + i + '" style="display:block; width:100%; border-radius:10px; margin:0 0 12px; background:#fff">';
+    render('<div style="max-width:560px; margin:10px auto; padding:0 10px">' + pages +
+      '<div class="cc-sub2" style="text-align:center; margin:6px 0 20px"><a class="cc-link" href="guide/SMToolBox_Cycle_Count_Scanner_Guide.pdf" target="_blank" rel="noopener">Download as PDF</a></div></div>');
   }
   function teamsScreen() {
     setTitle('Territory Cycle Counts', ''); backBtn.hidden = false;
@@ -2935,6 +2947,7 @@ var GLOSS = {
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
     if (h === '#/fa') { terrSet('ct'); return faScreen(); }
+    if (h === '#/teams/help/view') return helpViewScreen();
     if (h === '#/teams/help') return helpScreen();
     if (h === '#/teams') return teamsScreen();
     if (h === '#/signup') return signupScreen();
