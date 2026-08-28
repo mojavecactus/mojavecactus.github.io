@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.75';
+  var APPVER = '4.76';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3210,7 +3210,19 @@ var GLOSS = {
       '.a2top{position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:4/3;margin-bottom:10px}' +
       '.a2top video{width:100%;height:100%;object-fit:cover;display:block}' +
       '.a2hint{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;background:rgba(0,0,0,.55);color:#ddd;font-size:12px;text-align:center}' +
-      '.a2man{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px 12px;margin:8px 0}';
+      '.a2man{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px 12px;margin:8px 0}' +
+      '.h-ev{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px 12px;margin:8px 0;cursor:pointer}' +
+      '.h-ev.open{background:rgba(255,255,255,.07)}' +
+      '.h-top{display:flex;justify-content:space-between;align-items:center;gap:8px}' +
+      '.h-ty{font-size:15px;font-weight:700}' +
+      '.h-sub{margin-top:3px;font-size:12px;color:#9a9a9a}' +
+      '.h-cnt{font-size:12px;color:#cfcfcf;white-space:nowrap}' +
+      '.h-lines{margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px}' +
+      '.h-ln{display:flex;justify-content:space-between;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.05)}' +
+      '.h-ln:last-child{border-bottom:0}' +
+      '.h-lref{min-width:0}.h-lref b{display:block}.h-lref span{font-size:11px;color:#9a9a9a}' +
+      '.h-act{margin-top:2px}' +
+      '.h-dim{opacity:.5}';
     document.head.appendChild(st);
   }
   function expNorm(e) { e = String(e == null ? '' : e).trim(); var m = e.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/); if (!m) return e; return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + (m[3] || '1')).slice(-2); }
@@ -3352,7 +3364,7 @@ var GLOSS = {
       '<div class="card cc-card">' +
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<h2 class="cc-h">History</h2>' +
-        '<div class="cc-sub">Append-only ledger \u2014 corrections are new events, never edits.</div>' +
+        '<div class="cc-sub">Grouped by event \u2014 tap any card for line detail. Corrections are new events, never edits.</div>' +
         '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
       '</div>');
     document.getElementById('fa2-rf').addEventListener('click', function () { fa2HistLoad(true); });
@@ -3361,43 +3373,135 @@ var GLOSS = {
   function fa2HistLoad(force) {
     fa2Load(force).then(function (d) {
       if (CC.view !== 'fa2hist') return;
-      var el = document.getElementById('fa2-list'); if (!el) return;
-      var L = d.ledger || [], C = d.ledgerCols || [];
-      if (!L.length) { el.innerHTML = '<div class="cc-empty">No events yet.</div>'; return; }
-      var ix = {}; C.forEach(function (n, i) { ix[n] = i; });
-      function g(r, n) { return ix[n] !== undefined && r[ix[n]] !== undefined && r[ix[n]] !== null ? String(r[ix[n]]) : ''; }
-      var voided = {};
-      L.forEach(function (r) { if (g(r, 'Type') === 'Void' && g(r, 'Reverses')) voided[g(r, 'Reverses')] = 1; });
-      var canVoid = !fa2IsFA();
-      el.innerHTML = L.map(function (r) {
-        var ty = g(r, 'Type'), q = fa2Num(g(r, 'Qty')), eid = g(r, 'EventId');
-        var neg = (ty === 'Used in case' || ty === 'Returned to rep' || ty === 'Sent back to Stryker' || ty === 'Returned to Stryker' || ty === 'External Transfer' || ty === 'Written Off' || ty === 'Returned to CT SM');
-        var sign = ty === 'Adjustment' ? (q > 0 ? '+' : '\u2212') : (neg ? '\u2212' : '+');
-        var pc = ty === 'Adjustment' ? 'busy' : (neg ? 'bad' : 'ok');
-        var bits = [g(r, 'EventDate') || g(r, 'Timestamp').slice(0, 10)];
-        var who = g(r, 'From') || g(r, 'EnteredBy'); if (who) bits.push(who);
-        var where = g(r, 'DropName') || g(r, 'ReceivedBy') || g(r, 'Facility'); if (where) bits.push(where);
-        var xtra = g(r, 'CaseBO') || g(r, 'Tracking') || g(r, 'Reason'); if (xtra) bits.push(xtra);
-        var fl = g(r, 'Flags'); if (fl) bits.push(fl);
-        if (voided[eid]) bits.push('VOIDED');
-        var vlink = (canVoid && ty !== 'Void' && !voided[eid] && eid) ? ' <button type="button" class="cc-link fa2-void" data-eid="' + esc(eid) + '" data-ref="' + esc(g(r, 'Ref')) + '" data-lot="' + esc(g(r, 'Lot')) + '">void</button>' : '';
-        return '<div class="fa2-row' + (voided[eid] ? ' fa2-dim' : '') + '">' +
-          '<div class="fa2-l"><div class="fa2-t">' + esc(ty) + (g(r, 'Ref') ? ' \u2014 ' + esc(g(r, 'Ref')) : '') + (g(r, 'Lot') ? ' <span class="fa2-lot">Lot ' + esc(g(r, 'Lot')) + '</span>' : '') + '</div>' +
-          '<div class="fa2-s">' + esc(bits.join(' \u00b7 ')) + vlink + '</div></div>' +
-          '<div class="fa2-r">' + (ty === 'Void' ? '<span class="cc-pill">VOID</span>' : '<span class="cc-pill ' + pc + '">' + sign + Math.abs(q) + '</span>') + '</div>' +
-        '</div>';
-      }).join('');
-      el.addEventListener('click', function (e) {
-        var b = e.target.closest ? e.target.closest('.fa2-void') : null; if (!b) return;
-        if (!confirm('Void this event? It stays in the ledger, reversed by a Void entry.')) return;
-        fa2Submit([{ type: 'Void', reverses: b.dataset.eid, ref: b.dataset.ref, lot: b.dataset.lot, enteredBy: fa2Who() }], 'void-' + b.dataset.eid, b)
-          .then(function () { fa2HistLoad(true); })
-          .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t save the void \u2014 try again.'); b.disabled = false; b.textContent = 'void'; });
-      });
+      FA2.histD = d;
+      fa2HistDraw();
     }).catch(function () {
       if (CC.view !== 'fa2hist') return;
       var el = document.getElementById('fa2-list');
       if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
+    });
+  }
+  function fa2HistNeg(ty) {
+    return ty === 'Used in case' || ty === 'Returned to rep' || ty === 'Sent back to Stryker' ||
+           ty === 'Returned to Stryker' || ty === 'External Transfer' || ty === 'Written Off' || ty === 'Returned to CT SM';
+  }
+  function fa2HistDraw() {
+    var el = document.getElementById('fa2-list'); if (!el || !FA2.histD) return;
+    var d = FA2.histD, L = d.ledger || [], C = d.ledgerCols || [];
+    if (!L.length) { el.innerHTML = '<div class="cc-empty">No events yet.</div>'; return; }
+    var ix = {}; C.forEach(function (n, i) { ix[n] = i; });
+    function g(r, n) { return ix[n] !== undefined && r[ix[n]] !== undefined && r[ix[n]] !== null ? String(r[ix[n]]) : ''; }
+    var voided = {};
+    L.forEach(function (r) { if (g(r, 'Type') === 'Void' && g(r, 'Reverses')) voided[g(r, 'Reverses')] = 1; });
+    var groups = [], byKey = {};
+    L.forEach(function (r) {
+      var ty = g(r, 'Type');
+      var key = (g(r, 'OpId') || ('e:' + g(r, 'EventId'))) + '\u0001' + ty;
+      var grp = byKey[key];
+      if (!grp) {
+        grp = byKey[key] = {
+          key: key, ty: ty,
+          date: g(r, 'EventDate') || g(r, 'Timestamp').slice(0, 10),
+          ts: g(r, 'Timestamp'),
+          from: g(r, 'From') || g(r, 'EnteredBy'),
+          to: g(r, 'DropName') || g(r, 'ReceivedBy') || g(r, 'Facility') || '',
+          bo: g(r, 'CaseBO'), reason: g(r, 'Reason'), track: g(r, 'Tracking'),
+          rows: [], units: 0
+        };
+        groups.push(grp);
+      }
+      var q = fa2Num(g(r, 'Qty'));
+      var eid = g(r, 'EventId');
+      grp.rows.push({ eid: eid, ref: g(r, 'Ref'), desc: g(r, 'Description'), lot: g(r, 'Lot'), exp: g(r, 'Exp'), qty: q, ty: ty, voided: !!voided[eid], reverses: g(r, 'Reverses'), flags: g(r, 'Flags') });
+      if (!voided[eid] && ty !== 'Void') grp.units += q;
+    });
+    groups.sort(function (x, y) { return x.ts < y.ts ? 1 : x.ts > y.ts ? -1 : 0; });
+    var canFix = !fa2IsFA();
+    el.innerHTML = groups.map(function (grp, gi) {
+      var neg = fa2HistNeg(grp.ty);
+      var sign = grp.ty === 'Void' ? '' : (grp.ty === 'Adjustment' ? (grp.units < 0 ? '\u2212' : '+') : (neg ? '\u2212' : '+'));
+      var pc = grp.ty === 'Void' ? '' : (grp.ty === 'Adjustment' ? 'busy' : (neg ? 'bad' : 'ok'));
+      var allVoid = grp.rows.every(function (x) { return x.voided; });
+      var bits = [grp.date];
+      if (grp.from) bits.push(grp.from + (grp.to ? ' \u2192 ' + grp.to : ''));
+      else if (grp.to) bits.push(grp.to);
+      if (grp.bo) bits.push(grp.bo);
+      if (grp.track) bits.push('Tracking ' + grp.track);
+      if (grp.reason) bits.push(grp.reason);
+      var lines = grp.rows.map(function (x) {
+        return '<div class="h-ln' + (x.voided ? ' h-dim' : '') + '">' +
+          '<span class="h-lref"><b>' + esc(x.ref || (x.ty === 'Void' ? 'Void of ' + x.reverses.slice(0, 8) : '\u2014')) + '</b>' +
+          '<span>' + (x.lot ? 'Lot ' + esc(x.lot) : 'No lot') + (x.exp ? ' \u00b7 Exp ' + esc(x.exp) : '') + (x.desc ? ' \u00b7 ' + esc(x.desc) : '') + (x.voided ? ' \u00b7 VOIDED' : '') + (x.flags ? ' \u00b7 ' + esc(x.flags) : '') + '</span></span>' +
+          '<span class="h-cnt">' + (x.ty === 'Void' ? 'void' : (neg ? '\u2212' : '+') + Math.abs(x.qty)) +
+            (canFix && !x.voided && x.ty !== 'Void' && x.eid ? ' <button type="button" class="cc-link h-fix" data-eid="' + esc(x.eid) + '">File Correction</button>' : '') +
+          '</span>' +
+        '</div>';
+      }).join('');
+      return '<div class="h-ev' + (allVoid ? ' h-dim' : '') + '" data-g="' + gi + '">' +
+        '<div class="h-top"><span class="h-ty">' + esc(grp.ty) + '</span>' +
+          '<span class="cc-pill ' + pc + '">' + (grp.ty === 'Void' ? 'VOID' : sign + Math.abs(grp.units)) + '</span></div>' +
+        '<div class="h-sub">' + esc(bits.join(' \u00b7 ')) + ' \u00b7 ' + grp.rows.length + ' line' + (grp.rows.length > 1 ? 's' : '') + '</div>' +
+        '<div class="h-lines" hidden>' + lines + '</div>' +
+      '</div>';
+    }).join('');
+    FA2.histGroups = groups;
+    el.onclick = function (e) {
+      var fx = e.target.closest ? e.target.closest('.h-fix') : null;
+      if (fx) { e.stopPropagation(); fa2Correct(fx.dataset.eid); return; }
+      var card = e.target.closest ? e.target.closest('.h-ev') : null; if (!card) return;
+      var ln = card.querySelector('.h-lines');
+      ln.hidden = !ln.hidden; card.classList.toggle('open', !ln.hidden);
+    };
+  }
+  function fa2Correct(eid) {
+    var grps = FA2.histGroups || [], row = null, grp = null;
+    grps.forEach(function (G) { G.rows.forEach(function (x) { if (x.eid === eid) { row = x; grp = G; } }); });
+    if (!row) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'fa2-modal';
+    wrap.innerHTML =
+      '<div class="fa2-mcard">' +
+        '<div class="fa2-t">File Correction</div>' +
+        '<div class="fa2-s" style="margin:6px 0 10px">' + esc(row.ty) + ' \u00b7 ' + esc(row.ref) + ' \u00b7 Lot ' + esc(row.lot) + ' \u00b7 qty ' + Math.abs(row.qty) + '</div>' +
+        '<div class="fa2-lab">What to do</div>' + fa2Chips('fc-mode', ['Correct details', 'Void entirely'], 'Correct details') +
+        '<div id="fc-fields">' +
+          '<input id="fc-ref" class="cc-in" placeholder="REF" value="' + esc(row.ref) + '">' +
+          '<input id="fc-lot" class="cc-in" placeholder="LOT" value="' + esc(row.lot) + '">' +
+          '<input id="fc-qty" class="cc-in" type="number" min="1" placeholder="Qty" value="' + Math.abs(row.qty) + '">' +
+        '</div>' +
+        '<input id="fc-why" class="cc-in" placeholder="Explanation (required)">' +
+        '<div id="fc-err" class="cc-err" hidden></div>' +
+        '<div class="fa2-mrow"><button type="button" id="fc-cancel" class="cc-mini">Cancel</button><button type="button" id="fc-go" class="cc-btn">Save correction</button></div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    var mode = 'Correct details';
+    fa2ChipWire('fc-mode', function (v) { mode = v; document.getElementById('fc-fields').hidden = (v === 'Void entirely'); });
+    document.getElementById('fc-cancel').addEventListener('click', function () { wrap.remove(); });
+    document.getElementById('fc-go').addEventListener('click', function () {
+      var why = document.getElementById('fc-why').value.trim();
+      if (!why) return fa2Err('fc-err', 'An explanation is required.');
+      var evs = [{ type: 'Void', reverses: eid, ref: row.ref, lot: row.lot, reason: why, enteredBy: fa2Who(), entryMethod: 'manual' }];
+      if (mode === 'Correct details') {
+        var ref = document.getElementById('fc-ref').value.trim();
+        var lot = document.getElementById('fc-lot').value.trim();
+        var qty = +document.getElementById('fc-qty').value || 0;
+        if (!ref) return fa2Err('fc-err', 'REF is required.');
+        if (!lot) return fa2Err('fc-err', 'LOT is required.');
+        if (qty < 1) return fa2Err('fc-err', 'Qty must be at least 1.');
+        var rep = { type: row.ty, ref: ref, desc: row.desc, lot: lot, exp: row.exp, qty: qty,
+          reason: 'Correction: ' + why, linkedTo: eid, flags: 'Corrected', entryMethod: 'manual', enteredBy: fa2Who() };
+        if (grp) {
+          if (grp.bo) rep.caseBO = grp.bo;
+          if (grp.ty === 'Received') { rep.dropName = grp.to || ''; rep.from = grp.from || ''; rep.receivedBy = grp.to || ''; }
+          if (grp.track) rep.tracking = grp.track;
+          if (grp.date) rep.eventDate = grp.date;
+        }
+        evs.push(rep);
+      }
+      var btn = document.getElementById('fc-go');
+      fa2Submit(evs, 'fix-' + eid, btn)
+        .then(function () { wrap.remove(); kitBanner(document.querySelector('.cc-card'), mode === 'Void entirely' ? 'Entry voided' : 'Correction filed'); fa2HistLoad(true); })
+        .catch(function () { fa2Err('fc-err', 'Couldn\u2019t save \u2014 try again.'); btn.disabled = false; btn.textContent = 'Save correction'; });
     });
   }
 
