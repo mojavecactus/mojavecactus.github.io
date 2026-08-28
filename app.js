@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.68';
+  var APPVER = '4.69';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1807,7 +1807,9 @@ var GLOSS = {
           .then(function (km) { return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: ccB64d(P.salt), iterations: P.it }, km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']); })
           .then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: ccB64d(P.iv) }, key, ccB64d(P.ct)); });
       }).then(function (buf) {
-        okc(JSON.parse(new TextDecoder().decode(buf)));
+        var creds = JSON.parse(new TextDecoder().decode(buf));
+        var next = function () { okc(creds); };
+        if (CC.terr === 'ct') { fa2TryUnlock(v).then(next, next); } else { next(); }
       }).catch(function () {
         bad();
       });
@@ -2506,12 +2508,15 @@ var GLOSS = {
         (ccLearnCount() ? '<div class="cc-sub">' + ccLearnCount() + ' new barcode' + (ccLearnCount() > 1 ? 's' : '') + ' learned on this phone <button id="ct-learn" class="cc-link" type="button">copy</button></div>' : '') +
         '<button id="ct-cc" class="ct-big">Cycle Count<span>Trunk &amp; closet counts by location</span></button>' +
         (TR.fa ? '<button id="ct-fa" class="ct-big">F&amp;A Inventory<span>Product handed off to the Foot &amp; Ankle team</span></button>' : '') +
+        (TR.fa ? '<button id="ct-fa2" class="ct-big">F&amp;A Inventory <em class="fa2-em">v2</em><span>Preview \u2014 the new live inventory system</span></button>' : '') +
       '</div>');
     document.getElementById('ct-cc').addEventListener('click', function () { location.hash = TR.id === 'ct' ? '#/cc' : '#/team/' + TR.id + '/cc'; });
     var mg = document.getElementById('ct-mg');
     if (mg) mg.addEventListener('click', function () { location.hash = '#/team/' + TR.id + '/manage'; });
     var fb = document.getElementById('ct-fa');
     if (fb) fb.addEventListener('click', function () { location.hash = '#/fa'; });
+    var fb2 = document.getElementById('ct-fa2');
+    if (fb2) fb2.addEventListener('click', function () { location.hash = '#/fa2'; });
     var lb = document.getElementById('ct-learn');
     if (lb) lb.addEventListener('click', function () {
       var t = ccLearnText();
@@ -2995,6 +3000,188 @@ var GLOSS = {
     if (BYPN[nrm(String(n))]) { location.replace(pnRoute(String(n))); return; }
     location.replace('#/');
   }
+  // ---- F&A Inventory v2 (fa2) — live event-sourced stock via the TBX FA Hub ----
+  var FA2 = { creds: null, cache: null };
+  function fa2Save(c) { FA2.creds = c; try { localStorage.setItem('tbx_fa2', JSON.stringify(c)); } catch (e) {} }
+  function fa2Creds() {
+    if (FA2.creds) return FA2.creds;
+    try { FA2.creds = JSON.parse(localStorage.getItem('tbx_fa2') || 'null'); } catch (e) { FA2.creds = null; }
+    return FA2.creds;
+  }
+  function fa2TryUnlock(pw) {
+    return fetch('fa2.enc.json').then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (P) {
+      return crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey'])
+        .then(function (km) { return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: ccB64d(P.salt), iterations: P.it }, km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']); })
+        .then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: ccB64d(P.iv) }, key, ccB64d(P.ct)); });
+    }).then(function (buf) { fa2Save(JSON.parse(new TextDecoder().decode(buf))); })
+      .catch(function () {});
+  }
+  function fa2Call(action, extra) {
+    var c = fa2Creds(); if (!c) return Promise.reject(new Error('locked'));
+    var b = { action: action, token: c.token };
+    if (extra) { for (var k in extra) b[k] = extra[k]; }
+    return fetch(c.url, { method: 'POST', body: JSON.stringify(b) }).then(function (r) { return r.json(); });
+  }
+  function fa2Ensure(then) {
+    if (!ctEnsure(then)) return false;
+    if (!fa2Creds()) {
+      CC.creds = null; CC.ret = then;
+      CC.gateMsg = 'One-time unlock \u2014 enter the CT password again to turn on F&A v2 on this phone.';
+      ccGate(); return false;
+    }
+    return true;
+  }
+  function fa2CacheGet() {
+    if (FA2.cache) return FA2.cache;
+    try { FA2.cache = JSON.parse(localStorage.getItem('tbx_fa2_cache') || 'null'); } catch (e) { FA2.cache = null; }
+    return FA2.cache;
+  }
+  function fa2CacheSet(d) { FA2.cache = { t: Date.now(), d: d }; try { localStorage.setItem('tbx_fa2_cache', JSON.stringify(FA2.cache)); } catch (e) {} }
+  function fa2Load(force) {
+    var c = fa2CacheGet();
+    if (!force && c && Date.now() - c.t < 60000) return Promise.resolve(c.d);
+    return fa2Call('read', { limit: 250 }).then(function (j) {
+      if (j && j.ok) { fa2CacheSet(j); return j; }
+      if (c) return c.d;
+      throw new Error((j && j.err) || 'server');
+    }).catch(function (e) { if (c) return c.d; throw e; });
+  }
+  function fa2Num(x) { var n = Number(x); return isFinite(n) ? n : 0; }
+  function fa2PillClass(s) {
+    if (s === 'EXPIRED') return 'bad';
+    if (s && s.indexOf('SEND BACK') === 0) return 'wait';
+    if (s === '\u22643 MO') return 'busy';
+    return 'ok';
+  }
+  function fa2Home() {
+    setTitle('F&A Inventory', 'v2'); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Home)) return;
+    CC.view = 'fa2home';
+    render(
+      '<div class="card cc-card">' +
+        '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
+        '<h2 class="cc-h">F&amp;A Inventory <em class="fa2-em">v2</em></h2>' +
+        '<div class="cc-sub">Live field stock \u2014 everything handed to the Foot &amp; Ankle team.</div>' +
+        '<div id="fa2-pills" class="fa2-pills"></div>' +
+        '<button id="fa2-onhand" class="ct-big">On hand<span>What\u2019s out right now \u2014 first to expire on top</span></button>' +
+        '<button id="fa2-hist" class="ct-big">History<span>Every event, newest first \u2014 nothing ever disappears</span></button>' +
+        '<button class="ct-big ct-soon" type="button">Add inventory<span>Coming in the next update</span></button>' +
+        '<button class="ct-big ct-soon" type="button">Record case usage<span>Coming in the next update</span></button>' +
+        '<button class="ct-big ct-soon" type="button">Send back to Stryker<span>Coming in the next update</span></button>' +
+        '<button class="ct-big ct-soon" type="button">Admin<span>Coming in the next update</span></button>' +
+        '<div id="fa2-msg" class="cc-sub2"></div>' +
+      '</div>');
+    document.getElementById('fa2-onhand').addEventListener('click', function () { location.hash = '#/fa2/onhand'; });
+    document.getElementById('fa2-hist').addEventListener('click', function () { location.hash = '#/fa2/history'; });
+    document.getElementById('fa2-rf').addEventListener('click', function () { fa2HomeLoad(true); });
+    fa2HomeLoad(false);
+  }
+  function fa2HomeLoad(force) {
+    var p = document.getElementById('fa2-pills'), m = document.getElementById('fa2-msg');
+    if (p && !p.innerHTML) p.innerHTML = '<span class="cc-pill">Loading\u2026</span>';
+    fa2Load(force).then(function (d) {
+      if (CC.view !== 'fa2home') return;
+      var units = 0, soon = 0, exp = 0;
+      (d.master || []).forEach(function (r) {
+        var q = fa2Num(r[4]); units += q;
+        if (r[5] === 'EXPIRED') exp += q; else if (r[5] !== 'OK') soon += q;
+      });
+      if (p) p.innerHTML =
+        '<span class="cc-pill ok">' + units + ' on hand</span>' +
+        (soon ? '<span class="cc-pill wait">' + soon + ' expiring \u22643 mo</span>' : '') +
+        (exp ? '<span class="cc-pill bad">' + exp + ' expired</span>' : '');
+      if (m) m.textContent = '';
+    }).catch(function () {
+      if (CC.view !== 'fa2home') return;
+      if (p) p.innerHTML = '';
+      if (m) m.textContent = 'Couldn\u2019t reach the server \u2014 check signal and try again.';
+    });
+  }
+  function fa2OnHand() {
+    setTitle('On hand', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2OnHand)) return;
+    CC.view = 'fa2onhand';
+    render(
+      '<div class="card cc-card">' +
+        '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
+        '<h2 class="cc-h">On hand</h2>' +
+        '<div class="cc-sub">First to expire on top. Usage and send-backs come off automatically.</div>' +
+        '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
+      '</div>');
+    document.getElementById('fa2-rf').addEventListener('click', function () { fa2OnHandLoad(true); });
+    fa2OnHandLoad(false);
+  }
+  function fa2OnHandLoad(force) {
+    fa2Load(force).then(function (d) {
+      if (CC.view !== 'fa2onhand') return;
+      var el = document.getElementById('fa2-list'); if (!el) return;
+      var rows = d.master || [];
+      if (!rows.length) { el.innerHTML = '<div class="cc-empty">Nothing on hand \u2014 all clear.</div>'; return; }
+      var html = '', last = '';
+      rows.forEach(function (r) {
+        var st = String(r[5] || 'OK');
+        if (st !== last) { html += '<div class="fa2-eyebrow">' + esc(st) + '</div>'; last = st; }
+        html +=
+          '<div class="fa2-row">' +
+            '<div class="fa2-l"><div class="fa2-t">' + esc(r[0]) + (r[1] ? ' \u2014 ' + esc(r[1]) : '') + '</div>' +
+            '<div class="fa2-s">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (r[6] ? ' \u00b7 ' + esc(r[6]) : '') + '</div></div>' +
+            '<div class="fa2-r"><b>\u00d7' + fa2Num(r[4]) + '</b><span class="cc-pill ' + fa2PillClass(st) + '">' + esc(st) + '</span></div>' +
+          '</div>';
+      });
+      el.innerHTML = html;
+    }).catch(function () {
+      if (CC.view !== 'fa2onhand') return;
+      var el = document.getElementById('fa2-list');
+      if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
+    });
+  }
+  function fa2History() {
+    setTitle('History', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2History)) return;
+    CC.view = 'fa2hist';
+    render(
+      '<div class="card cc-card">' +
+        '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
+        '<h2 class="cc-h">History</h2>' +
+        '<div class="cc-sub">Append-only ledger \u2014 corrections are new events, never edits.</div>' +
+        '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
+      '</div>');
+    document.getElementById('fa2-rf').addEventListener('click', function () { fa2HistLoad(true); });
+    fa2HistLoad(false);
+  }
+  function fa2HistLoad(force) {
+    fa2Load(force).then(function (d) {
+      if (CC.view !== 'fa2hist') return;
+      var el = document.getElementById('fa2-list'); if (!el) return;
+      var L = d.ledger || [], C = d.ledgerCols || [];
+      if (!L.length) { el.innerHTML = '<div class="cc-empty">No events yet.</div>'; return; }
+      var ix = {}; C.forEach(function (n, i) { ix[n] = i; });
+      function g(r, n) { return ix[n] !== undefined && r[ix[n]] !== undefined && r[ix[n]] !== null ? String(r[ix[n]]) : ''; }
+      el.innerHTML = L.map(function (r) {
+        var ty = g(r, 'Type'), q = fa2Num(g(r, 'Qty'));
+        var neg = (ty === 'Used in case' || ty === 'Returned to rep' || ty === 'Sent back to Stryker');
+        var sign = ty === 'Adjustment' ? (q > 0 ? '+' : '\u2212') : (neg ? '\u2212' : '+');
+        var pc = ty === 'Adjustment' ? 'busy' : (neg ? 'bad' : 'ok');
+        var bits = [g(r, 'EventDate') || g(r, 'Timestamp').slice(0, 10)];
+        var who = g(r, 'From') || g(r, 'EnteredBy'); if (who) bits.push(who);
+        var where = g(r, 'DropName') || g(r, 'ReceivedBy') || g(r, 'Facility'); if (where) bits.push(where);
+        var xtra = g(r, 'CaseBO') || g(r, 'Tracking') || g(r, 'Reason'); if (xtra) bits.push(xtra);
+        var fl = g(r, 'Flags'); if (fl) bits.push(fl);
+        return '<div class="fa2-row">' +
+          '<div class="fa2-l"><div class="fa2-t">' + esc(ty) + (g(r, 'Ref') ? ' \u2014 ' + esc(g(r, 'Ref')) : '') + (g(r, 'Lot') ? ' <span class="fa2-lot">Lot ' + esc(g(r, 'Lot')) + '</span>' : '') + '</div>' +
+          '<div class="fa2-s">' + esc(bits.join(' \u00b7 ')) + '</div></div>' +
+          '<div class="fa2-r">' + (ty === 'Void' ? '<span class="cc-pill">VOID</span>' : '<span class="cc-pill ' + pc + '">' + sign + Math.abs(q) + '</span>') + '</div>' +
+        '</div>';
+      }).join('');
+    }).catch(function () {
+      if (CC.view !== 'fa2hist') return;
+      var el = document.getElementById('fa2-list');
+      if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
+    });
+  }
   function route() {
     var raw = location.hash || '#/';
     var qi = raw.indexOf('?');
@@ -3018,11 +3205,14 @@ var GLOSS = {
     FILT = {}; CURVIEW = null;
     var fpFilt = qparam(query, 'fp'); if (fpFilt) FILT.fp = fpFilt;
     var gp0 = document.getElementById('glosspanel'); if (gp0) gp0.hidden = true;
-    var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0);
+    var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0 || h.indexOf('#/fa2') === 0);
     if (!inCT) ccStop();
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
+    if (h === '#/fa2') { terrSet('ct'); return fa2Home(); }
+    if (h === '#/fa2/onhand') { terrSet('ct'); return fa2OnHand(); }
+    if (h === '#/fa2/history') { terrSet('ct'); return fa2History(); }
     if (h === '#/fa') { terrSet('ct'); return faScreen(); }
     if (h === '#/teams/help/view') return helpViewScreen();
     if (h === '#/teams/help') return helpScreen();
