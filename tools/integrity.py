@@ -1,5 +1,5 @@
 import re,sys
-s=open('app.js').read()
+s=open('app-4.79.js').read()
 routed=set(re.findall(r"return (fa2\w+)\(\);", s))
 missing=[f for f in sorted(routed) if ('function %s('%f) not in s]
 called=set(re.findall(r"\b(fa2[A-Z]\w*|kit[A-Z]\w*|cc[A-Z]\w*)\(", s))
