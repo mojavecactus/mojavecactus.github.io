@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.78';
+  var APPVER = '4.79';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3478,6 +3478,7 @@ var GLOSS = {
           '<input id="fc-ref" class="cc-in" placeholder="REF" value="' + esc(row.ref) + '">' +
           '<input id="fc-lot" class="cc-in" placeholder="LOT" value="' + esc(row.lot) + '">' +
           '<input id="fc-qty" class="cc-in" type="number" min="1" placeholder="Qty" value="' + Math.abs(row.qty) + '">' +
+          '<div id="fc-warn" class="cc-sub2" hidden></div>' +
         '</div>' +
         '<input id="fc-why" class="cc-in" placeholder="Explanation (required)">' +
         '<div id="fc-err" class="cc-err" hidden></div>' +
@@ -3486,6 +3487,26 @@ var GLOSS = {
     document.body.appendChild(wrap);
     var mode = 'Correct details';
     fa2ChipWire('fc-mode', function (v) { mode = v; document.getElementById('fc-fields').hidden = (v === 'Void entirely'); });
+    // Corrections change stock the same way the original event did. Warn (but
+    // never block) when the new number would drive this lot below zero — the
+    // ledger stays honest, the operator just needs to know.
+    function fcWarn() {
+      var w = document.getElementById('fc-warn'); if (!w) return;
+      var neg = fa2HistNeg(row.ty);
+      if (!neg) { w.hidden = true; return; }
+      var onhand = 0, d = FA2.histD || FA2.ohD;
+      var ref = document.getElementById('fc-ref').value.trim().toUpperCase();
+      var lot = document.getElementById('fc-lot').value.trim().toUpperCase();
+      ((d && d.master) || []).forEach(function (r) {
+        if (String(r[0]).toUpperCase() === ref && String(r[2]).toUpperCase() === lot) onhand += fa2Num(r[4]);
+      });
+      var q = +document.getElementById('fc-qty').value || 0;
+      var avail = onhand + Math.abs(row.qty);
+      if (q > avail) { w.hidden = false; w.textContent = 'Heads up: ' + q + ' is more than the ' + avail + ' this lot can cover \u2014 it will go to zero and the extra won\u2019t show on hand.'; }
+      else w.hidden = true;
+    }
+    ['fc-ref', 'fc-lot', 'fc-qty'].forEach(function (id) { document.getElementById(id).addEventListener('input', fcWarn); });
+    fcWarn();
     document.getElementById('fc-cancel').addEventListener('click', function () { wrap.remove(); });
     document.getElementById('fc-go').addEventListener('click', function () {
       var why = document.getElementById('fc-why').value.trim();
