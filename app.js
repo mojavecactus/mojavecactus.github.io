@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.72';
+  var APPVER = '4.73';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1987,7 +1987,7 @@ var GLOSS = {
       });
   }
   function ccTick() {
-    if (!CC.running || CC.view !== 'count') return;
+    if (!CC.running || (CC.view !== 'count' && CC.view !== 'fa2add2')) return;
     var v = document.getElementById('ccvid');
     if (!v || v.readyState < 2 || !v.videoWidth) {
       CC.stall++;
@@ -2189,6 +2189,7 @@ var GLOSS = {
   }
   function ccOnCode(txt) {
     var now = Date.now();
+    if (CC.view === 'fa2add2') { fa2ScanCode(txt, now); return; }
     if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(120); return; }
     CC.cool = { code: txt, t: now, ms: 2200 };
     var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
@@ -3202,7 +3203,13 @@ var GLOSS = {
       '.k-x{background:none;border:0;color:#f28b8b;font-size:16px;padding:2px 6px}' +
       '.k-arrows{display:none}.k-arrows button{width:24px;height:22px;border:0;border-radius:6px;background:rgba(255,255,255,.1);color:#ccc}' +
       '.f2bub{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(120,160,255,.18);color:#9db8ff;white-space:nowrap}' +
-      '.k-bar{position:sticky;bottom:0;padding-top:8px;z-index:6}';
+      '.k-bar{position:sticky;bottom:0;padding-top:8px;z-index:6}' +
+      '.cc-in[type=date]{min-width:0;max-width:100%;box-sizing:border-box}' +
+      '#fa2-more{margin:10px 0 14px}' +
+      '.a2top{position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:4/3;margin-bottom:10px}' +
+      '.a2top video{width:100%;height:100%;object-fit:cover;display:block}' +
+      '.a2hint{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;background:rgba(0,0,0,.55);color:#ddd;font-size:12px;text-align:center}' +
+      '.a2man{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px 12px;margin:8px 0}';
     document.head.appendChild(st);
   }
   function expNorm(e) { e = String(e == null ? '' : e).trim(); var m = e.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/); if (!m) return e; return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + (m[3] || '1')).slice(-2); }
@@ -3413,23 +3420,22 @@ var GLOSS = {
     ccStop();
     if (!fa2Ensure(fa2Add)) return;
     CC.view = 'fa2add';
-    if (!FA2.form || FA2.form.kind !== 'add') FA2.form = { kind: 'add', drop: '', date: new Date().toISOString().slice(0, 10), from: '', fromOther: '', rb: '', accName: '', accLoc: '', items: [{}] };
+    if (!FA2.form || FA2.form.kind !== 'add') FA2.form = { kind: 'add', drop: '', date: new Date().toISOString().slice(0, 10), from: '', fromOther: '', rb: '', accName: '', accLoc: '', note: '', items: [] };
     var f = FA2.form;
     var faNames = fa2Teams('fa');
     var rbOpts = faNames.concat(['Bloomfield Warehouse', 'Account']);
     fa2Shell('Add inventory', 'Record a drop to the F&amp;A team. Expiration is required.',
       '<input id="fa2-drop" class="cc-in" placeholder="Drop name (e.g. Hartford office drop)" value="' + esc(f.drop) + '">' +
       '<input id="fa2-date" class="cc-in" type="date" value="' + esc(f.date) + '">' +
-      '<div class="fa2-lab">From</div>' + fa2Chips('fa2-from', ['Megan', 'Matt', 'Mia', 'Manny', 'Isabella', 'Nate', 'Other'], f.from) +
+      '<div class="fa2-lab">From</div>' + fa2Chips('fa2-from', ['Megan', 'Matt', 'Mia', 'Manny', 'Isabella', 'Nate', 'Territory Transfer', 'Other'], f.from) +
       '<input id="fa2-fromo" class="cc-in" placeholder="Who? (free text)" value="' + esc(f.fromOther) + '"' + (f.from === 'Other' ? '' : ' hidden') + '>' +
       '<div class="fa2-lab">Received by</div>' + (rbOpts.length > 2 ? '' : '<div class="cc-sub2">Tip: add F&amp;A members in Admin to pick them here.</div>') + fa2Chips('fa2-rb', rbOpts, f.rb) +
       '<div id="fa2-acc"' + (f.rb === 'Account' ? '' : ' hidden') + '>' +
         '<input id="fa2-accn" class="cc-in" placeholder="Account name (required)" value="' + esc(f.accName) + '">' +
         '<input id="fa2-accl" class="cc-in" placeholder="Where at the account? (required)" value="' + esc(f.accLoc) + '">' +
       '</div>' +
-      '<div id="fa2-items">' + fa2ItemRows(f.items, true) + '</div>' +
-      '<button id="fa2-more" type="button" class="cc-mini">+ Add another item</button>' +
-      '<button id="fa2-go" class="cc-btn">Save drop</button>');
+      '<input id="fa2-note" class="cc-in" placeholder="Notes" value="' + esc(f.note || '') + '">' +
+      '<button id="fa2-go" class="cc-btn">Save drop \u2014 add items</button>');
     document.getElementById('fa2-drop').addEventListener('input', function (e) { f.drop = e.target.value; });
     document.getElementById('fa2-date').addEventListener('input', function (e) { f.date = e.target.value; });
     fa2ChipWire('fa2-from', function (v) { f.from = v; document.getElementById('fa2-fromo').hidden = v !== 'Other'; });
@@ -3437,272 +3443,142 @@ var GLOSS = {
     document.getElementById('fa2-fromo').addEventListener('input', function (e) { f.fromOther = e.target.value; });
     document.getElementById('fa2-accn').addEventListener('input', function (e) { f.accName = e.target.value; });
     document.getElementById('fa2-accl').addEventListener('input', function (e) { f.accLoc = e.target.value; });
-    var wrap = document.getElementById('fa2-items');
-    wrap.addEventListener('input', function (e) {
-      var t = e.target; if (!t.classList.contains('fa2-f')) return;
-      var it = f.items[+t.dataset.i]; it[t.dataset.f] = t.value;
-      if (t.dataset.f === 'ref' && !it.desc) {
-        var hit = BYPN[nrm(t.value)];
-        if (hit !== undefined && D.items[hit]) {
-          it.desc = D.items[hit].name || '';
-          var dEl = wrap.querySelector('.fa2-f[data-f="desc"][data-i="' + t.dataset.i + '"]');
-          if (dEl) dEl.value = it.desc;
-        }
-      }
-    });
-    wrap.addEventListener('click', function (e) {
-      var x = e.target.closest ? e.target.closest('.fa2-x') : null; if (!x) return;
-      f.items.splice(+x.dataset.i, 1);
-      wrap.innerHTML = fa2ItemRows(f.items, true);
-    });
-    document.getElementById('fa2-more').addEventListener('click', function () {
-      f.items.push({}); wrap.innerHTML = fa2ItemRows(f.items, true);
-    });
+    document.getElementById('fa2-note').addEventListener('input', function (e) { f.note = e.target.value; });
     document.getElementById('fa2-go').addEventListener('click', function () {
       var from = f.from === 'Other' ? f.fromOther.trim() : f.from;
       if (!f.drop.trim()) return fa2Err('fa2-err', 'Give the drop a name.');
       if (!from) return fa2Err('fa2-err', 'Pick who it came from.');
       if (!f.rb) return fa2Err('fa2-err', 'Pick who received it.');
       if (f.rb === 'Account' && (!f.accName.trim() || !f.accLoc.trim())) return fa2Err('fa2-err', 'Account name and location are both required.');
-      var evs = [];
-      for (var i = 0; i < f.items.length; i++) {
-        var it = f.items[i];
-        if (!s(it.ref)) return fa2Err('fa2-err', 'Item ' + (i + 1) + ': REF is required.');
-        if (!s(it.lot)) return fa2Err('fa2-err', 'Item ' + (i + 1) + ': lot is required.');
-        if (!s(it.exp)) return fa2Err('fa2-err', 'Item ' + (i + 1) + ': expiration is required.');
-        var q = fa2Num(it.qty); if (q < 1) return fa2Err('fa2-err', 'Item ' + (i + 1) + ': quantity must be at least 1.');
-        evs.push({ type: 'Received', ref: s(it.ref), desc: s(it.desc), lot: s(it.lot), exp: s(it.exp), qty: q,
-          dropName: f.drop.trim(), from: from, receivedBy: f.rb,
-          accountName: f.rb === 'Account' ? f.accName.trim() : '', accountLocation: f.rb === 'Account' ? f.accLoc.trim() : '',
-          eventDate: f.date, entryMethod: 'manual', enteredBy: fa2Who() });
-      }
-      function s(x) { return String(x || '').trim(); }
-      fa2Submit(evs, 'add-' + f.drop + '-' + f.date, document.getElementById('fa2-go'))
-        .then(function () { FA2.form = null; location.hash = '#/fa2'; })
-        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 nothing lost, tap Save again.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save drop'; } });
+      location.hash = '#/fa2/add2';
     });
   }
 
-  /* ---------- shared on-hand picker ---------- */
-  function fa2Picker(d, picks, allowOver) {
-    var rows = d.master || [];
-    if (!rows.length) return '<div class="cc-empty">Nothing on hand.</div>';
-    return rows.map(function (r, i) {
-      var key = r[0] + '\u0001' + r[2];
-      var onhand = fa2Num(r[4]);
-      var v = picks[key] ? picks[key].qty : 0;
-      return '<div class="fa2-row">' +
-        '<div class="fa2-l"><div class="fa2-t">' + esc(r[0]) + (r[1] ? ' \u2014 ' + esc(r[1]) : '') + '</div>' +
-        '<div class="fa2-s">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + ' \u00b7 ' + onhand + ' on hand</div></div>' +
-        '<div class="fa2-pickq">' +
-          '<button type="button" class="fa2-qb" data-k="' + esc(key) + '" data-d="-1">\u2212</button>' +
-          '<b class="fa2-qv" data-k="' + esc(key) + '">' + v + '</b>' +
-          '<button type="button" class="fa2-qb" data-k="' + esc(key) + '" data-d="1">+</button>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-  }
-  function fa2PickWire(el, d, picks, allowOver, onChange) {
-    var byKey = {};
-    (d.master || []).forEach(function (r) { byKey[r[0] + '\u0001' + r[2]] = { ref: r[0], desc: r[1], lot: r[2], exp: r[3], onhand: fa2Num(r[4]) }; });
-    el.addEventListener('click', function (e) {
-      var b = e.target.closest ? e.target.closest('.fa2-qb') : null; if (!b) return;
-      var k = b.dataset.k, m = byKey[k]; if (!m) return;
-      var cur = picks[k] ? picks[k].qty : 0;
-      var next = cur + (+b.dataset.d);
-      if (next < 0) next = 0;
-      if (!allowOver && next > m.onhand) next = m.onhand;
-      if (next === 0) delete picks[k]; else picks[k] = { ref: m.ref, desc: m.desc, lot: m.lot, exp: m.exp, onhand: m.onhand, qty: next };
-      var vEl = el.querySelector('.fa2-qv[data-k="' + (window.CSS && CSS.escape ? CSS.escape(k) : k) + '"]');
-      if (!vEl) { el.querySelectorAll('.fa2-qv').forEach(function (x) { if (x.dataset.k === k) vEl = x; }); }
-      if (vEl) vEl.textContent = next;
-      if (onChange) onChange();
-    });
-  }
-
-  /* ---------- Remove / Return ---------- */
-  var FA2_REMOVE_TYPES = ['Returned to Stryker', 'External Transfer', 'Written Off', 'Returned to CT SM'];
-  function fa2Return() {
-    setTitle('Remove / Return', ''); backBtn.hidden = false;
-    ccStop();
-    if (!fa2Ensure(fa2Return)) return;
-    CC.view = 'fa2ret';
-    fa2KitCss();
-    var tray = { items: {}, order: [] };
-    var sel = { type: '', reason: '', trk: '', terr: '', recv: '' };
-    var D = null;
-    fa2Shell('Remove / Return', 'Take product out of F&amp;A stock \u2014 pick where it went.',
-      '<div class="fa2-lab">Removal type</div>' + fa2Chips('fa2-rty', FA2_REMOVE_TYPES, '') +
-      '<input id="fa2-trk2" class="cc-in" placeholder="Tracking # (optional)" hidden>' +
-      '<input id="fa2-terr" class="cc-in" placeholder="Receiving Rep/Territory (required)" hidden>' +
-      '<input id="fa2-recv" class="cc-in" placeholder="Received by who (required)" hidden>' +
-      '<input id="fa2-rsn2" class="cc-in" placeholder="Reason">' +
-      '<div class="fa2-lab">Selected</div><div id="fa2-tray"></div>' +
-      '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
-      '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
-      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Remove selected</button></div>');
-    var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 tap items below.', onChange: drawPick });
-    fa2ChipWire('fa2-rty', function (v) {
-      sel.type = v;
-      document.getElementById('fa2-trk2').hidden = v !== 'Returned to Stryker';
-      document.getElementById('fa2-terr').hidden = v !== 'External Transfer';
-      document.getElementById('fa2-recv').hidden = v !== 'Returned to CT SM';
-    });
-    [['fa2-trk2', 'trk'], ['fa2-terr', 'terr'], ['fa2-recv', 'recv'], ['fa2-rsn2', 'reason']].forEach(function (p) {
-      document.getElementById(p[0]).addEventListener('input', function (e) { sel[p[1]] = e.target.value; });
-    });
-    document.getElementById('fa2-q').addEventListener('input', function () { drawPick(); });
-    function drawPick() {
-      var el = document.getElementById('fa2-pick'); if (!el || !D) return;
-      var q = (document.getElementById('fa2-q') || {}).value || '';
-      var rows = (D.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
-      if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
-      rows = fa2BandSort(rows);
-      el.innerHTML = rows.map(function (r) {
-        var key = r[0] + '\u0001' + r[2];
-        var have = tray.items[key] ? tray.items[key].qty : 0;
-        var oh = fa2Num(r[4]);
-        return '<div class="f2c fa2-pk" data-k="' + esc(key) + '">' +
-          '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + oh + ' on hand</span></div>' +
-          (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
-          '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (have ? ' \u00b7 <b>' + have + ' selected</b>' : '') + '</div>' +
-        '</div>';
-      }).join('');
+  /* ---------- Add inventory, step 2: scan + manual ---------- */
+  function fa2ScanCode(txt, now) {
+    if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(160); return; }
+    CC.cool = { code: txt, t: now, ms: 2200 };
+    var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
+    var p = r.p || {};
+    var lot = p.lot || '', exp = ccExp(p.exp), ref = r.sku || '', desc = '';
+    if (!ref && !p.gtin && (lot || exp)) {
+      FA2.pendLE = { lot: lot, exp: exp };
+      ccFlashGreen(); ccStatus('Lot/expiry held \u2014 now scan the product barcode');
+      ccSchedule(200); return;
     }
-    document.getElementById('fa2-pick').addEventListener('click', function (e) {
-      var c = e.target.closest ? e.target.closest('.fa2-pk') : null; if (!c || !D) return;
-      var k = c.getAttribute('data-k');
-      var m = null;
-      (D.master || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; });
-      if (!m) return;
-      var oh = fa2Num(m[4]);
-      var it = tray.items[k];
-      if (it) {
-        if (it.qty >= oh) { kitShake(c, c.querySelector('.f2bub')); return; }
-        it.qty += 1;
-      } else {
-        tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, max: oh, qty: 1 };
-        tray.order.push(k);
-      }
-      trayApi.redraw();
-    });
-    fa2Load(false).then(function (d) { if (CC.view !== 'fa2ret') return; D = d; drawPick(); })
-      .catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
-    document.getElementById('fa2-go').addEventListener('click', function () {
-      if (!sel.type) return fa2Err('fa2-err', 'Pick a removal type.');
-      if (sel.type === 'External Transfer' && !sel.terr.trim()) return fa2Err('fa2-err', 'Receiving Rep/Territory is required.');
-      if (sel.type === 'Returned to CT SM' && !sel.recv.trim()) return fa2Err('fa2-err', 'Received by who is required.');
-      if (!tray.order.length) return fa2Err('fa2-err', 'Pick at least one item.');
-      var evs = tray.order.map(function (k) {
-        var p = tray.items[k];
-        var ev = { type: sel.type, ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, reason: sel.reason.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
-        if (sel.type === 'Returned to Stryker' && sel.trk.trim()) ev.tracking = sel.trk.trim();
-        if (sel.type === 'External Transfer') ev.receivedBy = sel.terr.trim();
-        if (sel.type === 'Returned to CT SM') ev.receivedBy = sel.recv.trim();
-        return ev;
-      });
-      fa2Submit(evs, 'ret-' + Date.now(), document.getElementById('fa2-go'))
-        .then(function () {
-          tray.items = {}; tray.order = []; trayApi.redraw();
-          kitBanner(document.querySelector('.cc-card'), 'Items Removed');
-          var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; }
-          fa2Load(true).then(function (d2) { if (CC.view !== 'fa2ret') return; D = d2; drawPick(); }).catch(function () {});
-        })
-        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; } });
-    });
+    if (!ref) {
+      var n = nrm(txt);
+      if (n.length >= 5 && n.length <= 20 && BYPN[n]) ref = skuOf(BYPN[n]);
+    }
+    if (!ref) { ccStatus('Unknown barcode \u2014 use + Manual'); ccSchedule(300); return; }
+    var e = BYPN[nrm(ref)];
+    var it = e ? (e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]) : null;
+    if (it) desc = it.t || it.name || '';
+    if (FA2.pendLE) { lot = lot || FA2.pendLE.lot; exp = exp || FA2.pendLE.exp; FA2.pendLE = null; }
+    ccFlashGreen();
+    fa2AddItem({ ref: ref, desc: desc, lot: lot, exp: exp, qty: 1 }, true);
+    ccStatus(ref + (lot ? ' \u00b7 Lot ' + lot : ' \u00b7 no lot yet'));
+    ccSchedule(220);
   }
-
-  /* ---------- Send back to Stryker ---------- */
-  function fa2Send() {
-    setTitle('Send back', ''); backBtn.hidden = false;
-    ccStop();
-    if (!fa2Ensure(fa2Send)) return;
-    CC.view = 'fa2send';
-    var fa = fa2IsFA();
-    var picks = {}; var trk = { v: '' };
-    var namePick = fa ? '<div class="fa2-lab">Your name</div><div id="fa2-nmwrap"><div class="cc-empty">Loading team\u2026</div></div>' : '';
-    fa2Shell('Send back to Stryker', 'Works before or after expiration. <b>Tracking # required to complete.</b>',
-      namePick +
-      '<div class="fa2-lab">Items</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
-      '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (required)">' +
-      '<button id="fa2-go" class="cc-btn" disabled>Complete send-back</button>');
-    var goBtn = document.getElementById('fa2-go');
-    function gate() { goBtn.disabled = !(trk.v.trim() && Object.keys(picks).length && (!fa || FA2.faName)); }
-    document.getElementById('fa2-trk').addEventListener('input', function (e) { trk.v = e.target.value; gate(); });
-    fa2Load(false).then(function (d) {
-      if (CC.view !== 'fa2send') return;
-      var el = document.getElementById('fa2-pick');
-      el.innerHTML = fa2Picker(d, picks, false);
-      fa2PickWire(el, d, picks, false, gate);
-      if (fa) {
-        var names = fa2Teams('fa');
-        var nw = document.getElementById('fa2-nmwrap');
-        nw.innerHTML = names.length ? fa2Chips('fa2-nm', names, FA2.faName || '') : '<div class="cc-sub2">No F&amp;A team members set yet \u2014 ask Nate to add you in Admin.</div>';
-        fa2ChipWire('fa2-nm', function (v) { FA2.faName = v; gate(); });
-      }
-    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
-    goBtn.addEventListener('click', function () {
-      var evs = Object.keys(picks).map(function (k) {
-        var p = picks[k];
-        return { type: 'Returned to Stryker', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, tracking: trk.v.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
-      });
-      fa2Submit(evs, 'send-' + trk.v.trim(), goBtn)
-        .then(function () { location.hash = '#/fa2'; })
-        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); goBtn.disabled = false; goBtn.textContent = 'Complete send-back'; });
-    });
+  function fa2AddItem(o, fromScan) {
+    var key = (o.ref || '') + '\u0001' + (o.lot || '');
+    var t = FA2.a2;
+    if (t.items[key]) { t.items[key].qty += (o.qty || 1); }
+    else { t.items[key] = { ref: o.ref, desc: o.desc || '', lot: o.lot || '', exp: o.exp || '', qty: o.qty || 1, src: fromScan ? 'scan' : 'manual' }; t.order.push(key); }
+    if (FA2.a2api) FA2.a2api.redraw();
+    fa2A2Gate();
   }
-
-  /* ---------- Record case usage (+ overdraft warn-and-allow) ---------- */
-  function fa2Use() {
-    setTitle('Case usage', ''); backBtn.hidden = false;
-    ccStop();
-    if (!fa2Ensure(fa2Use)) return;
-    CC.view = 'fa2use';
-    if (!FA2.form || FA2.form.kind !== 'use') FA2.form = { kind: 'use', bo: '', po: '', fac: '', sur: '', dos: new Date().toISOString().slice(0, 10) };
+  function fa2A2Gate() {
+    var b = document.getElementById('a2-go'); if (!b) return;
+    var t = FA2.a2, bad = 0;
+    t.order.forEach(function (k) { var p = t.items[k]; if (!p.ref || !p.lot || !p.exp || !(p.qty > 0)) bad++; });
+    b.disabled = !t.order.length || bad > 0;
+    var w = document.getElementById('a2-warn');
+    if (w) { w.hidden = !bad; w.textContent = bad ? bad + ' item' + (bad > 1 ? 's need' : ' needs') + ' a lot and expiration \u2014 tap the item to fix.' : ''; }
+  }
+  function fa2Add2() {
     var f = FA2.form;
-    var picks = {}; var over = {};
-    fa2Shell('Record case usage', 'Manual bill-only entry. Going over on-hand asks how to resolve it.',
-      '<input id="u-bo" class="cc-in" placeholder="BO # (C-number)" value="' + esc(f.bo) + '">' +
-      '<input id="u-po" class="cc-in" placeholder="PO #" value="' + esc(f.po) + '">' +
-      '<input id="u-fac" class="cc-in" placeholder="Facility" value="' + esc(f.fac) + '">' +
-      '<input id="u-sur" class="cc-in" placeholder="Surgeon" value="' + esc(f.sur) + '">' +
-      '<input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '">' +
-      '<div class="fa2-lab">Items used</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
-      '<button id="fa2-go" class="cc-btn">Save usage</button>');
-    ['bo', 'po', 'fac', 'sur', 'dos'].forEach(function (k) {
-      document.getElementById('u-' + k).addEventListener('input', function (e) { f[k] = e.target.value; });
+    if (!f || f.kind !== 'add' || !f.drop) { location.hash = '#/fa2/add'; return; }
+    setTitle('Add items', ''); backBtn.hidden = false;
+    if (!fa2Ensure(fa2Add2)) return;
+    ccStop();
+    CC.view = 'fa2add2';
+    fa2KitCss();
+    FA2.a2 = { items: {}, order: [] };
+    FA2.pendLE = null;
+    render(
+      '<div class="card cc-card">' +
+        '<h2 class="cc-h">Add items</h2>' +
+        '<div class="cc-sub">' + esc(f.drop) + ' \u00b7 ' + esc(f.date) + ' \u00b7 from ' + esc(f.from === 'Other' ? f.fromOther : f.from) + '</div>' +
+        '<div class="a2top">' +
+          '<video id="ccvid" playsinline muted autoplay></video>' +
+          '<div id="cc-flash" aria-hidden="true"></div>' +
+          '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
+          '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
+          '<div class="a2hint">Scan the product barcode \u2014 lot and expiry fill in automatically</div>' +
+        '</div>' +
+        '<button id="a2-man" type="button" class="cc-mini">+ Manual</button>' +
+        '<div id="a2-manwrap" class="a2man" hidden>' +
+          '<input id="a2-ref" class="cc-in" placeholder="REF (part number)">' +
+          '<input id="a2-desc" class="cc-in" placeholder="Description">' +
+          '<input id="a2-lot" class="cc-in" placeholder="LOT">' +
+          '<div class="fa2-2col"><input id="a2-exp" class="cc-in" type="date"><input id="a2-qty" class="cc-in" type="number" min="1" value="1" placeholder="Qty"></div>' +
+          '<button id="a2-addman" type="button" class="cc-mini">Add to list</button>' +
+        '</div>' +
+        '<div class="fa2-lab">Items in this drop</div><div id="a2-tray"></div>' +
+        '<div id="a2-warn" class="cc-sub2" hidden></div>' +
+        '<div id="fa2-err" class="cc-err" hidden></div>' +
+        '<div class="k-bar"><button id="a2-go" class="cc-btn" disabled>Save drop</button></div>' +
+      '</div>');
+    FA2.a2api = kitTray(document.getElementById('a2-tray'), FA2.a2, { empty: 'Scan a barcode or use + Manual.', onChange: fa2A2Gate });
+    document.getElementById('a2-man').addEventListener('click', function () {
+      var w = document.getElementById('a2-manwrap'); w.hidden = !w.hidden;
+      if (!w.hidden) document.getElementById('a2-ref').focus();
     });
-    fa2Load(false).then(function (d) {
-      if (CC.view !== 'fa2use') return;
-      var el = document.getElementById('fa2-pick');
-      el.innerHTML = fa2Picker(d, picks, true);
-      fa2PickWire(el, d, picks, true, null);
-    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
-    document.getElementById('fa2-go').addEventListener('click', function () {
-      if (!f.bo.trim()) return fa2Err('fa2-err', 'BO # is required.');
-      if (!f.fac.trim()) return fa2Err('fa2-err', 'Facility is required.');
-      var keys = Object.keys(picks);
-      if (!keys.length) return fa2Err('fa2-err', 'Pick at least one item.');
-      var overs = keys.filter(function (k) { return picks[k].qty > picks[k].onhand && !over[k]; });
-      if (overs.length) return fa2Overdraft(picks[overs[0]], overs[0], over, function () { document.getElementById('fa2-go').click(); });
-      var evs = [];
-      keys.forEach(function (k) {
-        var p = picks[k];
-        var eid = fa2Uuid();
-        if (over[k]) {
-          evs.push({ eventId: fa2Uuid(), type: 'Received', ref: p.ref, desc: p.desc, lot: p.lot, exp: p.exp || over[k].exp || '2099-12',
-            qty: p.qty - p.onhand, receivedBy: over[k].src, eventDate: over[k].date, note: over[k].notes,
-            flags: 'Late entry', linkedTo: eid, entryMethod: 'manual', enteredBy: fa2Who() });
-        }
-        evs.push({ eventId: eid, type: 'Used in case', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty,
-          caseBO: f.bo.trim(), casePO: f.po.trim(), facility: f.fac.trim(), surgeon: f.sur.trim(), dos: f.dos, patientId: '',
-          entryMethod: 'manual', enteredBy: fa2Who() });
+    document.getElementById('a2-ref').addEventListener('input', function (e) {
+      var d = document.getElementById('a2-desc');
+      if (d && !d.value) { var hit = BYPN[nrm(e.target.value)]; if (hit !== undefined && D.items[hit]) d.value = D.items[hit].name || ''; }
+    });
+    document.getElementById('a2-addman').addEventListener('click', function () {
+      var ref = document.getElementById('a2-ref').value.trim();
+      var lot = document.getElementById('a2-lot').value.trim();
+      var exp = document.getElementById('a2-exp').value;
+      var qty = +document.getElementById('a2-qty').value || 0;
+      if (!ref) return fa2Err('fa2-err', 'REF is required.');
+      if (!lot) return fa2Err('fa2-err', 'LOT is required.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) return fa2Err('fa2-err', 'Pick a full expiration date (day, month, year).');
+      if (qty < 1) return fa2Err('fa2-err', 'Qty must be at least 1.');
+      var er = document.getElementById('fa2-err'); if (er) er.hidden = true;
+      fa2AddItem({ ref: ref, desc: document.getElementById('a2-desc').value.trim(), lot: lot, exp: exp, qty: qty }, false);
+      ['a2-ref', 'a2-desc', 'a2-lot', 'a2-exp'].forEach(function (id) { document.getElementById(id).value = ''; });
+      document.getElementById('a2-qty').value = '1';
+      document.getElementById('a2-ref').focus();
+    });
+    ccBeepInit();
+    CC.camOff = false;
+    ccStartCam();
+    fa2A2Gate();
+    document.getElementById('a2-go').addEventListener('click', function () {
+      var t = FA2.a2;
+      if (!t.order.length) return fa2Err('fa2-err', 'Add at least one item.');
+      var from = f.from === 'Other' ? f.fromOther.trim() : f.from;
+      var evs = t.order.map(function (k) {
+        var p = t.items[k];
+        return { type: 'Received', ref: p.ref, desc: p.desc, lot: p.lot, exp: p.exp, qty: p.qty,
+          dropName: f.drop.trim(), from: from, receivedBy: f.rb === 'Account' ? f.accName.trim() : f.rb,
+          accountName: f.rb === 'Account' ? f.accName.trim() : '', accountLocation: f.rb === 'Account' ? f.accLoc.trim() : '',
+          eventDate: f.date, note: (f.note || '').trim(), entryMethod: p.src === 'scan' ? 'scan' : 'manual', enteredBy: fa2Who() };
       });
-      fa2Submit(evs, 'use-' + f.bo.trim(), document.getElementById('fa2-go'))
-        .then(function () { FA2.form = null; location.hash = '#/fa2'; })
-        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save usage'; } });
+      fa2Submit(evs, 'add-' + f.drop.trim() + '-' + f.date, document.getElementById('a2-go'))
+        .then(function () {
+          ccStop();
+          FA2.form = null; FA2.a2 = { items: {}, order: [] };
+          location.hash = '#/fa2';
+        })
+        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('a2-go'); if (b) { b.disabled = false; b.textContent = 'Save drop'; } });
     });
   }
+
   function fa2Overdraft(p, key, over, done) {
     var short = p.qty - p.onhand;
     var wrap = document.createElement('div');
@@ -3976,6 +3852,7 @@ var GLOSS = {
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
     if (h === '#/fa2/add') { terrSet('ct'); return fa2Add(); }
+    if (h === '#/fa2/add2') { terrSet('ct'); return fa2Add2(); }
     if (h === '#/fa2/use') { terrSet('ct'); return fa2Use(); }
     if (h === '#/fa2/return') { terrSet('ct'); return fa2Return(); }
     if (h === '#/fa2/send') { terrSet('ct'); return fa2Send(); }
