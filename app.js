@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.74';
+  var APPVER = '4.75';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3588,6 +3588,264 @@ var GLOSS = {
     });
   }
 
+  function fa2Picker(d, picks, allowOver) {
+    var rows = d.master || [];
+    if (!rows.length) return '<div class="cc-empty">Nothing on hand.</div>';
+    return rows.map(function (r, i) {
+      var key = r[0] + '\u0001' + r[2];
+      var onhand = fa2Num(r[4]);
+      var v = picks[key] ? picks[key].qty : 0;
+      return '<div class="fa2-row">' +
+        '<div class="fa2-l"><div class="fa2-t">' + esc(r[0]) + (r[1] ? ' \u2014 ' + esc(r[1]) : '') + '</div>' +
+        '<div class="fa2-s">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + ' \u00b7 ' + onhand + ' on hand</div></div>' +
+        '<div class="fa2-pickq">' +
+          '<button type="button" class="fa2-qb" data-k="' + esc(key) + '" data-d="-1">\u2212</button>' +
+          '<b class="fa2-qv" data-k="' + esc(key) + '">' + v + '</b>' +
+          '<button type="button" class="fa2-qb" data-k="' + esc(key) + '" data-d="1">+</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+  function fa2PickWire(el, d, picks, allowOver, onChange) {
+    var byKey = {};
+    (d.master || []).forEach(function (r) { byKey[r[0] + '\u0001' + r[2]] = { ref: r[0], desc: r[1], lot: r[2], exp: r[3], onhand: fa2Num(r[4]) }; });
+    el.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.fa2-qb') : null; if (!b) return;
+      var k = b.dataset.k, m = byKey[k]; if (!m) return;
+      var cur = picks[k] ? picks[k].qty : 0;
+      var next = cur + (+b.dataset.d);
+      if (next < 0) next = 0;
+      if (!allowOver && next > m.onhand) next = m.onhand;
+      if (next === 0) delete picks[k]; else picks[k] = { ref: m.ref, desc: m.desc, lot: m.lot, exp: m.exp, onhand: m.onhand, qty: next };
+      var vEl = el.querySelector('.fa2-qv[data-k="' + (window.CSS && CSS.escape ? CSS.escape(k) : k) + '"]');
+      if (!vEl) { el.querySelectorAll('.fa2-qv').forEach(function (x) { if (x.dataset.k === k) vEl = x; }); }
+      if (vEl) vEl.textContent = next;
+      if (onChange) onChange();
+    });
+  }
+
+  /* ---------- Remove / Return ---------- */
+  var FA2_REMOVE_TYPES = ['Returned to Stryker', 'External Transfer', 'Written Off', 'Returned to CT SM'];
+  function fa2Return() {
+    setTitle('Remove / Return', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Return)) return;
+    CC.view = 'fa2ret';
+    fa2KitCss();
+    var tray = { items: {}, order: [] };
+    var sel = { type: '', reason: '', trk: '', terr: '', recv: '' };
+    var D = null;
+    fa2Shell('Remove / Return', 'Take product out of F&amp;A stock \u2014 pick where it went.',
+      '<div class="fa2-lab">Removal type</div>' + fa2Chips('fa2-rty', FA2_REMOVE_TYPES, '') +
+      '<input id="fa2-trk2" class="cc-in" placeholder="Tracking # (optional)" hidden>' +
+      '<input id="fa2-terr" class="cc-in" placeholder="Receiving Rep/Territory (required)" hidden>' +
+      '<input id="fa2-recv" class="cc-in" placeholder="Received by who (required)" hidden>' +
+      '<input id="fa2-rsn2" class="cc-in" placeholder="Reason">' +
+      '<div class="fa2-lab">Selected</div><div id="fa2-tray"></div>' +
+      '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
+      '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Remove selected</button></div>');
+    var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 tap items below.', onChange: drawPick });
+    fa2ChipWire('fa2-rty', function (v) {
+      sel.type = v;
+      document.getElementById('fa2-trk2').hidden = v !== 'Returned to Stryker';
+      document.getElementById('fa2-terr').hidden = v !== 'External Transfer';
+      document.getElementById('fa2-recv').hidden = v !== 'Returned to CT SM';
+    });
+    [['fa2-trk2', 'trk'], ['fa2-terr', 'terr'], ['fa2-recv', 'recv'], ['fa2-rsn2', 'reason']].forEach(function (p) {
+      document.getElementById(p[0]).addEventListener('input', function (e) { sel[p[1]] = e.target.value; });
+    });
+    document.getElementById('fa2-q').addEventListener('input', function () { drawPick(); });
+    function drawPick() {
+      var el = document.getElementById('fa2-pick'); if (!el || !D) return;
+      var q = (document.getElementById('fa2-q') || {}).value || '';
+      var rows = (D.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+      if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
+      rows = fa2BandSort(rows);
+      el.innerHTML = rows.map(function (r) {
+        var key = r[0] + '\u0001' + r[2];
+        var have = tray.items[key] ? tray.items[key].qty : 0;
+        var oh = fa2Num(r[4]);
+        return '<div class="f2c fa2-pk" data-k="' + esc(key) + '">' +
+          '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + oh + ' on hand</span></div>' +
+          (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
+          '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (have ? ' \u00b7 <b>' + have + ' selected</b>' : '') + '</div>' +
+        '</div>';
+      }).join('');
+    }
+    document.getElementById('fa2-pick').addEventListener('click', function (e) {
+      var c = e.target.closest ? e.target.closest('.fa2-pk') : null; if (!c || !D) return;
+      var k = c.getAttribute('data-k');
+      var m = null;
+      (D.master || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; });
+      if (!m) return;
+      var oh = fa2Num(m[4]);
+      var it = tray.items[k];
+      if (it) {
+        if (it.qty >= oh) { kitShake(c, c.querySelector('.f2bub')); return; }
+        it.qty += 1;
+      } else {
+        tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, max: oh, qty: 1 };
+        tray.order.push(k);
+      }
+      trayApi.redraw();
+    });
+    fa2Load(false).then(function (d) { if (CC.view !== 'fa2ret') return; D = d; drawPick(); })
+      .catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
+    document.getElementById('fa2-go').addEventListener('click', function () {
+      if (!sel.type) return fa2Err('fa2-err', 'Pick a removal type.');
+      if (sel.type === 'External Transfer' && !sel.terr.trim()) return fa2Err('fa2-err', 'Receiving Rep/Territory is required.');
+      if (sel.type === 'Returned to CT SM' && !sel.recv.trim()) return fa2Err('fa2-err', 'Received by who is required.');
+      if (!tray.order.length) return fa2Err('fa2-err', 'Pick at least one item.');
+      var evs = tray.order.map(function (k) {
+        var p = tray.items[k];
+        var ev = { type: sel.type, ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, reason: sel.reason.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
+        if (sel.type === 'Returned to Stryker' && sel.trk.trim()) ev.tracking = sel.trk.trim();
+        if (sel.type === 'External Transfer') ev.receivedBy = sel.terr.trim();
+        if (sel.type === 'Returned to CT SM') ev.receivedBy = sel.recv.trim();
+        return ev;
+      });
+      fa2Submit(evs, 'ret-' + Date.now(), document.getElementById('fa2-go'))
+        .then(function () {
+          tray.items = {}; tray.order = []; trayApi.redraw();
+          kitBanner(document.querySelector('.cc-card'), 'Items Removed');
+          var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; }
+          fa2Load(true).then(function (d2) { if (CC.view !== 'fa2ret') return; D = d2; drawPick(); }).catch(function () {});
+        })
+        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; } });
+    });
+  }
+
+  /* ---------- Send back to Stryker ---------- */
+  function fa2Send() {
+    setTitle('Send back', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Send)) return;
+    CC.view = 'fa2send';
+    var fa = fa2IsFA();
+    var picks = {}; var trk = { v: '' };
+    var namePick = fa ? '<div class="fa2-lab">Your name</div><div id="fa2-nmwrap"><div class="cc-empty">Loading team\u2026</div></div>' : '';
+    fa2Shell('Send back to Stryker', 'Works before or after expiration. <b>Tracking # required to complete.</b>',
+      namePick +
+      '<div class="fa2-lab">Items</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (required)">' +
+      '<button id="fa2-go" class="cc-btn" disabled>Complete send-back</button>');
+    var goBtn = document.getElementById('fa2-go');
+    function gate() { goBtn.disabled = !(trk.v.trim() && Object.keys(picks).length && (!fa || FA2.faName)); }
+    document.getElementById('fa2-trk').addEventListener('input', function (e) { trk.v = e.target.value; gate(); });
+    fa2Load(false).then(function (d) {
+      if (CC.view !== 'fa2send') return;
+      var el = document.getElementById('fa2-pick');
+      el.innerHTML = fa2Picker(d, picks, false);
+      fa2PickWire(el, d, picks, false, gate);
+      if (fa) {
+        var names = fa2Teams('fa');
+        var nw = document.getElementById('fa2-nmwrap');
+        nw.innerHTML = names.length ? fa2Chips('fa2-nm', names, FA2.faName || '') : '<div class="cc-sub2">No F&amp;A team members set yet \u2014 ask Nate to add you in Admin.</div>';
+        fa2ChipWire('fa2-nm', function (v) { FA2.faName = v; gate(); });
+      }
+    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
+    goBtn.addEventListener('click', function () {
+      var evs = Object.keys(picks).map(function (k) {
+        var p = picks[k];
+        return { type: 'Returned to Stryker', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, tracking: trk.v.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
+      });
+      fa2Submit(evs, 'send-' + trk.v.trim(), goBtn)
+        .then(function () { location.hash = '#/fa2'; })
+        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); goBtn.disabled = false; goBtn.textContent = 'Complete send-back'; });
+    });
+  }
+
+  /* ---------- Record case usage (+ overdraft warn-and-allow) ---------- */
+  function fa2Use() {
+    setTitle('Case usage', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Use)) return;
+    CC.view = 'fa2use';
+    fa2KitCss();
+    if (!FA2.form || FA2.form.kind !== 'use') FA2.form = { kind: 'use', bo: '', po: '', fac: '', sur: '', dos: new Date().toISOString().slice(0, 10) };
+    var f = FA2.form;
+    var tray = { items: {}, order: [] };
+    var over = {};
+    var D2 = null;
+    fa2Shell('Record case usage', 'Manual bill-only entry \u2014 BO, facility, surgeon.',
+      '<input id="u-bo" class="cc-in" placeholder="BO # (C-number)" value="' + esc(f.bo) + '">' +
+      '<input id="u-po" class="cc-in" placeholder="PO # (optional)" value="' + esc(f.po) + '">' +
+      '<input id="u-fac" class="cc-in" placeholder="Facility" value="' + esc(f.fac) + '">' +
+      '<input id="u-sur" class="cc-in" placeholder="Surgeon" value="' + esc(f.sur) + '">' +
+      '<input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '">' +
+      '<div class="fa2-lab">Items used \u2014 drag \u2261 to match the bill only</div><div id="u-tray"></div>' +
+      '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
+      '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Save usage</button></div>');
+    ['bo', 'po', 'fac', 'sur', 'dos'].forEach(function (k) {
+      document.getElementById('u-' + k).addEventListener('input', function (e) { f[k] = e.target.value; });
+    });
+    var trayApi = kitTray(document.getElementById('u-tray'), tray, {
+      empty: 'Nothing selected yet \u2014 tap items below.',
+      onChange: drawPick,
+      allowOver: function () { return true; }
+    });
+    document.getElementById('fa2-q').addEventListener('input', function () { drawPick(); });
+    function drawPick() {
+      var el = document.getElementById('fa2-pick'); if (!el || !D2) return;
+      var q = (document.getElementById('fa2-q') || {}).value || '';
+      var rows = (D2.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+      if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
+      rows = fa2BandSort(rows);
+      el.innerHTML = rows.map(function (r) {
+        var key = r[0] + '\u0001' + r[2];
+        var have = tray.items[key] ? tray.items[key].qty : 0;
+        var oh = fa2Num(r[4]);
+        return '<div class="f2c fa2-pk" data-k="' + esc(key) + '">' +
+          '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + oh + ' on hand</span></div>' +
+          (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
+          '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (have ? ' \u00b7 <b>' + have + ' selected</b>' : '') + '</div>' +
+        '</div>';
+      }).join('');
+    }
+    document.getElementById('fa2-pick').addEventListener('click', function (e) {
+      var c = e.target.closest ? e.target.closest('.fa2-pk') : null; if (!c || !D2) return;
+      var k = c.getAttribute('data-k'), m = null;
+      (D2.master || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; });
+      if (!m) return;
+      var oh = fa2Num(m[4]);
+      if (tray.items[k]) tray.items[k].qty += 1;
+      else { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, qty: 1 }; tray.order.push(k); }
+      trayApi.redraw();
+    });
+    fa2Load(false).then(function (d) { if (CC.view !== 'fa2use') return; D2 = d; drawPick(); })
+      .catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
+    document.getElementById('fa2-go').addEventListener('click', function () {
+      if (!f.bo.trim()) return fa2Err('fa2-err', 'BO # is required.');
+      if (!f.fac.trim()) return fa2Err('fa2-err', 'Facility is required.');
+      if (!tray.order.length) return fa2Err('fa2-err', 'Pick at least one item.');
+      var overs = tray.order.filter(function (k) { return tray.items[k].qty > tray.items[k].onhand && !over[k]; });
+      if (overs.length) return fa2Overdraft(tray.items[overs[0]], overs[0], over, function () { document.getElementById('fa2-go').click(); });
+      var evs = [];
+      tray.order.forEach(function (k) {
+        var p = tray.items[k];
+        var eid = fa2Uuid();
+        if (over[k]) {
+          evs.push({ eventId: fa2Uuid(), type: 'Received', ref: p.ref, desc: p.desc, lot: p.lot, exp: p.exp || over[k].exp || '2099-12',
+            qty: p.qty - p.onhand, receivedBy: over[k].src, eventDate: over[k].date, note: over[k].notes,
+            flags: 'Late entry', linkedTo: eid, entryMethod: 'manual', enteredBy: fa2Who() });
+        }
+        evs.push({ eventId: eid, type: 'Used in case', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty,
+          caseBO: f.bo.trim(), casePO: f.po.trim(), facility: f.fac.trim(), surgeon: f.sur.trim(), dos: f.dos, patientId: '',
+          entryMethod: 'manual', enteredBy: fa2Who() });
+      });
+      fa2Submit(evs, 'use-' + f.bo.trim(), document.getElementById('fa2-go'))
+        .then(function () {
+          tray.items = {}; tray.order = []; for (var k in over) delete over[k];
+          trayApi.redraw();
+          kitBanner(document.querySelector('.cc-card'), 'Usage saved');
+          var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save usage'; }
+          fa2Load(true).then(function (d2) { if (CC.view !== 'fa2use') return; D2 = d2; drawPick(); }).catch(function () {});
+        })
+        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save usage'; } });
+    });
+  }
   function fa2Overdraft(p, key, over, done) {
     var short = p.qty - p.onhand;
     var wrap = document.createElement('div');
@@ -3627,10 +3885,25 @@ var GLOSS = {
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<h2 class="cc-h">Transactions</h2>' +
         '<div class="cc-sub">Bill-only imports \u2014 clean ones auto-apply, the rest wait here.</div>' +
+        '<button id="fa2-poll" type="button" class="cc-mini">Check for new Bill Onlys</button>' +
+        '<div id="fa2-pollmsg" class="cc-sub2"></div>' +
         '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
         '<div id="fa2-err" class="cc-err" hidden></div>' +
       '</div>');
     document.getElementById('fa2-rf').addEventListener('click', function () { fa2TransLoad(); });
+    document.getElementById('fa2-poll').addEventListener('click', function () {
+      var b = this, m = document.getElementById('fa2-pollmsg');
+      b.disabled = true; b.textContent = 'Checking\u2026'; if (m) m.textContent = '';
+      fa2Call('poll_now').then(function (j) {
+        b.disabled = false; b.textContent = 'Check for new Bill Onlys';
+        if (!j || j.err) { if (m) m.textContent = 'Couldn\u2019t check right now.'; return; }
+        var n = j.threads || 0, res = j.results || [];
+        var applied = res.filter(function (r) { return r.outcome === 'auto'; }).length;
+        var pend = res.filter(function (r) { return String(r.outcome || '').indexOf('pending') > -1; }).length;
+        if (m) m.textContent = n ? ('Checked \u2014 ' + n + ' email' + (n > 1 ? 's' : '') + ' found' + (applied ? ', ' + applied + ' auto-applied' : '') + (pend ? ', ' + pend + ' waiting for review' : '') + '.') : 'Checked \u2014 no new bill onlys.';
+        fa2TransLoad();
+      }).catch(function () { b.disabled = false; b.textContent = 'Check for new Bill Onlys'; if (m) m.textContent = 'Couldn\u2019t reach the server.'; });
+    });
     fa2TransLoad();
   }
   function fa2TransLoad() {
