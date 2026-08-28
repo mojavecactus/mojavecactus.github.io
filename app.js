@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.76';
+  var APPVER = '4.77';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3222,7 +3222,8 @@ var GLOSS = {
       '.h-ln:last-child{border-bottom:0}' +
       '.h-lref{min-width:0}.h-lref b{display:block}.h-lref span{font-size:11px;color:#9a9a9a}' +
       '.h-act{margin-top:2px}' +
-      '.h-dim{opacity:.5}';
+      '.h-dim{opacity:.5}' +
+      '.a-busy{background:rgba(90,200,120,.25) !important;border-color:rgba(90,200,120,.6) !important;color:#bfe9cc !important}';
     document.head.appendChild(st);
   }
   function expNorm(e) { e = String(e == null ? '' : e).trim(); var m = e.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/); if (!m) return e; return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + (m[3] || '1')).slice(-2); }
@@ -4135,7 +4136,10 @@ var GLOSS = {
       return;
     }
     fa2Shell('Admin', 'Teams control sheet access and email recipients. Changes save instantly.',
+      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rf" class="cc-mini">\u21bb Refresh</button><button type="button" id="a-rep" class="cc-mini">Send Report</button></div>' +
       '<div id="a-body"><div class="cc-empty">Loading\u2026</div></div>');
+    document.getElementById('a-rf').addEventListener('click', function () { var o = document.getElementById('a-out'); if (o) o.textContent = 'Syncing\u2026'; fa2CacheKill(); fa2Call('admin', { adminPw: FA2.adminPw, op: 'sync_sharing' }).then(function () { fa2AdminLoad(); }).catch(function () { fa2AdminLoad(); }); });
+    document.getElementById('a-rep').addEventListener('click', function () { fa2SendReport(); });
     fa2AdminLoad();
   }
   function fa2AdminLoad() {
@@ -4173,7 +4177,7 @@ var GLOSS = {
         '<div id="a-out" class="cc-sub2"></div>';
       function saveTeams() {
         fa2Call('admin', { adminPw: FA2.adminPw, op: 'teams_set', rows: FA2.teams }).then(function (j) {
-          if (j && j.ok) { FA2.teams = j.teams; fa2CacheKill(); fa2AdminLoad(); var o = document.getElementById('a-out'); if (o && j.sharing) o.textContent = 'Sheet access synced' + (j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : '') + (j.sharing.errors.length ? ' \u00b7 issues: ' + j.sharing.errors.join('; ') : '') + '.'; }
+          if (j && j.ok) { FA2.teams = j.teams; fa2CacheKill(); fa2AdminLoad(); var o = document.getElementById('a-out'); if (o) { var msg = []; if (j.sharing) msg.push('Sheet access synced' + (j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : '')); if (j.welcomed && j.welcomed.length) msg.push('Welcome email sent to ' + j.welcomed.join(', ')); if (j.welcomeErrors && j.welcomeErrors.length) msg.push('Email issues: ' + j.welcomeErrors.join('; ')); if (j.sharing && j.sharing.errors.length) msg.push('Access issues: ' + j.sharing.errors.join('; ')); o.textContent = msg.join(' \u00b7 ') + '.'; } }
           else fa2Err('fa2-err', 'Save failed.');
         }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
       }
@@ -4182,10 +4186,14 @@ var GLOSS = {
         if (d) { if (confirm('Remove this person? Their sheet access is revoked too.')) { FA2.teams.splice(+d.dataset.i, 1); saveTeams(); } return; }
         var a = e.target.closest ? e.target.closest('.a-add') : null;
         if (a) {
+          if (a.disabled) return;
           var r = a.dataset.r;
           var nm = body.querySelector('.a-nm[data-r="' + r + '"]').value.trim();
           var em = body.querySelector('.a-em[data-r="' + r + '"]').value.trim();
           if (!nm || em.indexOf('@') < 1) return fa2Err('fa2-err', 'Name and a valid email are both needed.');
+          var dup = FA2.teams.filter(function (t) { return String(t.email || '').trim().toLowerCase() === em.toLowerCase(); })[0];
+          if (dup) return fa2Err('fa2-err', em + ' is already on the ' + (dup.role === 'fa' ? 'F&A' : 'Sports') + ' team \u2014 use a different email.');
+          a.disabled = true; a.classList.add('a-busy'); a.textContent = 'Adding\u2026';
           FA2.teams.push({ name: nm, email: em, role: r, active: true });
           saveTeams(); return;
         }
@@ -4206,6 +4214,47 @@ var GLOSS = {
     }).catch(function () {
       var body = document.getElementById('a-body');
       if (body) body.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server.</div>';
+    });
+  }
+
+  function fa2SendReport() {
+    var teams = FA2.teams || [];
+    var wrap = document.createElement('div');
+    wrap.className = 'fa2-modal';
+    function group(role, label) {
+      var list = teams.filter(function (t) { return t.role === role && t.email; });
+      if (!list.length) return '<div class="fa2-lab">' + label + '</div><div class="cc-sub2">Nobody yet.</div>';
+      return '<div class="fa2-lab">' + label + '</div>' + list.map(function (t) {
+        return '<label class="fa2-chk"><input type="checkbox" class="sr-em" value="' + esc(t.email) + '"> ' + esc(t.name) + ' <span class="fa2-s">' + esc(t.email) + '</span></label>';
+      }).join('');
+    }
+    wrap.innerHTML =
+      '<div class="fa2-mcard" style="max-height:80vh;overflow:auto">' +
+        '<div class="fa2-t">Send inventory report</div>' +
+        '<div class="fa2-s" style="margin:6px 0 4px">Full on-hand list \u2014 REF, description, lot, expiration, qty, last known location.</div>' +
+        '<div id="sr-stat" class="cc-sub2">Checking inventory\u2026</div>' +
+        group('fa', 'F&amp;A team') + group('sports', 'Sports team') +
+        '<div class="fa2-lab">Or type an email</div>' +
+        '<input id="sr-man" class="cc-in" placeholder="name@example.com">' +
+        '<div id="sr-err" class="cc-err" hidden></div>' +
+        '<div class="fa2-mrow"><button type="button" id="sr-cancel" class="cc-mini">Cancel</button><button type="button" id="sr-go" class="cc-btn">Send report</button></div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    fa2Call('admin', { adminPw: FA2.adminPw, op: 'report_preview' }).then(function (j) {
+      var st = document.getElementById('sr-stat'); if (!st) return;
+      st.textContent = j && j.ok ? (j.lots + ' lots \u00b7 ' + j.units + ' units on hand' + (j.instruction ? ' \u00b7 instruction sheet attached' : '')) : 'Couldn\u2019t read inventory.';
+    }).catch(function () { var st = document.getElementById('sr-stat'); if (st) st.textContent = ''; });
+    document.getElementById('sr-cancel').addEventListener('click', function () { wrap.remove(); });
+    document.getElementById('sr-go').addEventListener('click', function () {
+      var to = [].slice.call(wrap.querySelectorAll('.sr-em:checked')).map(function (c) { return c.value; });
+      var man = document.getElementById('sr-man').value.trim();
+      if (man) { if (man.indexOf('@') < 1) return fa2Err('sr-err', 'That email doesn\u2019t look right.'); to.push(man); }
+      if (!to.length) return fa2Err('sr-err', 'Pick at least one recipient.');
+      var b = document.getElementById('sr-go'); b.disabled = true; b.textContent = 'Sending\u2026';
+      fa2Call('admin', { adminPw: FA2.adminPw, op: 'send_report', to: to }).then(function (j) {
+        if (j && j.ok) { wrap.remove(); kitBanner(document.querySelector('.cc-card'), 'Report sent to ' + j.sent + ' recipient' + (j.sent > 1 ? 's' : '')); }
+        else { fa2Err('sr-err', (j && j.err === 'norecipients') ? 'No valid recipients.' : 'Couldn\u2019t send.'); b.disabled = false; b.textContent = 'Send report'; }
+      }).catch(function () { fa2Err('sr-err', 'Couldn\u2019t reach the server.'); b.disabled = false; b.textContent = 'Send report'; });
     });
   }
 
