@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.73';
+  var APPVER = '4.74';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2190,6 +2190,7 @@ var GLOSS = {
   function ccOnCode(txt) {
     var now = Date.now();
     if (CC.view === 'fa2add2') { fa2ScanCode(txt, now); return; }
+
     if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(120); return; }
     CC.cool = { code: txt, t: now, ms: 2200 };
     var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
@@ -3455,6 +3456,15 @@ var GLOSS = {
   }
 
   /* ---------- Add inventory, step 2: scan + manual ---------- */
+  function fa2DescOf(ref) {
+    var e = BYPN[nrm(ref)];
+    if (e === undefined) e = BYPN[nrm(ref).replace(/^0+/, '')];
+    if (e === undefined) return '';
+    var it = (typeof e === 'object' && e.kind)
+      ? (e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx])
+      : D.items[e];
+    return it ? (it.t || it.name || '') : '';
+  }
   function fa2ScanCode(txt, now) {
     if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(160); return; }
     CC.cool = { code: txt, t: now, ms: 2200 };
@@ -3471,9 +3481,7 @@ var GLOSS = {
       if (n.length >= 5 && n.length <= 20 && BYPN[n]) ref = skuOf(BYPN[n]);
     }
     if (!ref) { ccStatus('Unknown barcode \u2014 use + Manual'); ccSchedule(300); return; }
-    var e = BYPN[nrm(ref)];
-    var it = e ? (e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]) : null;
-    if (it) desc = it.t || it.name || '';
+    desc = fa2DescOf(ref);
     if (FA2.pendLE) { lot = lot || FA2.pendLE.lot; exp = exp || FA2.pendLE.exp; FA2.pendLE = null; }
     ccFlashGreen();
     fa2AddItem({ ref: ref, desc: desc, lot: lot, exp: exp, qty: 1 }, true);
@@ -3496,6 +3504,7 @@ var GLOSS = {
     var w = document.getElementById('a2-warn');
     if (w) { w.hidden = !bad; w.textContent = bad ? bad + ' item' + (bad > 1 ? 's need' : ' needs') + ' a lot and expiration \u2014 tap the item to fix.' : ''; }
   }
+  window.__TBX_ONCODE = function (txt) { return ccOnCode(txt); };
   function fa2Add2() {
     var f = FA2.form;
     if (!f || f.kind !== 'add' || !f.drop) { location.hash = '#/fa2/add'; return; }
@@ -3537,7 +3546,7 @@ var GLOSS = {
     });
     document.getElementById('a2-ref').addEventListener('input', function (e) {
       var d = document.getElementById('a2-desc');
-      if (d && !d.value) { var hit = BYPN[nrm(e.target.value)]; if (hit !== undefined && D.items[hit]) d.value = D.items[hit].name || ''; }
+      if (d && !d.value) { var dv = fa2DescOf(e.target.value); if (dv) d.value = dv; }
     });
     document.getElementById('a2-addman').addEventListener('click', function () {
       var ref = document.getElementById('a2-ref').value.trim();
