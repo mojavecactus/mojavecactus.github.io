@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.69';
+  var APPVER = '4.70';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1811,7 +1811,12 @@ var GLOSS = {
         var next = function () { okc(creds); };
         if (CC.terr === 'ct') { fa2TryUnlock(v).then(next, next); } else { next(); }
       }).catch(function () {
-        bad();
+        if (CC.terr === 'ct') {
+          fa2TryUnlockFA(v).then(function (ok) {
+            if (ok) { if (location.hash === '#/fa2') { fa2Home(); } else { location.hash = '#/fa2'; } }
+            else { bad(); }
+          });
+        } else { bad(); }
       });
     }
     go.addEventListener('click', tryPw);
@@ -2507,14 +2512,11 @@ var GLOSS = {
         (TR.hub ? '<div class="cc-sub"><button id="ct-mg" class="cc-link" type="button">Manage this team</button></div>' : '') +
         (ccLearnCount() ? '<div class="cc-sub">' + ccLearnCount() + ' new barcode' + (ccLearnCount() > 1 ? 's' : '') + ' learned on this phone <button id="ct-learn" class="cc-link" type="button">copy</button></div>' : '') +
         '<button id="ct-cc" class="ct-big">Cycle Count<span>Trunk &amp; closet counts by location</span></button>' +
-        (TR.fa ? '<button id="ct-fa" class="ct-big">F&amp;A Inventory<span>Product handed off to the Foot &amp; Ankle team</span></button>' : '') +
-        (TR.fa ? '<button id="ct-fa2" class="ct-big">F&amp;A Inventory <em class="fa2-em">v2</em><span>Preview \u2014 the new live inventory system</span></button>' : '') +
+        (TR.fa ? '<button id="ct-fa2" class="ct-big">F&amp;A Inventory <em class="fa2-em">v2</em><span>Live drops, usage, send-backs &amp; history</span></button>' : '') +
       '</div>');
     document.getElementById('ct-cc').addEventListener('click', function () { location.hash = TR.id === 'ct' ? '#/cc' : '#/team/' + TR.id + '/cc'; });
     var mg = document.getElementById('ct-mg');
     if (mg) mg.addEventListener('click', function () { location.hash = '#/team/' + TR.id + '/manage'; });
-    var fb = document.getElementById('ct-fa');
-    if (fb) fb.addEventListener('click', function () { location.hash = '#/fa'; });
     var fb2 = document.getElementById('ct-fa2');
     if (fb2) fb2.addEventListener('click', function () { location.hash = '#/fa2'; });
     var lb = document.getElementById('ct-learn');
@@ -3001,21 +3003,24 @@ var GLOSS = {
     location.replace('#/');
   }
   // ---- F&A Inventory v2 (fa2) — live event-sourced stock via the TBX FA Hub ----
-  var FA2 = { creds: null, cache: null };
+  var FA2 = { creds: null, cache: null, form: null, adminPw: '', pend: 0 };
   function fa2Save(c) { FA2.creds = c; try { localStorage.setItem('tbx_fa2', JSON.stringify(c)); } catch (e) {} }
   function fa2Creds() {
     if (FA2.creds) return FA2.creds;
     try { FA2.creds = JSON.parse(localStorage.getItem('tbx_fa2') || 'null'); } catch (e) { FA2.creds = null; }
     return FA2.creds;
   }
-  function fa2TryUnlock(pw) {
-    return fetch('fa2.enc.json').then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (P) {
+  function fa2Dec(file, pw) {
+    return fetch(file).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (P) {
       return crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey'])
         .then(function (km) { return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: ccB64d(P.salt), iterations: P.it }, km, { name: 'AES-GCM', length: 256 }, false, ['decrypt']); })
-        .then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: ccB64d(P.iv) }, key, ccB64d(P.ct)); });
-    }).then(function (buf) { fa2Save(JSON.parse(new TextDecoder().decode(buf))); })
-      .catch(function () {});
+        .then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: ccB64d(P.iv) }, key, ccB64d(P.ct)); })
+        .then(function (buf) { return JSON.parse(new TextDecoder().decode(buf)); });
+    });
   }
+  function fa2TryUnlock(pw) { return fa2Dec('fa2.enc.json', pw).then(fa2Save).catch(function () {}); }
+  function fa2TryUnlockFA(pw) { return fa2Dec('fa2-fa.enc.json', pw).then(function (c) { fa2Save(c); return true; }).catch(function () { return false; }); }
+  function fa2IsFA() { var c = fa2Creds(); return !!(c && c.scope === 'fa'); }
   function fa2Call(action, extra) {
     var c = fa2Creds(); if (!c) return Promise.reject(new Error('locked'));
     var b = { action: action, token: c.token };
@@ -3023,6 +3028,7 @@ var GLOSS = {
     return fetch(c.url, { method: 'POST', body: JSON.stringify(b) }).then(function (r) { return r.json(); });
   }
   function fa2Ensure(then) {
+    if (fa2IsFA()) return true;
     if (!ctEnsure(then)) return false;
     if (!fa2Creds()) {
       CC.creds = null; CC.ret = then;
@@ -3037,43 +3043,104 @@ var GLOSS = {
     return FA2.cache;
   }
   function fa2CacheSet(d) { FA2.cache = { t: Date.now(), d: d }; try { localStorage.setItem('tbx_fa2_cache', JSON.stringify(FA2.cache)); } catch (e) {} }
+  function fa2CacheKill() { FA2.cache = null; try { localStorage.removeItem('tbx_fa2_cache'); } catch (e) {} }
   function fa2Load(force) {
     var c = fa2CacheGet();
     if (!force && c && Date.now() - c.t < 60000) return Promise.resolve(c.d);
-    return fa2Call('read', { limit: 250 }).then(function (j) {
+    return fa2Call('read', { limit: 300 }).then(function (j) {
       if (j && j.ok) { fa2CacheSet(j); return j; }
       if (c) return c.d;
       throw new Error((j && j.err) || 'server');
     }).catch(function (e) { if (c) return c.d; throw e; });
   }
   function fa2Num(x) { var n = Number(x); return isFinite(n) ? n : 0; }
+  function fa2Uuid() { try { return crypto.randomUUID(); } catch (e) { return 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10); } }
   function fa2PillClass(s) {
     if (s === 'EXPIRED') return 'bad';
     if (s && s.indexOf('SEND BACK') === 0) return 'wait';
     if (s === '\u22643 MO') return 'busy';
     return 'ok';
   }
+  function fa2Who() { return fa2IsFA() ? (FA2.faName || '') : (CC.dev || ''); }
+  function fa2Teams(role) {
+    var d = fa2CacheGet();
+    var t = (d && d.d && d.d.teams) || [];
+    return t.filter(function (x) { return x.role === role; }).map(function (x) { return x.name; });
+  }
+  // pending (idempotent retry) queue: one batch at a time
+  function fa2PendGet() { try { return JSON.parse(localStorage.getItem('tbx_fa2_pend') || 'null'); } catch (e) { return null; } }
+  function fa2PendSet(p) { try { if (p) localStorage.setItem('tbx_fa2_pend', JSON.stringify(p)); else localStorage.removeItem('tbx_fa2_pend'); } catch (e) {} }
+  function fa2Submit(events, label, btn) {
+    var p = fa2PendGet();
+    var opId = (p && p.label === label) ? p.opId : fa2Uuid();
+    fa2PendSet({ opId: opId, label: label });
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
+    return fa2Call('batch', { opId: opId, events: events }).then(function (j) {
+      if (j && j.ok) { fa2PendSet(null); fa2CacheKill(); return j; }
+      throw new Error((j && j.err) || 'server');
+    });
+  }
+  function fa2Err(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg; el.hidden = false; } }
+  function fa2Shell(title, sub, inner) {
+    render(
+      '<div class="card cc-card">' +
+        '<h2 class="cc-h">' + title + '</h2>' +
+        (sub ? '<div class="cc-sub">' + sub + '</div>' : '') +
+        inner +
+        '<div id="fa2-err" class="cc-err" hidden></div>' +
+      '</div>');
+  }
+  function fa2Chips(id, opts, cur) {
+    return '<div class="fa2-chips" id="' + id + '">' + opts.map(function (o) {
+      return '<button type="button" class="fa2-chip' + (o === cur ? ' on' : '') + '" data-v="' + esc(o) + '">' + esc(o) + '</button>';
+    }).join('') + '</div>';
+  }
+  function fa2ChipWire(id, onPick) {
+    var el = document.getElementById(id); if (!el) return;
+    el.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.fa2-chip') : null; if (!b) return;
+      el.querySelectorAll('.fa2-chip').forEach(function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      onPick(b.dataset.v);
+    });
+  }
+
+  /* ---------- Home ---------- */
   function fa2Home() {
+    var fa = fa2IsFA();
     setTitle('F&A Inventory', 'v2'); backBtn.hidden = false;
     ccStop();
     if (!fa2Ensure(fa2Home)) return;
     CC.view = 'fa2home';
+    var tiles;
+    if (fa) {
+      tiles =
+        '<button id="fa2-onhand" class="ct-big">On hand<span>Product in your possession \u2014 first to expire on top</span></button>' +
+        '<button id="fa2-send" class="ct-big">Send back to Stryker<span>Scan out expiring or unused product \u2014 tracking # required</span></button>' +
+        '<button id="fa2-hist" class="ct-big">History<span>Every event, newest first</span></button>';
+    } else {
+      tiles =
+        '<button id="fa2-onhand" class="ct-big">On hand<span>What\u2019s out right now \u2014 first to expire on top</span></button>' +
+        '<button id="fa2-trans" class="ct-big">Transactions<span id="fa2-tsub">Bill-only imports \u2014 approve or deny</span></button>' +
+        '<button id="fa2-add" class="ct-big">Add inventory<span>Record a drop to the F&amp;A team</span></button>' +
+        '<button id="fa2-ret" class="ct-big">Remove / Return<span>Back to rep stock, transfer, or other</span></button>' +
+        '<button id="fa2-use" class="ct-big">Record case usage<span>Manual bill-only entry \u2014 BO, facility, surgeon</span></button>' +
+        '<button id="fa2-send" class="ct-big">Send back to Stryker<span>Tracking # required to complete</span></button>' +
+        '<button id="fa2-hist" class="ct-big">History<span>Append-only ledger \u2014 corrections are new events</span></button>' +
+        '<button id="fa2-adm" class="ct-big">Admin<span>Teams, sheet access &amp; email settings</span></button>';
+    }
     render(
       '<div class="card cc-card">' +
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<h2 class="cc-h">F&amp;A Inventory <em class="fa2-em">v2</em></h2>' +
-        '<div class="cc-sub">Live field stock \u2014 everything handed to the Foot &amp; Ankle team.</div>' +
+        '<div class="cc-sub">' + (fa ? 'F&amp;A view \u2014 send-backs only. Everything else is read-only.' : 'Live field stock \u2014 everything handed to the Foot &amp; Ankle team.') + '</div>' +
         '<div id="fa2-pills" class="fa2-pills"></div>' +
-        '<button id="fa2-onhand" class="ct-big">On hand<span>What\u2019s out right now \u2014 first to expire on top</span></button>' +
-        '<button id="fa2-hist" class="ct-big">History<span>Every event, newest first \u2014 nothing ever disappears</span></button>' +
-        '<button class="ct-big ct-soon" type="button">Add inventory<span>Coming in the next update</span></button>' +
-        '<button class="ct-big ct-soon" type="button">Record case usage<span>Coming in the next update</span></button>' +
-        '<button class="ct-big ct-soon" type="button">Send back to Stryker<span>Coming in the next update</span></button>' +
-        '<button class="ct-big ct-soon" type="button">Admin<span>Coming in the next update</span></button>' +
+        tiles +
         '<div id="fa2-msg" class="cc-sub2"></div>' +
       '</div>');
-    document.getElementById('fa2-onhand').addEventListener('click', function () { location.hash = '#/fa2/onhand'; });
-    document.getElementById('fa2-hist').addEventListener('click', function () { location.hash = '#/fa2/history'; });
+    function go(id, h) { var b = document.getElementById(id); if (b) b.addEventListener('click', function () { location.hash = h; }); }
+    go('fa2-onhand', '#/fa2/onhand'); go('fa2-hist', '#/fa2/history'); go('fa2-send', '#/fa2/send');
+    go('fa2-trans', '#/fa2/trans'); go('fa2-add', '#/fa2/add'); go('fa2-ret', '#/fa2/return'); go('fa2-use', '#/fa2/use'); go('fa2-adm', '#/fa2/admin');
     document.getElementById('fa2-rf').addEventListener('click', function () { fa2HomeLoad(true); });
     fa2HomeLoad(false);
   }
@@ -3089,15 +3156,24 @@ var GLOSS = {
       });
       if (p) p.innerHTML =
         '<span class="cc-pill ok">' + units + ' on hand</span>' +
-        (soon ? '<span class="cc-pill wait">' + soon + ' expiring \u22643 mo</span>' : '') +
+        (soon ? '<span class="cc-pill wait">' + soon + ' \u22643 mo</span>' : '') +
         (exp ? '<span class="cc-pill bad">' + exp + ' expired</span>' : '');
       if (m) m.textContent = '';
+      if (!fa2IsFA()) fa2Call('import_list').then(function (j) {
+        if (!j || !j.ok || CC.view !== 'fa2home') return;
+        var n = (j.imports || []).filter(function (x) { return x.outcome === 'pending' || x.outcome === 'revised-pending'; }).length;
+        FA2.pend = n;
+        var ts = document.getElementById('fa2-tsub');
+        if (ts && n) ts.innerHTML = '<b class="fa2-badge">' + n + ' pending</b> \u2014 tap to review';
+      }).catch(function () {});
     }).catch(function () {
       if (CC.view !== 'fa2home') return;
       if (p) p.innerHTML = '';
       if (m) m.textContent = 'Couldn\u2019t reach the server \u2014 check signal and try again.';
     });
   }
+
+  /* ---------- On hand ---------- */
   function fa2OnHand() {
     setTitle('On hand', ''); backBtn.hidden = false;
     ccStop();
@@ -3137,6 +3213,8 @@ var GLOSS = {
       if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
     });
   }
+
+  /* ---------- History (+ Void on sports) ---------- */
   function fa2History() {
     setTitle('History', ''); backBtn.hidden = false;
     ccStop();
@@ -3160,8 +3238,11 @@ var GLOSS = {
       if (!L.length) { el.innerHTML = '<div class="cc-empty">No events yet.</div>'; return; }
       var ix = {}; C.forEach(function (n, i) { ix[n] = i; });
       function g(r, n) { return ix[n] !== undefined && r[ix[n]] !== undefined && r[ix[n]] !== null ? String(r[ix[n]]) : ''; }
+      var voided = {};
+      L.forEach(function (r) { if (g(r, 'Type') === 'Void' && g(r, 'Reverses')) voided[g(r, 'Reverses')] = 1; });
+      var canVoid = !fa2IsFA();
       el.innerHTML = L.map(function (r) {
-        var ty = g(r, 'Type'), q = fa2Num(g(r, 'Qty'));
+        var ty = g(r, 'Type'), q = fa2Num(g(r, 'Qty')), eid = g(r, 'EventId');
         var neg = (ty === 'Used in case' || ty === 'Returned to rep' || ty === 'Sent back to Stryker');
         var sign = ty === 'Adjustment' ? (q > 0 ? '+' : '\u2212') : (neg ? '\u2212' : '+');
         var pc = ty === 'Adjustment' ? 'busy' : (neg ? 'bad' : 'ok');
@@ -3170,18 +3251,525 @@ var GLOSS = {
         var where = g(r, 'DropName') || g(r, 'ReceivedBy') || g(r, 'Facility'); if (where) bits.push(where);
         var xtra = g(r, 'CaseBO') || g(r, 'Tracking') || g(r, 'Reason'); if (xtra) bits.push(xtra);
         var fl = g(r, 'Flags'); if (fl) bits.push(fl);
-        return '<div class="fa2-row">' +
+        if (voided[eid]) bits.push('VOIDED');
+        var vlink = (canVoid && ty !== 'Void' && !voided[eid] && eid) ? ' <button type="button" class="cc-link fa2-void" data-eid="' + esc(eid) + '" data-ref="' + esc(g(r, 'Ref')) + '" data-lot="' + esc(g(r, 'Lot')) + '">void</button>' : '';
+        return '<div class="fa2-row' + (voided[eid] ? ' fa2-dim' : '') + '">' +
           '<div class="fa2-l"><div class="fa2-t">' + esc(ty) + (g(r, 'Ref') ? ' \u2014 ' + esc(g(r, 'Ref')) : '') + (g(r, 'Lot') ? ' <span class="fa2-lot">Lot ' + esc(g(r, 'Lot')) + '</span>' : '') + '</div>' +
-          '<div class="fa2-s">' + esc(bits.join(' \u00b7 ')) + '</div></div>' +
+          '<div class="fa2-s">' + esc(bits.join(' \u00b7 ')) + vlink + '</div></div>' +
           '<div class="fa2-r">' + (ty === 'Void' ? '<span class="cc-pill">VOID</span>' : '<span class="cc-pill ' + pc + '">' + sign + Math.abs(q) + '</span>') + '</div>' +
         '</div>';
       }).join('');
+      el.addEventListener('click', function (e) {
+        var b = e.target.closest ? e.target.closest('.fa2-void') : null; if (!b) return;
+        if (!confirm('Void this event? It stays in the ledger, reversed by a Void entry.')) return;
+        fa2Submit([{ type: 'Void', reverses: b.dataset.eid, ref: b.dataset.ref, lot: b.dataset.lot, enteredBy: fa2Who() }], 'void-' + b.dataset.eid, b)
+          .then(function () { fa2HistLoad(true); })
+          .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t save the void \u2014 try again.'); b.disabled = false; b.textContent = 'void'; });
+      });
     }).catch(function () {
       if (CC.view !== 'fa2hist') return;
       var el = document.getElementById('fa2-list');
       if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
     });
   }
+
+  /* ---------- Add inventory (drop) ---------- */
+  function fa2ItemRows(items, needLot) {
+    return items.map(function (it, i) {
+      return '<div class="fa2-item" data-i="' + i + '">' +
+        '<div class="fa2-itop"><b>Item ' + (i + 1) + '</b>' + (items.length > 1 ? '<button type="button" class="fa2-x" data-i="' + i + '">\u00d7</button>' : '') + '</div>' +
+        '<input class="cc-in fa2-f" data-f="ref" data-i="' + i + '" placeholder="REF (part number)" value="' + esc(it.ref || '') + '">' +
+        '<input class="cc-in fa2-f" data-f="desc" data-i="' + i + '" placeholder="Description" value="' + esc(it.desc || '') + '">' +
+        '<input class="cc-in fa2-f" data-f="lot" data-i="' + i + '" placeholder="Lot' + (needLot ? '' : ' (optional)') + '" value="' + esc(it.lot || '') + '">' +
+        '<div class="fa2-2col">' +
+          '<input class="cc-in fa2-f" data-f="exp" data-i="' + i + '" placeholder="Exp (YYYY-MM)" value="' + esc(it.exp || '') + '">' +
+          '<input class="cc-in fa2-f" data-f="qty" data-i="' + i + '" type="number" min="1" placeholder="Qty" value="' + esc(it.qty || '') + '">' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+  function fa2Add() {
+    setTitle('Add inventory', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Add)) return;
+    CC.view = 'fa2add';
+    if (!FA2.form || FA2.form.kind !== 'add') FA2.form = { kind: 'add', drop: '', date: new Date().toISOString().slice(0, 10), from: '', fromOther: '', rb: '', accName: '', accLoc: '', items: [{}] };
+    var f = FA2.form;
+    var faNames = fa2Teams('fa');
+    var rbOpts = faNames.concat(['Bloomfield Warehouse', 'Account']);
+    fa2Shell('Add inventory', 'Record a drop to the F&amp;A team. Expiration is required.',
+      '<input id="fa2-drop" class="cc-in" placeholder="Drop name (e.g. Hartford office drop)" value="' + esc(f.drop) + '">' +
+      '<input id="fa2-date" class="cc-in" type="date" value="' + esc(f.date) + '">' +
+      '<div class="fa2-lab">From</div>' + fa2Chips('fa2-from', ['Megan', 'Matt', 'Mia', 'Manny', 'Isabella', 'Nate', 'Other'], f.from) +
+      '<input id="fa2-fromo" class="cc-in" placeholder="Who? (free text)" value="' + esc(f.fromOther) + '"' + (f.from === 'Other' ? '' : ' hidden') + '>' +
+      '<div class="fa2-lab">Received by</div>' + (rbOpts.length > 2 ? '' : '<div class="cc-sub2">Tip: add F&amp;A members in Admin to pick them here.</div>') + fa2Chips('fa2-rb', rbOpts, f.rb) +
+      '<div id="fa2-acc"' + (f.rb === 'Account' ? '' : ' hidden') + '>' +
+        '<input id="fa2-accn" class="cc-in" placeholder="Account name (required)" value="' + esc(f.accName) + '">' +
+        '<input id="fa2-accl" class="cc-in" placeholder="Where at the account? (required)" value="' + esc(f.accLoc) + '">' +
+      '</div>' +
+      '<div id="fa2-items">' + fa2ItemRows(f.items, true) + '</div>' +
+      '<button id="fa2-more" type="button" class="cc-mini">+ Add another item</button>' +
+      '<button id="fa2-go" class="cc-btn">Save drop</button>');
+    document.getElementById('fa2-drop').addEventListener('input', function (e) { f.drop = e.target.value; });
+    document.getElementById('fa2-date').addEventListener('input', function (e) { f.date = e.target.value; });
+    fa2ChipWire('fa2-from', function (v) { f.from = v; document.getElementById('fa2-fromo').hidden = v !== 'Other'; });
+    fa2ChipWire('fa2-rb', function (v) { f.rb = v; document.getElementById('fa2-acc').hidden = v !== 'Account'; });
+    document.getElementById('fa2-fromo').addEventListener('input', function (e) { f.fromOther = e.target.value; });
+    document.getElementById('fa2-accn').addEventListener('input', function (e) { f.accName = e.target.value; });
+    document.getElementById('fa2-accl').addEventListener('input', function (e) { f.accLoc = e.target.value; });
+    var wrap = document.getElementById('fa2-items');
+    wrap.addEventListener('input', function (e) {
+      var t = e.target; if (!t.classList.contains('fa2-f')) return;
+      var it = f.items[+t.dataset.i]; it[t.dataset.f] = t.value;
+      if (t.dataset.f === 'ref' && !it.desc) {
+        var hit = BYPN[nrm(t.value)];
+        if (hit !== undefined && D.items[hit]) {
+          it.desc = D.items[hit].name || '';
+          var dEl = wrap.querySelector('.fa2-f[data-f="desc"][data-i="' + t.dataset.i + '"]');
+          if (dEl) dEl.value = it.desc;
+        }
+      }
+    });
+    wrap.addEventListener('click', function (e) {
+      var x = e.target.closest ? e.target.closest('.fa2-x') : null; if (!x) return;
+      f.items.splice(+x.dataset.i, 1);
+      wrap.innerHTML = fa2ItemRows(f.items, true);
+    });
+    document.getElementById('fa2-more').addEventListener('click', function () {
+      f.items.push({}); wrap.innerHTML = fa2ItemRows(f.items, true);
+    });
+    document.getElementById('fa2-go').addEventListener('click', function () {
+      var from = f.from === 'Other' ? f.fromOther.trim() : f.from;
+      if (!f.drop.trim()) return fa2Err('fa2-err', 'Give the drop a name.');
+      if (!from) return fa2Err('fa2-err', 'Pick who it came from.');
+      if (!f.rb) return fa2Err('fa2-err', 'Pick who received it.');
+      if (f.rb === 'Account' && (!f.accName.trim() || !f.accLoc.trim())) return fa2Err('fa2-err', 'Account name and location are both required.');
+      var evs = [];
+      for (var i = 0; i < f.items.length; i++) {
+        var it = f.items[i];
+        if (!s(it.ref)) return fa2Err('fa2-err', 'Item ' + (i + 1) + ': REF is required.');
+        if (!s(it.lot)) return fa2Err('fa2-err', 'Item ' + (i + 1) + ': lot is required.');
+        if (!s(it.exp)) return fa2Err('fa2-err', 'Item ' + (i + 1) + ': expiration is required.');
+        var q = fa2Num(it.qty); if (q < 1) return fa2Err('fa2-err', 'Item ' + (i + 1) + ': quantity must be at least 1.');
+        evs.push({ type: 'Received', ref: s(it.ref), desc: s(it.desc), lot: s(it.lot), exp: s(it.exp), qty: q,
+          dropName: f.drop.trim(), from: from, receivedBy: f.rb,
+          accountName: f.rb === 'Account' ? f.accName.trim() : '', accountLocation: f.rb === 'Account' ? f.accLoc.trim() : '',
+          eventDate: f.date, entryMethod: 'manual', enteredBy: fa2Who() });
+      }
+      function s(x) { return String(x || '').trim(); }
+      fa2Submit(evs, 'add-' + f.drop + '-' + f.date, document.getElementById('fa2-go'))
+        .then(function () { FA2.form = null; location.hash = '#/fa2'; })
+        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 nothing lost, tap Save again.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save drop'; } });
+    });
+  }
+
+  /* ---------- shared on-hand picker ---------- */
+  function fa2Picker(d, picks, allowOver) {
+    var rows = d.master || [];
+    if (!rows.length) return '<div class="cc-empty">Nothing on hand.</div>';
+    return rows.map(function (r, i) {
+      var key = r[0] + '\u0001' + r[2];
+      var onhand = fa2Num(r[4]);
+      var v = picks[key] ? picks[key].qty : 0;
+      return '<div class="fa2-row">' +
+        '<div class="fa2-l"><div class="fa2-t">' + esc(r[0]) + (r[1] ? ' \u2014 ' + esc(r[1]) : '') + '</div>' +
+        '<div class="fa2-s">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + ' \u00b7 ' + onhand + ' on hand</div></div>' +
+        '<div class="fa2-pickq">' +
+          '<button type="button" class="fa2-qb" data-k="' + esc(key) + '" data-d="-1">\u2212</button>' +
+          '<b class="fa2-qv" data-k="' + esc(key) + '">' + v + '</b>' +
+          '<button type="button" class="fa2-qb" data-k="' + esc(key) + '" data-d="1">+</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+  function fa2PickWire(el, d, picks, allowOver, onChange) {
+    var byKey = {};
+    (d.master || []).forEach(function (r) { byKey[r[0] + '\u0001' + r[2]] = { ref: r[0], desc: r[1], lot: r[2], exp: r[3], onhand: fa2Num(r[4]) }; });
+    el.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.fa2-qb') : null; if (!b) return;
+      var k = b.dataset.k, m = byKey[k]; if (!m) return;
+      var cur = picks[k] ? picks[k].qty : 0;
+      var next = cur + (+b.dataset.d);
+      if (next < 0) next = 0;
+      if (!allowOver && next > m.onhand) next = m.onhand;
+      if (next === 0) delete picks[k]; else picks[k] = { ref: m.ref, desc: m.desc, lot: m.lot, exp: m.exp, onhand: m.onhand, qty: next };
+      var vEl = el.querySelector('.fa2-qv[data-k="' + (window.CSS && CSS.escape ? CSS.escape(k) : k) + '"]');
+      if (!vEl) { el.querySelectorAll('.fa2-qv').forEach(function (x) { if (x.dataset.k === k) vEl = x; }); }
+      if (vEl) vEl.textContent = next;
+      if (onChange) onChange();
+    });
+  }
+
+  /* ---------- Remove / Return ---------- */
+  function fa2Return() {
+    setTitle('Remove / Return', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Return)) return;
+    CC.view = 'fa2ret';
+    var picks = {}; var reason = { v: '', other: '' };
+    fa2Shell('Remove / Return', 'Back to rep stock or elsewhere \u2014 no tracking needed. Stryker send-backs have their own flow.',
+      '<div class="fa2-lab">Reason</div>' + fa2Chips('fa2-rsn', ['Returned to rep stock', 'Transfer', 'Other'], '') +
+      '<input id="fa2-rsno" class="cc-in" placeholder="Reason (free text)" hidden>' +
+      '<div class="fa2-lab">Items</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<button id="fa2-go" class="cc-btn">Remove selected</button>');
+    fa2ChipWire('fa2-rsn', function (v) { reason.v = v; document.getElementById('fa2-rsno').hidden = v !== 'Other'; });
+    document.getElementById('fa2-rsno').addEventListener('input', function (e) { reason.other = e.target.value; });
+    fa2Load(false).then(function (d) {
+      if (CC.view !== 'fa2ret') return;
+      var el = document.getElementById('fa2-pick');
+      el.innerHTML = fa2Picker(d, picks, false);
+      fa2PickWire(el, d, picks, false, null);
+    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
+    document.getElementById('fa2-go').addEventListener('click', function () {
+      var rs = reason.v === 'Other' ? reason.other.trim() : reason.v;
+      if (!rs) return fa2Err('fa2-err', 'Pick a reason.');
+      var keys = Object.keys(picks);
+      if (!keys.length) return fa2Err('fa2-err', 'Pick at least one item.');
+      var evs = keys.map(function (k) {
+        var p = picks[k];
+        return { type: 'Returned to rep', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, reason: rs, entryMethod: 'manual', enteredBy: fa2Who() };
+      });
+      fa2Submit(evs, 'ret-' + Date.now(), document.getElementById('fa2-go'))
+        .then(function () { location.hash = '#/fa2'; })
+        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; } });
+    });
+  }
+
+  /* ---------- Send back to Stryker ---------- */
+  function fa2Send() {
+    setTitle('Send back', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Send)) return;
+    CC.view = 'fa2send';
+    var fa = fa2IsFA();
+    var picks = {}; var trk = { v: '' };
+    var namePick = fa ? '<div class="fa2-lab">Your name</div><div id="fa2-nmwrap"><div class="cc-empty">Loading team\u2026</div></div>' : '';
+    fa2Shell('Send back to Stryker', 'Works before or after expiration. <b>Tracking # required to complete.</b>',
+      namePick +
+      '<div class="fa2-lab">Items</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (required)">' +
+      '<button id="fa2-go" class="cc-btn" disabled>Complete send-back</button>');
+    var goBtn = document.getElementById('fa2-go');
+    function gate() { goBtn.disabled = !(trk.v.trim() && Object.keys(picks).length && (!fa || FA2.faName)); }
+    document.getElementById('fa2-trk').addEventListener('input', function (e) { trk.v = e.target.value; gate(); });
+    fa2Load(false).then(function (d) {
+      if (CC.view !== 'fa2send') return;
+      var el = document.getElementById('fa2-pick');
+      el.innerHTML = fa2Picker(d, picks, false);
+      fa2PickWire(el, d, picks, false, gate);
+      if (fa) {
+        var names = fa2Teams('fa');
+        var nw = document.getElementById('fa2-nmwrap');
+        nw.innerHTML = names.length ? fa2Chips('fa2-nm', names, FA2.faName || '') : '<div class="cc-sub2">No F&amp;A team members set yet \u2014 ask Nate to add you in Admin.</div>';
+        fa2ChipWire('fa2-nm', function (v) { FA2.faName = v; gate(); });
+      }
+    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
+    goBtn.addEventListener('click', function () {
+      var evs = Object.keys(picks).map(function (k) {
+        var p = picks[k];
+        return { type: 'Sent back to Stryker', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, tracking: trk.v.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
+      });
+      fa2Submit(evs, 'send-' + trk.v.trim(), goBtn)
+        .then(function () { location.hash = '#/fa2'; })
+        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); goBtn.disabled = false; goBtn.textContent = 'Complete send-back'; });
+    });
+  }
+
+  /* ---------- Record case usage (+ overdraft warn-and-allow) ---------- */
+  function fa2Use() {
+    setTitle('Case usage', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Use)) return;
+    CC.view = 'fa2use';
+    if (!FA2.form || FA2.form.kind !== 'use') FA2.form = { kind: 'use', bo: '', po: '', fac: '', sur: '', dos: new Date().toISOString().slice(0, 10), pat: '' };
+    var f = FA2.form;
+    var picks = {}; var over = {};
+    fa2Shell('Record case usage', 'Manual bill-only entry. Going over on-hand asks how to resolve it.',
+      '<input id="u-bo" class="cc-in" placeholder="BO # (C-number)" value="' + esc(f.bo) + '">' +
+      '<input id="u-po" class="cc-in" placeholder="PO #" value="' + esc(f.po) + '">' +
+      '<input id="u-fac" class="cc-in" placeholder="Facility" value="' + esc(f.fac) + '">' +
+      '<input id="u-sur" class="cc-in" placeholder="Surgeon" value="' + esc(f.sur) + '">' +
+      '<div class="fa2-2col"><input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '"><input id="u-pat" class="cc-in" placeholder="Patient ID (optional)" value="' + esc(f.pat) + '"></div>' +
+      '<div class="fa2-lab">Items used</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<button id="fa2-go" class="cc-btn">Save usage</button>');
+    ['bo', 'po', 'fac', 'sur', 'dos', 'pat'].forEach(function (k) {
+      document.getElementById('u-' + k).addEventListener('input', function (e) { f[k] = e.target.value; });
+    });
+    fa2Load(false).then(function (d) {
+      if (CC.view !== 'fa2use') return;
+      var el = document.getElementById('fa2-pick');
+      el.innerHTML = fa2Picker(d, picks, true);
+      fa2PickWire(el, d, picks, true, null);
+    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
+    document.getElementById('fa2-go').addEventListener('click', function () {
+      if (!f.bo.trim()) return fa2Err('fa2-err', 'BO # is required.');
+      if (!f.fac.trim()) return fa2Err('fa2-err', 'Facility is required.');
+      var keys = Object.keys(picks);
+      if (!keys.length) return fa2Err('fa2-err', 'Pick at least one item.');
+      var overs = keys.filter(function (k) { return picks[k].qty > picks[k].onhand && !over[k]; });
+      if (overs.length) return fa2Overdraft(picks[overs[0]], overs[0], over, function () { document.getElementById('fa2-go').click(); });
+      var evs = [];
+      keys.forEach(function (k) {
+        var p = picks[k];
+        var eid = fa2Uuid();
+        if (over[k]) {
+          evs.push({ eventId: fa2Uuid(), type: 'Received', ref: p.ref, desc: p.desc, lot: p.lot, exp: p.exp || over[k].exp || '2099-12',
+            qty: p.qty - p.onhand, receivedBy: over[k].src, eventDate: over[k].date, note: over[k].notes,
+            flags: 'Late entry', linkedTo: eid, entryMethod: 'manual', enteredBy: fa2Who() });
+        }
+        evs.push({ eventId: eid, type: 'Used in case', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty,
+          caseBO: f.bo.trim(), casePO: f.po.trim(), facility: f.fac.trim(), surgeon: f.sur.trim(), dos: f.dos, patientId: f.pat.trim(),
+          entryMethod: 'manual', enteredBy: fa2Who() });
+      });
+      fa2Submit(evs, 'use-' + f.bo.trim(), document.getElementById('fa2-go'))
+        .then(function () { FA2.form = null; location.hash = '#/fa2'; })
+        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save usage'; } });
+    });
+  }
+  function fa2Overdraft(p, key, over, done) {
+    var short = p.qty - p.onhand;
+    var wrap = document.createElement('div');
+    wrap.className = 'fa2-modal';
+    wrap.innerHTML =
+      '<div class="fa2-mcard">' +
+        '<div class="fa2-t">Not enough on hand</div>' +
+        '<div class="fa2-s" style="margin:6px 0 10px">' + esc(p.ref) + ' Lot ' + esc(p.lot) + ' \u2014 using ' + p.qty + ', only ' + p.onhand + ' recorded (' + short + ' short).</div>' +
+        '<label class="fa2-chk"><input id="od-chk" type="checkbox"> This inventory was already transferred \u2014 it just never got entered</label>' +
+        '<div id="od-more" hidden>' +
+          '<input id="od-src" class="cc-in" placeholder="Where it came from (required)">' +
+          '<input id="od-date" class="cc-in" type="date">' +
+          '<input id="od-notes" class="cc-in" placeholder="Notes">' +
+        '</div>' +
+        '<div class="fa2-mrow"><button id="od-cancel" type="button" class="cc-mini">Cancel</button><button id="od-go" type="button" class="cc-btn" disabled>Record &amp; continue</button></div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    var chk = wrap.querySelector('#od-chk'), more = wrap.querySelector('#od-more'), go = wrap.querySelector('#od-go'), src = wrap.querySelector('#od-src');
+    function gate() { go.disabled = !(chk.checked && src.value.trim()); }
+    chk.addEventListener('change', function () { more.hidden = !chk.checked; gate(); });
+    src.addEventListener('input', gate);
+    wrap.querySelector('#od-cancel').addEventListener('click', function () { wrap.remove(); });
+    go.addEventListener('click', function () {
+      over[key] = { src: src.value.trim(), date: wrap.querySelector('#od-date').value, notes: wrap.querySelector('#od-notes').value.trim() };
+      wrap.remove(); done();
+    });
+  }
+
+  /* ---------- Transactions (imports approve/deny) ---------- */
+  function fa2Trans() {
+    setTitle('Transactions', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Trans)) return;
+    CC.view = 'fa2trans';
+    render(
+      '<div class="card cc-card">' +
+        '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
+        '<h2 class="cc-h">Transactions</h2>' +
+        '<div class="cc-sub">Bill-only imports \u2014 clean ones auto-apply, the rest wait here.</div>' +
+        '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
+        '<div id="fa2-err" class="cc-err" hidden></div>' +
+      '</div>');
+    document.getElementById('fa2-rf').addEventListener('click', function () { fa2TransLoad(); });
+    fa2TransLoad();
+  }
+  function fa2TransLoad() {
+    fa2Call('import_list').then(function (j) {
+      if (CC.view !== 'fa2trans') return;
+      var el = document.getElementById('fa2-list'); if (!el) return;
+      if (!j || !j.ok) { el.innerHTML = '<div class="cc-empty">Couldn\u2019t load imports.</div>'; return; }
+      var imps = j.imports || [];
+      if (!imps.length) { el.innerHTML = '<div class="cc-empty">No imports yet. Email a bill only to the +fa inbox or upload one here later.</div>'; return; }
+      var pend = imps.filter(function (x) { return x.outcome === 'pending' || x.outcome === 'revised-pending'; });
+      var rest = imps.filter(function (x) { return x.outcome !== 'pending' && x.outcome !== 'revised-pending'; });
+      function card(x, isPend) {
+        var lines = (x.detail && x.detail.lines) || [];
+        var iss = lines.filter(function (L) { return L.issue && !L.skipped; }).length;
+        var sub = [x.ts.slice(0, 10), x.source, lines.length + ' lines'].concat(iss ? [iss + ' issue' + (iss > 1 ? 's' : '')] : []).join(' \u00b7 ');
+        return '<div class="fa2-row">' +
+          '<div class="fa2-l"><div class="fa2-t">' + esc(x.bo || '(no BO)') + ' <span class="cc-pill ' + (isPend ? 'wait' : (x.outcome === 'auto' || x.outcome === 'approved' ? 'ok' : '')) + '">' + esc(x.outcome) + '</span></div>' +
+          '<div class="fa2-s">' + esc(sub) + (x.pdf ? ' \u00b7 <a class="cc-link" href="' + esc(x.pdf) + '" target="_blank" rel="noopener">PDF</a>' : '') + '</div></div>' +
+          (isPend ? '<div class="fa2-r"><button type="button" class="cc-mini fa2-rev" data-id="' + esc(x.importId) + '">Review</button></div>' : '') +
+        '</div>';
+      }
+      el.innerHTML =
+        (pend.length ? '<div class="fa2-eyebrow">Pending (' + pend.length + ')</div>' + pend.map(function (x) { return card(x, true); }).join('') : '') +
+        (rest.length ? '<div class="fa2-eyebrow">Recent</div>' + rest.map(function (x) { return card(x, false); }).join('') : '');
+      el.addEventListener('click', function (e) {
+        var b = e.target.closest ? e.target.closest('.fa2-rev') : null; if (!b) return;
+        var x = pend.filter(function (p) { return p.importId === b.dataset.id; })[0];
+        if (x) fa2TransEdit(x);
+      });
+    }).catch(function () {
+      if (CC.view !== 'fa2trans') return;
+      var el = document.getElementById('fa2-list');
+      if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server.</div>';
+    });
+  }
+  function fa2TransEdit(x) {
+    CC.view = 'fa2tedit';
+    setTitle('Review import', '');
+    var lines = ((x.detail && x.detail.lines) || []).map(function (L) { return JSON.parse(JSON.stringify(L)); });
+    var hdr = (x.detail && x.detail.hdr) || {};
+    function lineRow(L, i) {
+      return '<div class="fa2-item">' +
+        '<div class="fa2-itop"><b>' + esc(L.refRaw) + '</b>' + (L.issue ? '<span class="cc-pill ' + (L.skipped ? '' : 'wait') + '">' + esc(L.issue) + '</span>' : '<span class="cc-pill ok">ok</span>') + '</div>' +
+        '<div class="fa2-s">' + esc(L.desc || '') + ' \u00b7 qty ' + esc(L.qty) + (L.lineTotal ? ' \u00b7 $' + esc(L.lineTotal) : '') + '</div>' +
+        '<div class="fa2-2col">' +
+          '<input class="cc-in fa2-tl" data-f="lot" data-i="' + i + '" placeholder="Lot" value="' + esc(L.lot || '') + '"' + (L.skipped ? ' disabled' : '') + '>' +
+          '<label class="fa2-chk"><input type="checkbox" class="fa2-tl" data-f="skip" data-i="' + i + '"' + (L.skipped ? ' checked' : '') + '> Not F&amp;A stock \u2014 skip</label>' +
+        '</div>' +
+        (L.issue === 'overdraft' ? '<button type="button" class="cc-mini fa2-res" data-i="' + i + '">' + (L.resolve ? 'Overdraft resolved \u2713' : 'Resolve overdraft\u2026') + '</button>' : '') +
+      '</div>';
+    }
+    fa2Shell('Review ' + esc(x.bo || 'import'),
+      esc([hdr.facility, hdr.dos, hdr.surgeon].filter(Boolean).join(' \u00b7 ')),
+      '<div id="fa2-tlines">' + lines.map(lineRow).join('') + '</div>' +
+      '<div class="fa2-mrow">' +
+        '<button id="t-deny" type="button" class="cc-mini cc-endb">Deny all</button>' +
+        '<button id="t-appr" type="button" class="cc-btn">Approve</button>' +
+      '</div>' +
+      '<button id="t-back" type="button" class="cc-link" style="margin-top:10px">\u2039 Back to transactions</button>');
+    var wrap = document.getElementById('fa2-tlines');
+    wrap.addEventListener('input', function (e) {
+      var t = e.target; if (!t.classList.contains('fa2-tl')) return;
+      var L = lines[+t.dataset.i];
+      if (t.dataset.f === 'lot') { L.lot = t.value.trim().toUpperCase(); }
+    });
+    wrap.addEventListener('change', function (e) {
+      var t = e.target; if (!t.classList.contains('fa2-tl') || t.dataset.f !== 'skip') return;
+      lines[+t.dataset.i].skipped = t.checked;
+      wrap.innerHTML = lines.map(lineRow).join('');
+    });
+    wrap.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.fa2-res') : null; if (!b) return;
+      var L = lines[+b.dataset.i];
+      fa2Overdraft({ ref: L.refRaw, lot: L.lot, qty: L.qty, onhand: 0 }, 'imp', {}, function () {});
+      // reuse modal but capture into the line:
+      var mo = document.querySelector('.fa2-modal');
+      if (mo) {
+        var go = mo.querySelector('#od-go');
+        go.addEventListener('click', function () {
+          L.resolve = { source: mo.querySelector('#od-src').value.trim(), date: mo.querySelector('#od-date').value, notes: mo.querySelector('#od-notes').value.trim() };
+          wrap.innerHTML = lines.map(lineRow).join('');
+        });
+      }
+    });
+    document.getElementById('t-back').addEventListener('click', function () { fa2Trans(); });
+    document.getElementById('t-deny').addEventListener('click', function () {
+      if (!confirm('Deny this whole import? No inventory changes.')) return;
+      fa2Call('import_deny', { importId: x.importId, by: fa2Who() }).then(function (j) {
+        if (j && j.ok) { fa2Trans(); } else fa2Err('fa2-err', 'Deny failed: ' + ((j && j.err) || 'server'));
+      }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
+    });
+    document.getElementById('t-appr').addEventListener('click', function () {
+      var send = lines.map(function (L) {
+        return { refRaw: L.refRaw, desc: L.desc, lot: L.lot, qty: L.qty, unitPrice: L.unitPrice, lineTotal: L.lineTotal, skipped: !!L.skipped, resolve: L.resolve || null };
+      });
+      var b = document.getElementById('t-appr'); b.disabled = true; b.textContent = 'Applying\u2026';
+      fa2Call('import_approve', { importId: x.importId, lines: send, by: fa2Who() }).then(function (j) {
+        if (j && j.ok) { fa2CacheKill(); fa2Trans(); }
+        else { fa2Err('fa2-err', 'Approve failed: ' + ((j && j.err) || 'server') + (j && j.at !== undefined ? ' (line ' + (j.at + 1) + ')' : '')); b.disabled = false; b.textContent = 'Approve'; }
+      }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); b.disabled = false; b.textContent = 'Approve'; });
+    });
+  }
+
+  /* ---------- Admin ---------- */
+  function fa2Admin() {
+    setTitle('Admin', ''); backBtn.hidden = false;
+    ccStop();
+    if (!fa2Ensure(fa2Admin)) return;
+    CC.view = 'fa2adm';
+    if (!FA2.adminPw) {
+      fa2Shell('Admin', 'Master password required.',
+        '<input id="a-pw" class="cc-in" type="password" autocomplete="off" placeholder="Admin password">' +
+        '<button id="a-go" class="cc-btn">Unlock</button>');
+      var go = document.getElementById('a-go');
+      function tryA() {
+        var v = document.getElementById('a-pw').value; if (!v) return;
+        go.disabled = true; go.textContent = 'Checking\u2026';
+        fa2Call('admin', { adminPw: v, op: 'toggles_get' }).then(function (j) {
+          if (j && j.ok) { FA2.adminPw = v; fa2Admin(); }
+          else { go.disabled = false; go.textContent = 'Unlock'; fa2Err('fa2-err', j && j.err === 'adminpw' ? 'Wrong password.' : 'Server error.'); }
+        }).catch(function () { go.disabled = false; go.textContent = 'Unlock'; fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
+      }
+      go.addEventListener('click', tryA);
+      document.getElementById('a-pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') tryA(); });
+      return;
+    }
+    fa2Shell('Admin', 'Teams control sheet access and email recipients. Changes save instantly.',
+      '<div id="a-body"><div class="cc-empty">Loading\u2026</div></div>');
+    fa2AdminLoad();
+  }
+  function fa2AdminLoad() {
+    Promise.all([
+      fa2Call('admin', { adminPw: FA2.adminPw, op: 'teams_get' }),
+      fa2Call('admin', { adminPw: FA2.adminPw, op: 'toggles_get' })
+    ]).then(function (rs) {
+      if (CC.view !== 'fa2adm') return;
+      var teams = (rs[0] && rs[0].teams) || [];
+      var tg = (rs[1] && rs[1].toggles) || {};
+      FA2.teams = teams;
+      var body = document.getElementById('a-body'); if (!body) return;
+      function section(role, label) {
+        var list = teams.map(function (t, i) { return { t: t, i: i }; }).filter(function (x) { return x.t.role === role; });
+        return '<div class="fa2-lab">' + label + '</div>' +
+          (list.length ? list.map(function (x) {
+            return '<div class="fa2-row"><div class="fa2-l"><div class="fa2-t">' + esc(x.t.name) + '</div><div class="fa2-s">' + esc(x.t.email) + (x.t.active ? '' : ' \u00b7 inactive') + '</div></div>' +
+              '<div class="fa2-r"><button type="button" class="fa2-x a-del" data-i="' + x.i + '">\u00d7</button></div></div>';
+          }).join('') : '<div class="cc-sub2">Nobody yet.</div>') +
+          '<div class="fa2-2col"><input class="cc-in a-nm" data-r="' + role + '" placeholder="Name"><input class="cc-in a-em" data-r="' + role + '" placeholder="Email"></div>' +
+          '<button type="button" class="cc-mini a-add" data-r="' + role + '">+ Add to ' + label + '</button>';
+      }
+      body.innerHTML =
+        section('sports', 'Sports team') +
+        section('fa', 'F&amp;A team') +
+        '<div class="fa2-lab">Emails</div>' +
+        '<label class="fa2-chk"><input id="a-tw" type="checkbox"' + (tg.weeklyEmail ? ' checked' : '') + '> Weekly F&amp;A expiring report (Sun 8 PM)</label>' +
+        '<label class="fa2-chk"><input id="a-tm" type="checkbox"' + (tg.monthlyEmail ? ' checked' : '') + '> Monthly sports summary (1st, 8 AM)</label>' +
+        '<div class="fa2-lab">Test &amp; tools</div>' +
+        '<div class="fa2-mrow">' +
+          '<button type="button" id="a-ew" class="cc-mini">Send weekly now</button>' +
+          '<button type="button" id="a-em2" class="cc-mini">Send monthly now</button>' +
+          '<button type="button" id="a-poll" class="cc-mini">Check inbox now</button>' +
+        '</div>' +
+        '<div id="a-out" class="cc-sub2"></div>';
+      function saveTeams() {
+        fa2Call('admin', { adminPw: FA2.adminPw, op: 'teams_set', rows: FA2.teams }).then(function (j) {
+          if (j && j.ok) { FA2.teams = j.teams; fa2CacheKill(); fa2AdminLoad(); var o = document.getElementById('a-out'); if (o && j.sharing) o.textContent = 'Sheet access synced' + (j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : '') + (j.sharing.errors.length ? ' \u00b7 issues: ' + j.sharing.errors.join('; ') : '') + '.'; }
+          else fa2Err('fa2-err', 'Save failed.');
+        }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
+      }
+      body.addEventListener('click', function (e) {
+        var d = e.target.closest ? e.target.closest('.a-del') : null;
+        if (d) { if (confirm('Remove this person? Their sheet access is revoked too.')) { FA2.teams.splice(+d.dataset.i, 1); saveTeams(); } return; }
+        var a = e.target.closest ? e.target.closest('.a-add') : null;
+        if (a) {
+          var r = a.dataset.r;
+          var nm = body.querySelector('.a-nm[data-r="' + r + '"]').value.trim();
+          var em = body.querySelector('.a-em[data-r="' + r + '"]').value.trim();
+          if (!nm || em.indexOf('@') < 1) return fa2Err('fa2-err', 'Name and a valid email are both needed.');
+          FA2.teams.push({ name: nm, email: em, role: r, active: true });
+          saveTeams(); return;
+        }
+      });
+      function tgl() {
+        fa2Call('admin', { adminPw: FA2.adminPw, op: 'toggles_set', weeklyEmail: document.getElementById('a-tw').checked, monthlyEmail: document.getElementById('a-tm').checked })
+          .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t save toggles.'); });
+      }
+      document.getElementById('a-tw').addEventListener('change', tgl);
+      document.getElementById('a-tm').addEventListener('change', tgl);
+      function tool(id, op) {
+        document.getElementById(id).addEventListener('click', function () {
+          var o = document.getElementById('a-out'); o.textContent = 'Working\u2026';
+          fa2Call('admin', { adminPw: FA2.adminPw, op: op }).then(function (j) { o.textContent = JSON.stringify(j); }).catch(function () { o.textContent = 'Server unreachable.'; });
+        });
+      }
+      tool('a-ew', 'email_weekly_now'); tool('a-em2', 'email_monthly_now'); tool('a-poll', 'poll_now');
+    }).catch(function () {
+      var body = document.getElementById('a-body');
+      if (body) body.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server.</div>';
+    });
+  }
+
   function route() {
     var raw = location.hash || '#/';
     var qi = raw.indexOf('?');
@@ -3210,6 +3798,12 @@ var GLOSS = {
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
+    if (h === '#/fa2/add') { terrSet('ct'); return fa2Add(); }
+    if (h === '#/fa2/use') { terrSet('ct'); return fa2Use(); }
+    if (h === '#/fa2/return') { terrSet('ct'); return fa2Return(); }
+    if (h === '#/fa2/send') { terrSet('ct'); return fa2Send(); }
+    if (h === '#/fa2/trans') { terrSet('ct'); return fa2Trans(); }
+    if (h === '#/fa2/admin') { terrSet('ct'); return fa2Admin(); }
     if (h === '#/fa2') { terrSet('ct'); return fa2Home(); }
     if (h === '#/fa2/onhand') { terrSet('ct'); return fa2OnHand(); }
     if (h === '#/fa2/history') { terrSet('ct'); return fa2History(); }
