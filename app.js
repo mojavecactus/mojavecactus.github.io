@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.77';
+  var APPVER = '4.78';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3044,15 +3044,24 @@ var GLOSS = {
     try { FA2.cache = JSON.parse(localStorage.getItem('tbx_fa2_cache') || 'null'); } catch (e) { FA2.cache = null; }
     return FA2.cache;
   }
-  function fa2CacheSet(d) { FA2.cache = { t: Date.now(), d: d }; try { localStorage.setItem('tbx_fa2_cache', JSON.stringify(FA2.cache)); } catch (e) {} }
+  function fa2CacheSet(d) { if (!fa2Sane(d)) return; FA2.cache = { t: Date.now(), d: d }; try { localStorage.setItem('tbx_fa2_cache', JSON.stringify(FA2.cache)); } catch (e) {} }
+  // A read that comes back ok:true but without a master array (seen when the
+  // server is mid-rebuild) must never be cached or rendered — one bad payload
+  // would otherwise blank every screen until the cache expired.
+  function fa2Sane(d) { return !!(d && d.ok && d.master && typeof d.master.length === 'number' && d.ledgerCols); }
   function fa2CacheKill() { FA2.cache = null; try { localStorage.removeItem('tbx_fa2_cache'); } catch (e) {} }
   function fa2Load(force) {
     var c = fa2CacheGet();
+    if (c && !fa2Sane(c.d)) { fa2CacheKill(); c = null; }
     if (!force && c && Date.now() - c.t < 60000) return Promise.resolve(c.d);
     return fa2Call('read', { limit: 300 }).then(function (j) {
-      if (j && j.ok) { fa2CacheSet(j); return j; }
-      if (c) return c.d;
-      throw new Error((j && j.err) || 'server');
+      if (fa2Sane(j)) { fa2CacheSet(j); return j; }
+      // Retry once: these blanks are transient rebuild races, not real states.
+      return fa2Call('read', { limit: 300 }).then(function (j2) {
+        if (fa2Sane(j2)) { fa2CacheSet(j2); return j2; }
+        if (c) return c.d;
+        throw new Error((j2 && j2.err) || 'server');
+      });
     }).catch(function (e) { if (c) return c.d; throw e; });
   }
   function fa2Num(x) { var n = Number(x); return isFinite(n) ? n : 0; }
