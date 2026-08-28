@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.70';
+  var APPVER = '4.71';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3173,12 +3173,111 @@ var GLOSS = {
     });
   }
 
+  /* ---------- v2.1 shared kit ---------- */
+  function fa2KitCss() {
+    if (document.getElementById('fa2k')) return;
+    var st = document.createElement('style'); st.id = 'fa2k';
+    st.textContent =
+      '.k-scroll{max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:4px}' +
+      '.f2c{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px 12px;margin:8px 0}' +
+      '.f2top{display:flex;justify-content:space-between;align-items:center;gap:8px}' +
+      '.f2top b{font-size:15px}' +
+      '.f2chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}' +
+      '.f2chip.ok{background:rgba(90,200,120,.18);color:#7ed99b}' +
+      '.f2chip.soon{background:rgba(240,180,60,.2);color:#f0c060}' +
+      '.f2chip.exp{background:rgba(240,90,90,.22);color:#f28b8b}' +
+      '.f2desc{margin-top:2px;font-size:13px;color:#d8d8d8}' +
+      '.f2sub{margin-top:2px;font-size:12px;color:#9a9a9a}' +
+      '.f2qty{margin-top:4px;font-size:13px;color:#cfcfcf}.f2qty b{font-size:15px;color:#fff}' +
+      '.k-ban{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;background:rgba(90,200,120,.16);border:1px solid rgba(90,200,120,.4);color:#bfe9cc;border-radius:12px;padding:8px 12px;margin:0 0 10px}' +
+      '.k-ban button{margin-left:auto;background:none;border:0;color:inherit;font-size:16px;padding:0 2px}' +
+      '@keyframes kshake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}' +
+      '.k-shake{animation:kshake .35s}' +
+      '.k-red{color:#f28b8b !important}' +
+      '.k-trow{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:8px 10px;margin:6px 0;touch-action:pan-y}' +
+      '.k-trow.k-lift{opacity:.92;transform:scale(1.02);box-shadow:0 6px 18px rgba(0,0,0,.5);position:relative;z-index:9}' +
+      '.k-handle{cursor:grab;touch-action:none;padding:4px 6px;color:#9a9a9a;font-size:16px;line-height:1;user-select:none}' +
+      '.k-tmain{flex:1;min-width:0}.k-tt{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.k-ts{font-size:11px;color:#9a9a9a}' +
+      '.k-step{display:flex;align-items:center;gap:6px}.k-step button{width:26px;height:26px;border-radius:8px;border:0;background:rgba(255,255,255,.12);color:#fff;font-size:15px}' +
+      '.k-step b{min-width:16px;text-align:center}' +
+      '.k-x{background:none;border:0;color:#f28b8b;font-size:16px;padding:2px 6px}' +
+      '.k-arrows{display:none}.k-arrows button{width:24px;height:22px;border:0;border-radius:6px;background:rgba(255,255,255,.1);color:#ccc}';
+    document.head.appendChild(st);
+  }
+  function expNorm(e) { e = String(e == null ? '' : e).trim(); var m = e.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/); if (!m) return e; return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + (m[3] || '1')).slice(-2); }
+  function expBand(e) { var n = expNorm(e); if (!/^\d{4}-\d{2}-\d{2}$/.test(n)) return 2; var d = new Date(n + 'T12:00:00'); var now = new Date(); now.setHours(0, 0, 0, 0); if (d < now) return 0; var soon = new Date(now); soon.setMonth(soon.getMonth() + 3); return d <= soon ? 1 : 2; }
+  function expChip(e) { var b = expBand(e); return '<span class="f2chip ' + (b === 0 ? 'exp">Expired' : b === 1 ? 'soon">\u22643 mo' : 'ok">OK') + '</span>'; }
+  function kitBanner(hostSel, msg) { var host = typeof hostSel === 'string' ? document.querySelector(hostSel) : hostSel; if (!host) return; var b = document.createElement('div'); b.className = 'k-ban'; b.innerHTML = '<span>' + msg + '</span><button aria-label="Dismiss">\u00d7</button>'; b.querySelector('button').addEventListener('click', function () { b.remove(); }); host.insertBefore(b, host.firstChild); setTimeout(function () { if (b.parentNode) b.remove(); }, 3000); }
+  function kitShake(el, qtyEl) { if (!el) return; el.classList.remove('k-shake'); void el.offsetWidth; el.classList.add('k-shake'); if (qtyEl) { qtyEl.classList.add('k-red'); setTimeout(function () { qtyEl.classList.remove('k-red'); }, 700); } }
+  function kitMatch(q, parts) { q = String(q || '').trim().toUpperCase(); if (!q) return true; var hay = parts.join(' ').toUpperCase(); return q.split(/\s+/).every(function (w) { return hay.indexOf(w) > -1; }); }
+  function kitTray(host, state, opts) {
+    opts = opts || {}; fa2KitCss();
+    function rowsOf() { return [].slice.call(host.querySelectorAll('.k-trow')); }
+    function draw() {
+      var order = state.order, items = state.items;
+      if (!order.length) { host.innerHTML = opts.empty ? '<div class="cc-empty">' + opts.empty + '</div>' : ''; return; }
+      var h = '';
+      order.forEach(function (k) {
+        var p = items[k]; if (!p) return;
+        h += '<div class="k-trow" data-k="' + esc(k) + '">' +
+          '<span class="k-handle" aria-label="Reorder">\u2261</span>' +
+          '<span class="k-arrows"><button data-mv="-1">\u25b2</button><button data-mv="1">\u25bc</button></span>' +
+          '<span class="k-tmain"><span class="k-tt">' + esc(p.ref) + (p.desc ? ' \u00b7 ' + esc(p.desc) : '') + '</span>' +
+          '<span class="k-ts">Lot ' + esc(p.lot) + (p.onhand != null ? ' \u00b7 ' + p.onhand + ' on hand' : '') + '</span></span>' +
+          '<span class="k-step"><button data-d="-1">\u2212</button><b>' + p.qty + '</b><button data-d="1">+</button></span>' +
+          '<button class="k-x" aria-label="Remove">\u00d7</button>' +
+        '</div>';
+      });
+      host.innerHTML = h;
+      if (window.FA2_ARROWS) rowsOf().forEach(function (r) { r.querySelector('.k-arrows').style.display = 'inline-flex'; });
+      wire();
+      if (opts.onChange) opts.onChange();
+    }
+    function wire() {
+      rowsOf().forEach(function (row) {
+        var k = row.getAttribute('data-k'), p = state.items[k];
+        row.querySelectorAll('.k-step button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var d = Number(b.getAttribute('data-d')); var nq = p.qty + d;
+            if (nq < 1) return;
+            if (p.max != null && nq > p.max && !(opts.allowOver && opts.allowOver(k))) { kitShake(row, row.querySelector('.k-step b')); return; }
+            p.qty = nq; draw();
+          });
+        });
+        row.querySelector('.k-x').addEventListener('click', function () { delete state.items[k]; state.order = state.order.filter(function (x) { return x !== k; }); draw(); });
+        row.querySelectorAll('.k-arrows button').forEach(function (b) {
+          b.addEventListener('click', function () { var mv = Number(b.getAttribute('data-mv')); var i = state.order.indexOf(k), j = i + mv; if (j < 0 || j >= state.order.length) return; state.order.splice(i, 1); state.order.splice(j, 0, k); draw(); });
+        });
+        var hd = row.querySelector('.k-handle');
+        hd.addEventListener('pointerdown', function (ev) {
+          ev.preventDefault(); try { hd.setPointerCapture(ev.pointerId); } catch (e) {}
+          row.classList.add('k-lift');
+          function onMove(e2) {
+            var y = e2.clientY, list = rowsOf(), i = list.indexOf(row);
+            if (i > 0) { var pr = list[i - 1].getBoundingClientRect(); if (y < pr.top + pr.height / 2) { row.parentNode.insertBefore(row, list[i - 1]); return; } }
+            if (i < list.length - 1) { var nr = list[i + 1].getBoundingClientRect(); if (y > nr.top + nr.height / 2) { row.parentNode.insertBefore(list[i + 1], row); } }
+          }
+          function onUp() {
+            hd.removeEventListener('pointermove', onMove); hd.removeEventListener('pointerup', onUp); hd.removeEventListener('pointercancel', onUp);
+            row.classList.remove('k-lift');
+            state.order = rowsOf().map(function (r) { return r.getAttribute('data-k'); });
+            if (opts.onChange) opts.onChange();
+          }
+          hd.addEventListener('pointermove', onMove); hd.addEventListener('pointerup', onUp); hd.addEventListener('pointercancel', onUp);
+        });
+      });
+    }
+    draw();
+    return { redraw: draw };
+  }
+
   /* ---------- On hand ---------- */
   function fa2OnHand() {
     setTitle('On hand', ''); backBtn.hidden = false;
     ccStop();
     if (!fa2Ensure(fa2OnHand)) return;
     CC.view = 'fa2onhand';
+    fa2KitCss();
     render(
       '<div class="card cc-card">' +
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
@@ -3200,10 +3299,11 @@ var GLOSS = {
         var st = String(r[5] || 'OK');
         if (st !== last) { html += '<div class="fa2-eyebrow">' + esc(st) + '</div>'; last = st; }
         html +=
-          '<div class="fa2-row">' +
-            '<div class="fa2-l"><div class="fa2-t">' + esc(r[0]) + (r[1] ? ' \u2014 ' + esc(r[1]) : '') + '</div>' +
-            '<div class="fa2-s">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (r[6] ? ' \u00b7 ' + esc(r[6]) : '') + '</div></div>' +
-            '<div class="fa2-r"><b>\u00d7' + fa2Num(r[4]) + '</b><span class="cc-pill ' + fa2PillClass(st) + '">' + esc(st) + '</span></div>' +
+          '<div class="f2c">' +
+            '<div class="f2top"><b>' + esc(r[0]) + '</b>' + expChip(r[3]) + '</div>' +
+            (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
+            '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (r[6] ? ' \u00b7 ' + esc(r[6]) : '') + '</div>' +
+            '<div class="f2qty"><b>' + fa2Num(r[4]) + '</b> on hand</div>' +
           '</div>';
       });
       el.innerHTML = html;
@@ -3243,7 +3343,7 @@ var GLOSS = {
       var canVoid = !fa2IsFA();
       el.innerHTML = L.map(function (r) {
         var ty = g(r, 'Type'), q = fa2Num(g(r, 'Qty')), eid = g(r, 'EventId');
-        var neg = (ty === 'Used in case' || ty === 'Returned to rep' || ty === 'Sent back to Stryker');
+        var neg = (ty === 'Used in case' || ty === 'Returned to rep' || ty === 'Sent back to Stryker' || ty === 'Returned to Stryker' || ty === 'External Transfer' || ty === 'Written Off' || ty === 'Returned to CT SM');
         var sign = ty === 'Adjustment' ? (q > 0 ? '+' : '\u2212') : (neg ? '\u2212' : '+');
         var pc = ty === 'Adjustment' ? 'busy' : (neg ? 'bad' : 'ok');
         var bits = [g(r, 'EventDate') || g(r, 'Timestamp').slice(0, 10)];
@@ -3467,7 +3567,7 @@ var GLOSS = {
     goBtn.addEventListener('click', function () {
       var evs = Object.keys(picks).map(function (k) {
         var p = picks[k];
-        return { type: 'Sent back to Stryker', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, tracking: trk.v.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
+        return { type: 'Returned to Stryker', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, tracking: trk.v.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
       });
       fa2Submit(evs, 'send-' + trk.v.trim(), goBtn)
         .then(function () { location.hash = '#/fa2'; })
@@ -3481,7 +3581,7 @@ var GLOSS = {
     ccStop();
     if (!fa2Ensure(fa2Use)) return;
     CC.view = 'fa2use';
-    if (!FA2.form || FA2.form.kind !== 'use') FA2.form = { kind: 'use', bo: '', po: '', fac: '', sur: '', dos: new Date().toISOString().slice(0, 10), pat: '' };
+    if (!FA2.form || FA2.form.kind !== 'use') FA2.form = { kind: 'use', bo: '', po: '', fac: '', sur: '', dos: new Date().toISOString().slice(0, 10) };
     var f = FA2.form;
     var picks = {}; var over = {};
     fa2Shell('Record case usage', 'Manual bill-only entry. Going over on-hand asks how to resolve it.',
@@ -3489,10 +3589,10 @@ var GLOSS = {
       '<input id="u-po" class="cc-in" placeholder="PO #" value="' + esc(f.po) + '">' +
       '<input id="u-fac" class="cc-in" placeholder="Facility" value="' + esc(f.fac) + '">' +
       '<input id="u-sur" class="cc-in" placeholder="Surgeon" value="' + esc(f.sur) + '">' +
-      '<div class="fa2-2col"><input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '"><input id="u-pat" class="cc-in" placeholder="Patient ID (optional)" value="' + esc(f.pat) + '"></div>' +
+      '<input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '">' +
       '<div class="fa2-lab">Items used</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
       '<button id="fa2-go" class="cc-btn">Save usage</button>');
-    ['bo', 'po', 'fac', 'sur', 'dos', 'pat'].forEach(function (k) {
+    ['bo', 'po', 'fac', 'sur', 'dos'].forEach(function (k) {
       document.getElementById('u-' + k).addEventListener('input', function (e) { f[k] = e.target.value; });
     });
     fa2Load(false).then(function (d) {
@@ -3518,7 +3618,7 @@ var GLOSS = {
             flags: 'Late entry', linkedTo: eid, entryMethod: 'manual', enteredBy: fa2Who() });
         }
         evs.push({ eventId: eid, type: 'Used in case', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty,
-          caseBO: f.bo.trim(), casePO: f.po.trim(), facility: f.fac.trim(), surgeon: f.sur.trim(), dos: f.dos, patientId: f.pat.trim(),
+          caseBO: f.bo.trim(), casePO: f.po.trim(), facility: f.fac.trim(), surgeon: f.sur.trim(), dos: f.dos, patientId: '',
           entryMethod: 'manual', enteredBy: fa2Who() });
       });
       fa2Submit(evs, 'use-' + f.bo.trim(), document.getElementById('fa2-go'))
