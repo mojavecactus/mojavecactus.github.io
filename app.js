@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.71';
+  var APPVER = '4.72';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3125,7 +3125,6 @@ var GLOSS = {
         '<button id="fa2-add" class="ct-big">Add inventory<span>Record a drop to the F&amp;A team</span></button>' +
         '<button id="fa2-ret" class="ct-big">Remove / Return<span>Back to rep stock, transfer, or other</span></button>' +
         '<button id="fa2-use" class="ct-big">Record case usage<span>Manual bill-only entry \u2014 BO, facility, surgeon</span></button>' +
-        '<button id="fa2-send" class="ct-big">Send back to Stryker<span>Tracking # required to complete</span></button>' +
         '<button id="fa2-hist" class="ct-big">History<span>Append-only ledger \u2014 corrections are new events</span></button>' +
         '<button id="fa2-adm" class="ct-big">Admin<span>Teams, sheet access &amp; email settings</span></button>';
     }
@@ -3201,12 +3200,24 @@ var GLOSS = {
       '.k-step{display:flex;align-items:center;gap:6px}.k-step button{width:26px;height:26px;border-radius:8px;border:0;background:rgba(255,255,255,.12);color:#fff;font-size:15px}' +
       '.k-step b{min-width:16px;text-align:center}' +
       '.k-x{background:none;border:0;color:#f28b8b;font-size:16px;padding:2px 6px}' +
-      '.k-arrows{display:none}.k-arrows button{width:24px;height:22px;border:0;border-radius:6px;background:rgba(255,255,255,.1);color:#ccc}';
+      '.k-arrows{display:none}.k-arrows button{width:24px;height:22px;border:0;border-radius:6px;background:rgba(255,255,255,.1);color:#ccc}' +
+      '.f2bub{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(120,160,255,.18);color:#9db8ff;white-space:nowrap}' +
+      '.k-bar{position:sticky;bottom:0;padding-top:8px;z-index:6}';
     document.head.appendChild(st);
   }
   function expNorm(e) { e = String(e == null ? '' : e).trim(); var m = e.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/); if (!m) return e; return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + (m[3] || '1')).slice(-2); }
   function expBand(e) { var n = expNorm(e); if (!/^\d{4}-\d{2}-\d{2}$/.test(n)) return 2; var d = new Date(n + 'T12:00:00'); var now = new Date(); now.setHours(0, 0, 0, 0); if (d < now) return 0; var soon = new Date(now); soon.setMonth(soon.getMonth() + 3); return d <= soon ? 1 : 2; }
   function expChip(e) { var b = expBand(e); return '<span class="f2chip ' + (b === 0 ? 'exp">Expired' : b === 1 ? 'soon">\u22643 mo' : 'ok">OK') + '</span>'; }
+  function fa2BandSort(rows) {
+    return rows.slice().sort(function (a, b) {
+      var ba = expBand(a[3]), bb = expBand(b[3]);
+      if (ba !== bb) return ba - bb;
+      var ra = String(a[0]), rb = String(b[0]);
+      if (ra !== rb) return ra < rb ? -1 : 1;
+      var ea = expNorm(a[3]) || '9999-99-99', eb = expNorm(b[3]) || '9999-99-99';
+      return ea < eb ? -1 : ea > eb ? 1 : 0;
+    });
+  }
   function kitBanner(hostSel, msg) { var host = typeof hostSel === 'string' ? document.querySelector(hostSel) : hostSel; if (!host) return; var b = document.createElement('div'); b.className = 'k-ban'; b.innerHTML = '<span>' + msg + '</span><button aria-label="Dismiss">\u00d7</button>'; b.querySelector('button').addEventListener('click', function () { b.remove(); }); host.insertBefore(b, host.firstChild); setTimeout(function () { if (b.parentNode) b.remove(); }, 3000); }
   function kitShake(el, qtyEl) { if (!el) return; el.classList.remove('k-shake'); void el.offsetWidth; el.classList.add('k-shake'); if (qtyEl) { qtyEl.classList.add('k-red'); setTimeout(function () { qtyEl.classList.remove('k-red'); }, 700); } }
   function kitMatch(q, parts) { q = String(q || '').trim().toUpperCase(); if (!q) return true; var hay = parts.join(' ').toUpperCase(); return q.split(/\s+/).every(function (w) { return hay.indexOf(w) > -1; }); }
@@ -3283,35 +3294,44 @@ var GLOSS = {
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<h2 class="cc-h">On hand</h2>' +
         '<div class="cc-sub">First to expire on top. Usage and send-backs come off automatically.</div>' +
+        '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
         '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
       '</div>');
     document.getElementById('fa2-rf').addEventListener('click', function () { fa2OnHandLoad(true); });
+    document.getElementById('fa2-q').addEventListener('input', fa2OnHandDraw);
     fa2OnHandLoad(false);
   }
   function fa2OnHandLoad(force) {
     fa2Load(force).then(function (d) {
       if (CC.view !== 'fa2onhand') return;
-      var el = document.getElementById('fa2-list'); if (!el) return;
-      var rows = d.master || [];
-      if (!rows.length) { el.innerHTML = '<div class="cc-empty">Nothing on hand \u2014 all clear.</div>'; return; }
-      var html = '', last = '';
-      rows.forEach(function (r) {
-        var st = String(r[5] || 'OK');
-        if (st !== last) { html += '<div class="fa2-eyebrow">' + esc(st) + '</div>'; last = st; }
-        html +=
+      FA2.ohD = d;
+      fa2OnHandDraw();
+    }).catch(function () {
+      if (CC.view !== 'fa2onhand') return;
+      var el = document.getElementById('fa2-list');
+      if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
+    });
+  }
+  function fa2OnHandDraw() {
+    var el = document.getElementById('fa2-list'); if (!el || !FA2.ohD) return;
+    var q = (document.getElementById('fa2-q') || {}).value || '';
+    var rows = (FA2.ohD.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+    if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand \u2014 all clear.') + '</div>'; return; }
+    rows = fa2BandSort(rows);
+    var names = ['Expired', 'Expiring \u22643 mo', 'OK'];
+    var html = '', last = -1;
+    rows.forEach(function (r) {
+      var b = expBand(r[3]);
+      if (b !== last) { html += '<div class="fa2-eyebrow">' + names[b] + '</div>'; last = b; }
+      html +=
           '<div class="f2c">' +
             '<div class="f2top"><b>' + esc(r[0]) + '</b>' + expChip(r[3]) + '</div>' +
             (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
             '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (r[6] ? ' \u00b7 ' + esc(r[6]) : '') + '</div>' +
             '<div class="f2qty"><b>' + fa2Num(r[4]) + '</b> on hand</div>' +
           '</div>';
-      });
-      el.innerHTML = html;
-    }).catch(function () {
-      if (CC.view !== 'fa2onhand') return;
-      var el = document.getElementById('fa2-list');
-      if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
     });
+    el.innerHTML = html;
   }
 
   /* ---------- History (+ Void on sports) ---------- */
@@ -3501,36 +3521,93 @@ var GLOSS = {
   }
 
   /* ---------- Remove / Return ---------- */
+  var FA2_REMOVE_TYPES = ['Returned to Stryker', 'External Transfer', 'Written Off', 'Returned to CT SM'];
   function fa2Return() {
     setTitle('Remove / Return', ''); backBtn.hidden = false;
     ccStop();
     if (!fa2Ensure(fa2Return)) return;
     CC.view = 'fa2ret';
-    var picks = {}; var reason = { v: '', other: '' };
-    fa2Shell('Remove / Return', 'Back to rep stock or elsewhere \u2014 no tracking needed. Stryker send-backs have their own flow.',
-      '<div class="fa2-lab">Reason</div>' + fa2Chips('fa2-rsn', ['Returned to rep stock', 'Transfer', 'Other'], '') +
-      '<input id="fa2-rsno" class="cc-in" placeholder="Reason (free text)" hidden>' +
-      '<div class="fa2-lab">Items</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
-      '<button id="fa2-go" class="cc-btn">Remove selected</button>');
-    fa2ChipWire('fa2-rsn', function (v) { reason.v = v; document.getElementById('fa2-rsno').hidden = v !== 'Other'; });
-    document.getElementById('fa2-rsno').addEventListener('input', function (e) { reason.other = e.target.value; });
-    fa2Load(false).then(function (d) {
-      if (CC.view !== 'fa2ret') return;
-      var el = document.getElementById('fa2-pick');
-      el.innerHTML = fa2Picker(d, picks, false);
-      fa2PickWire(el, d, picks, false, null);
-    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
+    fa2KitCss();
+    var tray = { items: {}, order: [] };
+    var sel = { type: '', reason: '', trk: '', terr: '', recv: '' };
+    var D = null;
+    fa2Shell('Remove / Return', 'Take product out of F&amp;A stock \u2014 pick where it went.',
+      '<div class="fa2-lab">Removal type</div>' + fa2Chips('fa2-rty', FA2_REMOVE_TYPES, '') +
+      '<input id="fa2-trk2" class="cc-in" placeholder="Tracking # (optional)" hidden>' +
+      '<input id="fa2-terr" class="cc-in" placeholder="Receiving Rep/Territory (required)" hidden>' +
+      '<input id="fa2-recv" class="cc-in" placeholder="Received by who (required)" hidden>' +
+      '<input id="fa2-rsn2" class="cc-in" placeholder="Reason">' +
+      '<div class="fa2-lab">Selected</div><div id="fa2-tray"></div>' +
+      '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
+      '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Remove selected</button></div>');
+    var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 tap items below.', onChange: drawPick });
+    fa2ChipWire('fa2-rty', function (v) {
+      sel.type = v;
+      document.getElementById('fa2-trk2').hidden = v !== 'Returned to Stryker';
+      document.getElementById('fa2-terr').hidden = v !== 'External Transfer';
+      document.getElementById('fa2-recv').hidden = v !== 'Returned to CT SM';
+    });
+    [['fa2-trk2', 'trk'], ['fa2-terr', 'terr'], ['fa2-recv', 'recv'], ['fa2-rsn2', 'reason']].forEach(function (p) {
+      document.getElementById(p[0]).addEventListener('input', function (e) { sel[p[1]] = e.target.value; });
+    });
+    document.getElementById('fa2-q').addEventListener('input', function () { drawPick(); });
+    function drawPick() {
+      var el = document.getElementById('fa2-pick'); if (!el || !D) return;
+      var q = (document.getElementById('fa2-q') || {}).value || '';
+      var rows = (D.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+      if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
+      rows = fa2BandSort(rows);
+      el.innerHTML = rows.map(function (r) {
+        var key = r[0] + '\u0001' + r[2];
+        var have = tray.items[key] ? tray.items[key].qty : 0;
+        var oh = fa2Num(r[4]);
+        return '<div class="f2c fa2-pk" data-k="' + esc(key) + '">' +
+          '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + oh + ' on hand</span></div>' +
+          (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
+          '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (have ? ' \u00b7 <b>' + have + ' selected</b>' : '') + '</div>' +
+        '</div>';
+      }).join('');
+    }
+    document.getElementById('fa2-pick').addEventListener('click', function (e) {
+      var c = e.target.closest ? e.target.closest('.fa2-pk') : null; if (!c || !D) return;
+      var k = c.getAttribute('data-k');
+      var m = null;
+      (D.master || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; });
+      if (!m) return;
+      var oh = fa2Num(m[4]);
+      var it = tray.items[k];
+      if (it) {
+        if (it.qty >= oh) { kitShake(c, c.querySelector('.f2bub')); return; }
+        it.qty += 1;
+      } else {
+        tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, max: oh, qty: 1 };
+        tray.order.push(k);
+      }
+      trayApi.redraw();
+    });
+    fa2Load(false).then(function (d) { if (CC.view !== 'fa2ret') return; D = d; drawPick(); })
+      .catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
     document.getElementById('fa2-go').addEventListener('click', function () {
-      var rs = reason.v === 'Other' ? reason.other.trim() : reason.v;
-      if (!rs) return fa2Err('fa2-err', 'Pick a reason.');
-      var keys = Object.keys(picks);
-      if (!keys.length) return fa2Err('fa2-err', 'Pick at least one item.');
-      var evs = keys.map(function (k) {
-        var p = picks[k];
-        return { type: 'Returned to rep', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, reason: rs, entryMethod: 'manual', enteredBy: fa2Who() };
+      if (!sel.type) return fa2Err('fa2-err', 'Pick a removal type.');
+      if (sel.type === 'External Transfer' && !sel.terr.trim()) return fa2Err('fa2-err', 'Receiving Rep/Territory is required.');
+      if (sel.type === 'Returned to CT SM' && !sel.recv.trim()) return fa2Err('fa2-err', 'Received by who is required.');
+      if (!tray.order.length) return fa2Err('fa2-err', 'Pick at least one item.');
+      var evs = tray.order.map(function (k) {
+        var p = tray.items[k];
+        var ev = { type: sel.type, ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, reason: sel.reason.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
+        if (sel.type === 'Returned to Stryker' && sel.trk.trim()) ev.tracking = sel.trk.trim();
+        if (sel.type === 'External Transfer') ev.receivedBy = sel.terr.trim();
+        if (sel.type === 'Returned to CT SM') ev.receivedBy = sel.recv.trim();
+        return ev;
       });
       fa2Submit(evs, 'ret-' + Date.now(), document.getElementById('fa2-go'))
-        .then(function () { location.hash = '#/fa2'; })
+        .then(function () {
+          tray.items = {}; tray.order = []; trayApi.redraw();
+          kitBanner(document.querySelector('.cc-card'), 'Items Removed');
+          var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; }
+          fa2Load(true).then(function (d2) { if (CC.view !== 'fa2ret') return; D = d2; drawPick(); }).catch(function () {});
+        })
         .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; } });
     });
   }
