@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.90';
+  var APPVER = '4.91';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3373,7 +3373,9 @@ var GLOSS = {
         if (p.exp) bits.push('Exp ' + esc(p.exp));
         else if (opts.needExp) bits.push('<em class="k-miss">No expiry</em>');
         if (p.onhand != null) bits.push(p.onhand + ' on hand');
-        h += '<div class="k-trow' + (opts.onEdit ? ' k-can' : '') + '" data-k="' + esc(k) + '">' +
+        // more than the sheet says is on hand: flag the row so nobody submits it by accident
+        var over = (p.onhand != null && p.qty > p.onhand);
+        h += '<div class="k-trow' + (opts.onEdit ? ' k-can' : '') + (over ? ' k-over' : '') + '" data-k="' + esc(k) + '">' +
           '<span class="k-handle" aria-label="Reorder">\u2261</span>' +
           '<span class="k-arrows"><button data-mv="-1">\u25b2</button><button data-mv="1">\u25bc</button></span>' +
           '<span class="k-tmain"><span class="k-tt">' + esc(p.ref) + (p.desc ? ' \u00b7 ' + esc(p.desc) : '') + '</span>' +
@@ -4268,14 +4270,13 @@ var GLOSS = {
       '<input id="u-sur" class="cc-in" placeholder="Surgeon (required)" value="' + esc(f.sur) + '">' +
       '<label class="a2f" for="u-dos"><span class="a2fl">Date of surgery</span>' +
         '<input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '"></label>' +
-      '<div class="fa2-lab">Items used \u2014 drag \u2261 to match the bill only</div><div id="u-tray"></div>' +
+      '<div id="u-tray"></div>' +
       '<button id="u-man" type="button" class="cc-mini">+ Manual \u2014 not on the list</button>' +
       '<div id="u-manwrap" class="a2man" hidden>' +
         '<input id="u-mref" class="cc-in" placeholder="REF (part number)">' +
         '<input id="u-mdesc" class="cc-in" placeholder="Description">' +
         '<input id="u-mlot" class="cc-in" placeholder="LOT">' +
         fa2ExpQtyRow('u-mexp', 'u-mqty') +
-        '<div class="cc-sub2">For product that was never entered \u2014 on save you\u2019ll confirm where it came from and it\u2019s recorded as a late entry.</div>' +
         '<button id="u-addman" type="button" class="cc-mini">Add to list</button>' +
       '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +

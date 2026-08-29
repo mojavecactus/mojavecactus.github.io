@@ -387,6 +387,8 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     check('S6a C-number required', /C-number is required/.test(await text(page, '#fa2-err')), await text(page, '#fa2-err'));
     if (FIXED) {
       check('R12a Subtitle is just the manual bill-only line', (await text(page, '.cc-sub')) === 'Manual bill-only entry.', await text(page, '.cc-sub'));
+      const body0 = await page.evaluate(() => document.querySelector('.cc-card').innerText);
+      check('R13a The "drag to match the bill only" line is gone', !/drag/i.test(body0) && !/Items used/i.test(body0), (body0.match(/.*drag.*|.*Items used.*/i) || ['none'])[0]);
       await page.fill('#u-bo', 'C123456'); await page.click('#fa2-go');
       check('R12b Facility required', /Facility is required/.test(await text(page, '#fa2-err')));
       await page.fill('#u-fac', 'WCOSC'); await page.click('#fa2-go');
@@ -401,6 +403,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       check('R12f With the header complete, at least one item is required', /Add at least one item/.test(await text(page, '#fa2-err')), await text(page, '#fa2-err'));
       // manual add now demands REF / LOT / date / qty
       await page.click('#u-man'); await sleep(200);
+      check('R13b The late-entry explainer is gone from the manual panel', !/never entered/i.test(await text(page, '#u-manwrap')), await text(page, '#u-manwrap'));
       await page.click('#u-addman'); check('R12g Manual add: REF required', /REF is required/.test(await text(page, '#fa2-err')));
       await page.fill('#u-mref', '0132'); await page.click('#u-addman');
       check('R12h Manual add: LOT required', /LOT is required/.test(await text(page, '#fa2-err')));
@@ -431,6 +434,14 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     const useQty = FIXED ? dOnHand + 1 : 5;
     if (FIXED) { await page.locator('#u-tray .k-trow .k-step button').last().click(); await sleep(250); } // tray + is the deliberate overdraft path
     check('S6b Tray can still be pushed one past on-hand for a late entry', (await text(page, '#u-tray .k-trow .k-step b')) === String(useQty), 'tray=' + (await text(page, '#u-tray .k-trow .k-step b')) + ' onhand=' + dOnHand);
+    if (FIXED) {
+      const flag = await page.evaluate(() => { const r = document.querySelector('#u-tray .k-trow'); const cs = getComputedStyle(r); const n = getComputedStyle(r.querySelector('.k-step b')); return { over: r.classList.contains('k-over'), border: cs.borderColor, num: n.color }; });
+      check('R13c Over-on-hand tray row gets a red box and a red count', flag.over && /242, 139, 139/.test(flag.border) && /242, 139, 139/.test(flag.num), JSON.stringify(flag));
+      await page.locator('#u-tray .k-trow .k-step button').first().click(); await sleep(250);
+      const back = await page.evaluate(() => { const r = document.querySelector('#u-tray .k-trow'); return { over: r.classList.contains('k-over'), border: getComputedStyle(r).borderColor }; });
+      check('R13d Stepping back within on-hand clears the red', !back.over && !/242, 139, 139/.test(back.border), JSON.stringify(back));
+      await page.locator('#u-tray .k-trow .k-step button').last().click(); await sleep(250); // restore for the overdraft checks below
+    }
     await page.click('#fa2-go');
     await page.waitForSelector('#od-chk', { timeout: 5000 });
     check('S6c Overdraft modal appears', true, await text(page, '.fa2-mcard .fa2-s'));
