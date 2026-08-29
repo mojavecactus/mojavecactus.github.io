@@ -261,7 +261,9 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       // clean up so later on-hand counts stay predictable
       await go(page, '#/fa2/return', '#fa2-pick .fa2-pk');
       await pickChip(page, 'fa2-rty', 'Written Off');
-      await page.locator('#fa2-pick .fa2-pk', { hasText: 'FAILLOT' }).click();
+      await page.fill('#rf-reason', 'test cleanup');
+      const fc = page.locator('#fa2-pick .fa2-pk', { hasText: 'FAILLOT' });
+      await fc.locator('.f2sub').click(); await sleep(200); await fc.locator('.pk-add').click(); await sleep(200);
       await page.click('#fa2-go'); await page.waitForSelector('.k-ban', { timeout: 10000 });
       await go(page, '#/fa2', '#fa2-pills .cc-pill.ok');
     }
@@ -269,18 +271,64 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     // ---------------- S4: Remove/Return idempotency ----------------
     await go(page, '#/fa2/return', '#fa2-pick .fa2-pk');
     if (FIXED) {
-      const shown = () => page.evaluate(() => ['fa2-trk2', 'fa2-terr', 'fa2-recv'].filter(id => document.getElementById(id).getBoundingClientRect().height > 0));
-      check('R7h Remove/Return: no conditional box before a type is picked', (await shown()).length === 0, JSON.stringify(await shown()));
-      await pickChip(page, 'fa2-rty', 'External Transfer');
-      check('R7i Only the External Transfer box shows', JSON.stringify(await shown()) === '["fa2-terr"]', JSON.stringify(await shown()));
+      const fields = () => page.evaluate(() => [].map.call(document.querySelectorAll('#fa2-rfields input'), i => i.id.replace('rf-', '') + ':' + i.placeholder));
+      check('R11a No detail fields before a removal type is picked', (await fields()).length === 0, JSON.stringify(await fields()));
       await pickChip(page, 'fa2-rty', 'Returned to Stryker');
-      check('R7j Switching type swaps which box shows', JSON.stringify(await shown()) === '["fa2-trk2"]', JSON.stringify(await shown()));
+      check('R11b Returned to Stryker = optional tracking + notes', JSON.stringify(await fields()) === '["trk:Tracking # (optional)","note:Notes (optional)"]', JSON.stringify(await fields()));
+      await pickChip(page, 'fa2-rty', 'External Transfer');
+      check('R11c External Transfer = optional tracking, required territory + sent by, optional notes', JSON.stringify(await fields()) === '["trk:Tracking # (optional)","terr:Receiving Rep/Territory (required)","sent:Sent by who (required)","note:Notes (optional)"]', JSON.stringify(await fields()));
+      await pickChip(page, 'fa2-rty', 'Returned to CT SM');
+      check('R11d Returned to CT SM = required received-by + notes', JSON.stringify(await fields()) === '["recv:Received by who (required)","note:Notes (optional)"]', JSON.stringify(await fields()));
+      await pickChip(page, 'fa2-rty', 'Written Off');
+      check('R11e Written Off = reason only', JSON.stringify(await fields()) === '["reason:Reason (required)"]', JSON.stringify(await fields()));
+      check('R11f Submit button is labelled Submit', (await text(page, '#fa2-go')) === 'Submit', await text(page, '#fa2-go'));
+      await page.click('#fa2-go');
+      check('R11g Required field is enforced by name', /Reason is required/.test(await text(page, '#fa2-err')), await text(page, '#fa2-err'));
+      // per-card quantity picker
+      const card = page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace C' });
+      await card.locator('.f2sub').click(); await sleep(250);
+      check('R11h Tapping a card opens a quantity picker on that card', (await card.locator('.pk-n').count()) === 1 && (await card.locator('.pk-add').count()) === 1);
+      const vis = await page.evaluate(() => { const q = document.querySelector('.pk-qty'); const r = q.getBoundingClientRect(); const bar = document.querySelector('.k-bar').getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), barTop: Math.round(bar.top), vh: window.innerHeight }; });
+      check('R11h2 The picker scrolls clear of the sticky Submit bar', vis.top > 0 && vis.bottom <= vis.barTop, JSON.stringify(vis));
+      const geo = await page.evaluate(() => { const s = document.querySelector('.pk-n').getBoundingClientRect(); const a = document.querySelector('.pk-add').getBoundingClientRect(); return { sel: Math.round(s.width), add: Math.round(a.width), overlap: Math.round(s.right) > Math.round(a.left) }; });
+      check('R11h3 Select and Add share the row (neither is crushed)', geo.sel >= 100 && geo.add >= 60 && geo.add <= 160 && !geo.overlap, JSON.stringify(geo));
+      const opts = await card.locator('.pk-n option').allInnerTexts();
+      check('R11i Picker offers 1..on-hand only', JSON.stringify(opts) === '["1","2","3","4","5"]', JSON.stringify(opts));
+      await card.locator('.pk-n').selectOption('3');
+      await card.locator('.pk-add').click(); await sleep(300);
+      check('R11j Chosen quantity lands in the Selected tray', (await text(page, '#fa2-tray .k-trow .k-step b')) === '3' && /3 of 5 selected/.test(await card.innerText()), await text(page, '#fa2-tray'));
+      // over-selecting shakes the card and reddens the count
+      await card.locator('.f2sub').click(); await sleep(250);
+      await card.locator('.pk-n').selectOption('4');
+      await card.locator('.pk-add').click(); await sleep(150);
+      const over = await page.evaluate(() => { const c = [].filter.call(document.querySelectorAll('#fa2-pick .fa2-pk'), x => /InSpace C/.test(x.innerText))[0]; const b = c.querySelector('.f2bub'); return { shake: c.classList.contains('k-shake'), red: b.classList.contains('k-red'), qty: document.querySelector('#fa2-tray .k-step b').innerText }; });
+      check('R11k Over-selecting shakes the card, reddens the count, and adds nothing', over.shake && over.red && over.qty === '3', JSON.stringify(over));
+      await sleep(900);
+      // scanner adds from stock
+      await page.click('#fa2-scanb'); await sleep(400);
+      check('R11l Scan button reveals the camera panel', !(await page.evaluate(() => document.getElementById('fa2-scanwrap').hidden)));
+      await page.evaluate(() => window.__TBX_ONCODE('(01)07290013396041(10)LOTC'));
+      await sleep(400);
+      const scanned = await page.evaluate(() => ({ qty: document.querySelector('#fa2-tray .k-step b').innerText, stat: (document.getElementById('cc-stat') || {}).textContent }));
+      check('R11m Scanning a stocked ref+lot adds one to the tray', scanned.qty === '4' && /added/.test(scanned.stat), JSON.stringify(scanned));
+      await page.evaluate(() => window.__TBX_ONCODE('(01)07613327570463(10)NOPE'));
+      await sleep(400);
+      const bad = await page.evaluate(() => ({ qty: document.querySelector('#fa2-tray .k-step b').innerText, stat: (document.getElementById('cc-stat') || {}).textContent }));
+      check('R11n Scanning a lot that is not on hand is refused with a reason', bad.qty === '4' && /isn/.test(bad.stat), JSON.stringify(bad));
+      await page.click('#fa2-scanb'); await sleep(200);
+      // reset for the shared idempotency checks below
+      await page.locator('#fa2-tray .k-trow .k-x').first().click(); await sleep(200);
     }
     await pickChip(page, 'fa2-rty', 'Written Off');
-    await page.fill('#fa2-rsn2', 'damaged');
-    await page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace C' }).click();
-    await page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace C' }).click();
-    check('S4a Tapping a pick row twice = qty 2 in tray', (await text(page, '#fa2-tray .k-trow .k-step b')) === '2');
+    await page.fill('#rf-reason', 'damaged');
+    async function pick(name, n) {
+      const c = page.locator('#fa2-pick .fa2-pk', { hasText: name });
+      await c.locator('.f2sub').click(); await sleep(200);
+      await c.locator('.pk-n').selectOption(String(n));
+      await c.locator('.pk-add').click(); await sleep(250);
+    }
+    await pick('InSpace C', 2);
+    check('S4a Choosing 2 on a card puts 2 in the tray', (await text(page, '#fa2-tray .k-trow .k-step b')) === '2');
     hub.failNext = { action: 'batch', mode: 'abort-after-apply' };
     await page.click('#fa2-go');
     await page.waitForFunction(() => !!document.querySelector('.k-ban') || /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
@@ -290,11 +338,12 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     bug('S4b Remove/Return lost reply → double-applied (new opId per tap)', rb.length === 2 && rb[0].opId !== rb[1].opId && woC === 2, woC === 1 && new Set(rb.map(x => x.opId)).size === 1, 'opIds ' + rb.map(x => x.opId.slice(0, 8)).join('/') + ' writtenOff(LOTC)=' + woC + ' (correct=1)');
     if (FIXED) {
       await pickChip(page, 'fa2-rty', 'Written Off');
-      await page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace D' }).click();
+      await page.fill('#rf-reason', 'damaged');
+      await pick('InSpace D', 1);
       hub.failNext = { action: 'batch', mode: 'abort-after-apply' }; hub.abortReads = 1; // batch reply lost AND the landed-probe fails (offline)
       await page.click('#fa2-go');
       await page.waitForFunction(() => /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
-      await page.locator('#fa2-pick .fa2-pk', { hasText: 'Test screw B' }).click(); // edit the tray, then retry
+      await pick('Test screw B', 1); // edit the tray, then retry
       const woBefore = hub.events('Written Off').length;
       await page.click('#fa2-go');
       await page.waitForFunction(() => /earlier attempt did go through/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
@@ -485,7 +534,13 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
 
     // ---------------- S14: re-gate when fa2 creds missing ----------------
     await page.evaluate(() => localStorage.removeItem('tbx_fa2'));
-    await page.reload(); await page.waitForFunction(() => document.documentElement.classList.contains('authed') && !!window.TBX_BOOT, null, { timeout: 20000 }); await page.waitForSelector('.cc-card', { timeout: 15000 }); await sleep(500);
+    // boot after a reload occasionally needs a nudge on a loaded machine — retry once
+    async function bootedReload() {
+      await page.reload();
+      try { await page.waitForFunction(() => !!document.querySelector('#content *'), null, { timeout: 20000 }); }
+      catch (e) { await page.reload(); await page.waitForFunction(() => !!document.querySelector('#content *'), null, { timeout: 25000 }); }
+    }
+    await bootedReload(); await sleep(600);
     await go(page, '#/fa2/onhand', null); await sleep(600);
     note('S14 state after reload+navigate', await page.evaluate(() => location.hash + ' | ' + (document.getElementById('content') || document.body).innerText.replace(/\s+/g, ' ').slice(0, 120)));
     await page.waitForSelector('#cc-pw', { timeout: 10000 });

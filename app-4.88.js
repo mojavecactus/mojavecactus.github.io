@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.87';
+  var APPVER = '4.88';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1987,7 +1987,7 @@ var GLOSS = {
       });
   }
   function ccTick() {
-    if (!CC.running || (CC.view !== 'count' && CC.view !== 'fa2add2')) return;
+    if (!CC.running || (CC.view !== 'count' && CC.view !== 'fa2add2' && CC.view !== 'fa2ret')) return;
     var v = document.getElementById('ccvid');
     if (!v || v.readyState < 2 || !v.videoWidth) {
       CC.stall++;
@@ -2190,6 +2190,7 @@ var GLOSS = {
   function ccOnCode(txt) {
     var now = Date.now();
     if (CC.view === 'fa2add2') { fa2ScanCode(txt, now); return; }
+    if (CC.view === 'fa2ret') { fa2RetCode(txt, now); return; }
 
     if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(120); return; }
     CC.cool = { code: txt, t: now, ms: 2200 };
@@ -3896,6 +3897,16 @@ var GLOSS = {
     var w = document.getElementById('a2-warn');
     if (w) { w.hidden = !bad; w.textContent = bad ? bad + ' item' + (bad > 1 ? 's need' : ' needs') + ' a lot and expiration \u2014 scan its lot barcode next, or remove it and use + Manual.' : ''; }
   }
+  function fa2RetCode(txt, now) {
+    if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(160); return; }
+    CC.cool = { code: txt, t: now, ms: 2200 };
+    var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
+    var p = r.p || {}, ref = r.sku || '';
+    if (!ref) { var n = nrm(txt); if (n.length >= 5 && n.length <= 20 && BYPN[n]) ref = skuOf(BYPN[n]); }
+    if (!ref) { ccStatus('Unknown barcode \u2014 tap the item in the list'); ccSchedule(300); return; }
+    ccStatus(FA2.retScan ? FA2.retScan(ref, p.lot || '') : '');
+    ccSchedule(220);
+  }
   window.__TBX_ONCODE = function (txt) { return ccOnCode(txt); };
   function fa2Add2() {
     var f = FA2.form;
@@ -4021,6 +4032,13 @@ var GLOSS = {
 
   /* ---------- Remove / Return ---------- */
   var FA2_REMOVE_TYPES = ['Returned to Stryker', 'External Transfer', 'Written Off', 'Returned to CT SM'];
+  // Which detail fields each removal type asks for: [key, label, required]
+  var FA2_REMOVE_FIELDS = {
+    'Returned to Stryker': [['trk', 'Tracking #', false], ['note', 'Notes', false]],
+    'External Transfer': [['trk', 'Tracking #', false], ['terr', 'Receiving Rep/Territory', true], ['sent', 'Sent by who', true], ['note', 'Notes', false]],
+    'Written Off': [['reason', 'Reason', true]],
+    'Returned to CT SM': [['recv', 'Received by who', true], ['note', 'Notes', false]]
+  };
   function fa2Return() {
     setTitle('Remove / Return', ''); backBtn.hidden = false;
     ccStop();
@@ -4028,30 +4046,51 @@ var GLOSS = {
     CC.view = 'fa2ret';
     fa2KitCss();
     var tray = { items: {}, order: [] };
-    var sel = { type: '', reason: '', trk: '', terr: '', recv: '' };
-    var OH = null, subKey = 'ret-' + fa2Uuid();
+    var sel = { type: '', v: {} };
+    var OH = null, subKey = 'ret-' + fa2Uuid(), openKey = '';
     fa2Shell('Remove / Return', 'Take product out of F&amp;A stock \u2014 pick where it went.',
       '<div class="fa2-lab">Removal type</div>' + fa2Chips('fa2-rty', FA2_REMOVE_TYPES, '') +
-      '<input id="fa2-trk2" class="cc-in" placeholder="Tracking # (optional)" hidden>' +
-      '<input id="fa2-terr" class="cc-in" placeholder="Receiving Rep/Territory (required)" hidden>' +
-      '<input id="fa2-recv" class="cc-in" placeholder="Received by who (required)" hidden>' +
-      '<input id="fa2-rsn2" class="cc-in" placeholder="Reason">' +
+      '<div id="fa2-rfields"></div>' +
       '<div class="fa2-lab">Selected</div><div id="fa2-tray"></div>' +
+      '<button id="fa2-scanb" type="button" class="cc-mini">\ud83d\udcf7 Scan a barcode</button>' +
+      '<div id="fa2-scanwrap" class="a2top" hidden>' +
+        '<video id="ccvid" playsinline muted autoplay></video>' +
+        '<div id="cc-flash" aria-hidden="true"></div>' +
+        '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
+        '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
+        '<div class="a2hint">Scan a product barcode to pull it from stock</div>' +
+      '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
-      '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
-      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Remove selected</button></div>',
+      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Submit</button></div>',
       function () { return fa2Load(true).then(function (d) { if (CC.view !== 'fa2ret') return; OH = d; drawPick(); }); });
-    var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 tap items below.', onChange: drawPick });
-    fa2ChipWire('fa2-rty', function (v) {
-      sel.type = v;
-      document.getElementById('fa2-trk2').hidden = v !== 'Returned to Stryker';
-      document.getElementById('fa2-terr').hidden = v !== 'External Transfer';
-      document.getElementById('fa2-recv').hidden = v !== 'Returned to CT SM';
-    });
-    [['fa2-trk2', 'trk'], ['fa2-terr', 'terr'], ['fa2-recv', 'recv'], ['fa2-rsn2', 'reason']].forEach(function (p) {
-      document.getElementById(p[0]).addEventListener('input', function (e) { sel[p[1]] = e.target.value; });
-    });
-    document.getElementById('fa2-q').addEventListener('input', function () { drawPick(); });
+    var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 tap an item below.', onChange: drawPick });
+    // The detail fields follow the removal type, so nobody is asked for a tracking
+    // number on a write-off or a reason on a send-back.
+    function drawFields() {
+      var host = document.getElementById('fa2-rfields'); if (!host) return;
+      var defs = FA2_REMOVE_FIELDS[sel.type] || [];
+      host.innerHTML = defs.map(function (f) {
+        return '<input id="rf-' + f[0] + '" class="cc-in" placeholder="' + esc(f[1] + (f[2] ? ' (required)' : ' (optional)')) + '" value="' + esc(sel.v[f[0]] || '') + '">';
+      }).join('');
+      defs.forEach(function (f) {
+        document.getElementById('rf-' + f[0]).addEventListener('input', function (e) { sel.v[f[0]] = e.target.value; });
+      });
+    }
+    fa2ChipWire('fa2-rty', function (v) { sel.type = v; drawFields(); });
+    document.getElementById('fa2-q').addEventListener('input', function () { openKey = ''; drawPick(); });
+    function rowFor(k) { var m = null; ((OH && OH.master) || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; }); return m; }
+    function cardFor(k) { var c = null; [].forEach.call(document.querySelectorAll('#fa2-pick .fa2-pk'), function (x) { if (x.getAttribute('data-k') === k) c = x; }); return c; }
+    function addToTray(k, n) {
+      var m = rowFor(k); if (!m) return false;
+      var oh = fa2Num(m[4]), have = tray.items[k] ? tray.items[k].qty : 0;
+      if (have + n > oh) { var c = cardFor(k); kitShake(c, c && c.querySelector('.f2bub')); return false; }
+      if (tray.items[k]) tray.items[k].qty = have + n;
+      else { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, max: oh, qty: n }; tray.order.push(k); }
+      openKey = '';
+      trayApi.redraw();
+      return true;
+    }
     function drawPick() {
       var el = document.getElementById('fa2-pick'); if (!el || !OH) return;
       var q = (document.getElementById('fa2-q') || {}).value || '';
@@ -4060,55 +4099,89 @@ var GLOSS = {
       rows = fa2BandSort(rows);
       el.innerHTML = rows.map(function (r) {
         var key = r[0] + '\u0001' + r[2];
-        var have = tray.items[key] ? tray.items[key].qty : 0;
-        var oh = fa2Num(r[4]);
-        return '<div class="f2c fa2-pk" data-k="' + esc(key) + '">' +
-          '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + oh + ' on hand</span></div>' +
+        var oh = fa2Num(r[4]), have = tray.items[key] ? tray.items[key].qty : 0;
+        var open = openKey === key, opts = '';
+        for (var i = 1; i <= oh; i++) opts += '<option value="' + i + '">' + i + '</option>';
+        return '<div class="f2c fa2-pk' + (open ? ' pk-open' : '') + '" data-k="' + esc(key) + '">' +
+          '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + (have ? have + ' of ' + oh + ' selected' : oh + ' on hand') + '</span></div>' +
           (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
-          '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (have ? ' \u00b7 <b>' + have + ' selected</b>' : '') + '</div>' +
+          '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + '</div>' +
+          (open ? '<div class="pk-qty">' +
+              '<label class="a2f"><span class="a2fl">QTY</span><select class="cc-in cc-sel pk-n">' + opts + '</select></label>' +
+              '<button type="button" class="cc-btn pk-add">Add</button>' +
+            '</div>' : '') +
         '</div>';
       }).join('');
     }
     document.getElementById('fa2-pick').addEventListener('click', function (e) {
-      var c = e.target.closest ? e.target.closest('.fa2-pk') : null; if (!c || !OH) return;
-      var k = c.getAttribute('data-k');
-      var m = null;
-      (OH.master || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; });
-      if (!m) return;
-      var oh = fa2Num(m[4]);
-      var it = tray.items[k];
-      if (it) {
-        if (it.qty >= oh) { kitShake(c, c.querySelector('.f2bub')); return; }
-        it.qty += 1;
-      } else {
-        tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, max: oh, qty: 1 };
-        tray.order.push(k);
+      if (!OH || !e.target.closest) return;
+      var card = e.target.closest('.fa2-pk'); if (!card) return;
+      var k = card.getAttribute('data-k');
+      if (e.target.closest('.pk-add')) {
+        var s = card.querySelector('.pk-n');
+        addToTray(k, Math.max(1, +(s && s.value) || 1));
+        return;
       }
-      trayApi.redraw();
+      if (e.target.closest('.pk-qty')) return; // let the picker do its thing
+      openKey = (openKey === k) ? '' : k;
+      drawPick();
+      // the sticky Submit bar sits over the bottom of the list — bring the picker up to it
+      if (openKey) {
+        var c2 = cardFor(openKey);
+        if (c2) { try { c2.scrollIntoView({ block: 'center' }); } catch (e2) { c2.scrollIntoView(false); } }
+      }
+    });
+    // Scanning adds straight from stock — same guard rails as tapping.
+    FA2.retScan = function (ref, lot) {
+      if (!OH) return 'Still loading stock\u2026';
+      var nref = nrm(ref);
+      var cands = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && nrm(String(r[0])) === nref; });
+      if (!cands.length) return ref + ' isn\u2019t in F&A stock';
+      var m = null;
+      if (lot) {
+        m = cands.filter(function (r) { return String(r[2]).toUpperCase() === String(lot).toUpperCase(); })[0];
+        if (!m) return ref + ' Lot ' + lot + ' isn\u2019t on hand';
+      } else if (cands.length === 1) { m = cands[0]; }
+      else { return ref + ' has ' + cands.length + ' lots \u2014 tap the right one'; }
+      var k = m[0] + '\u0001' + m[2];
+      if (!addToTray(k, 1)) return m[0] + ' \u2014 all ' + fa2Num(m[4]) + ' already selected';
+      ccFlashGreen();
+      return m[0] + (m[2] ? ' \u00b7 Lot ' + m[2] : '') + ' added';
+    };
+    document.getElementById('fa2-scanb').addEventListener('click', function () {
+      var w = document.getElementById('fa2-scanwrap'), on = w.hidden;
+      w.hidden = !on;
+      this.textContent = on ? '\u25a0 Stop scanning' : '\ud83d\udcf7 Scan a barcode';
+      if (on) { ccBeepInit(); CC.camOff = false; ccStartCam(); } else { ccStop(); }
     });
     fa2Load(false).then(function (d) { if (CC.view !== 'fa2ret') return; OH = d; drawPick(); })
       .catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
     document.getElementById('fa2-go').addEventListener('click', function () {
       if (!sel.type) return fa2Err('fa2-err', 'Pick a removal type.');
-      if (sel.type === 'External Transfer' && !sel.terr.trim()) return fa2Err('fa2-err', 'Receiving Rep/Territory is required.');
-      if (sel.type === 'Returned to CT SM' && !sel.recv.trim()) return fa2Err('fa2-err', 'Received by who is required.');
+      var defs = FA2_REMOVE_FIELDS[sel.type] || [];
+      for (var i = 0; i < defs.length; i++) {
+        if (defs[i][2] && !String(sel.v[defs[i][0]] || '').trim()) return fa2Err('fa2-err', defs[i][1] + ' is required.');
+      }
       if (!tray.order.length) return fa2Err('fa2-err', 'Pick at least one item.');
+      var v = {}; for (var kk in sel.v) v[kk] = String(sel.v[kk] || '').trim();
       var evs = tray.order.map(function (k) {
         var p = tray.items[k];
-        var ev = { type: sel.type, ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, reason: sel.reason.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
-        if (sel.type === 'Returned to Stryker' && sel.trk.trim()) ev.tracking = sel.trk.trim();
-        if (sel.type === 'External Transfer') ev.receivedBy = sel.terr.trim();
-        if (sel.type === 'Returned to CT SM') ev.receivedBy = sel.recv.trim();
+        var ev = { type: sel.type, ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, entryMethod: 'manual', enteredBy: fa2Who() };
+        if (v.trk) ev.tracking = v.trk;
+        if (v.reason) ev.reason = v.reason;
+        if (v.note) ev.note = v.note;
+        if (sel.type === 'External Transfer') { ev.receivedBy = v.terr; ev.from = v.sent; }
+        if (sel.type === 'Returned to CT SM') ev.receivedBy = v.recv;
         return ev;
       });
       fa2Submit(evs, subKey, document.getElementById('fa2-go'))
         .then(function () {
-          tray.items = {}; tray.order = []; trayApi.redraw(); subKey = 'ret-' + fa2Uuid();
-          kitBanner(document.querySelector('.cc-card'), 'Items Removed');
-          var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; }
+          tray.items = {}; tray.order = []; openKey = ''; trayApi.redraw(); subKey = 'ret-' + fa2Uuid();
+          kitBanner(document.querySelector('.cc-card'), 'Items removed');
+          var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Submit'; }
           fa2Load(true).then(function (d2) { if (CC.view !== 'fa2ret') return; OH = d2; drawPick(); }).catch(function () {});
         })
-        .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; } });
+        .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Submit'; } });
     });
   }
 
