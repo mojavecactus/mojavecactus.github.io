@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.84';
+  var APPVER = '4.85';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3686,6 +3686,32 @@ var GLOSS = {
   }
 
   /* ---------- Add inventory (drop) ---------- */
+  // A bare type=date renders empty until it is tapped, and a number input never shows
+  // its placeholder once it has a value — so both fields get a visible label, and the
+  // date is pre-filled with today (editable) rather than looking broken.
+  function fa2ExpQtyRow(expId, qtyId, warnId) {
+    return '<div class="fa2-2col">' +
+        '<label class="a2f" for="' + expId + '"><span class="a2fl">Expiration</span>' +
+          '<input id="' + expId + '" class="cc-in" type="date" value="' + fa2Today() + '"></label>' +
+        '<label class="a2f" for="' + qtyId + '"><span class="a2fl">QTY</span>' +
+          '<input id="' + qtyId + '" class="cc-in" type="number" min="1" inputmode="numeric" value="1"></label>' +
+      '</div>' +
+      '<div id="' + warnId + '" class="a2warn" hidden></div>';
+  }
+  function fa2ExpWire(expId, warnId) {
+    var el = document.getElementById(expId), w = document.getElementById(warnId);
+    if (!el || !w) return;
+    function chk() {
+      var v = el.value, t = fa2Today();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || v > t) { w.hidden = true; return; }
+      // A date of today is still good through the end of the day; earlier is already expired.
+      w.textContent = v < t ? 'That expiration has already passed \u2014 this will land as EXPIRED.'
+                            : 'That expiration is today \u2014 it expires at the end of the day.';
+      w.hidden = false;
+    }
+    el.addEventListener('input', chk); el.addEventListener('change', chk);
+    chk();
+  }
   function fa2ItemRows(items, needLot) {
     return items.map(function (it, i) {
       return '<div class="fa2-item" data-i="' + i + '">' +
@@ -3835,7 +3861,7 @@ var GLOSS = {
           '<input id="a2-ref" class="cc-in" placeholder="REF (part number)">' +
           '<input id="a2-desc" class="cc-in" placeholder="Description">' +
           '<input id="a2-lot" class="cc-in" placeholder="LOT">' +
-          '<div class="fa2-2col"><input id="a2-exp" class="cc-in" type="date"><input id="a2-qty" class="cc-in" type="number" min="1" value="1" placeholder="Qty"></div>' +
+          fa2ExpQtyRow('a2-exp', 'a2-qty', 'a2-expwarn') +
           '<button id="a2-addman" type="button" class="cc-mini">Add to list</button>' +
         '</div>' +
         '<div class="fa2-lab">Items in this drop</div><div id="a2-tray"></div>' +
@@ -3848,6 +3874,7 @@ var GLOSS = {
       var w = document.getElementById('a2-manwrap'); w.hidden = !w.hidden;
       if (!w.hidden) document.getElementById('a2-ref').focus();
     });
+    fa2ExpWire('a2-exp', 'a2-expwarn');
     document.getElementById('a2-ref').addEventListener('input', function (e) {
       var d = document.getElementById('a2-desc');
       if (d && !d.value) { var dv = fa2DescOf(e.target.value); if (dv) d.value = dv; }
@@ -3863,8 +3890,10 @@ var GLOSS = {
       if (qty < 1) return fa2Err('fa2-err', 'Qty must be at least 1.');
       var er = document.getElementById('fa2-err'); if (er) er.hidden = true;
       fa2AddItem({ ref: ref, desc: document.getElementById('a2-desc').value.trim(), lot: lot, exp: exp, qty: qty }, false);
-      ['a2-ref', 'a2-desc', 'a2-lot', 'a2-exp'].forEach(function (id) { document.getElementById(id).value = ''; });
+      ['a2-ref', 'a2-desc', 'a2-lot'].forEach(function (id) { document.getElementById(id).value = ''; });
+      document.getElementById('a2-exp').value = fa2Today();
       document.getElementById('a2-qty').value = '1';
+      fa2ExpWire('a2-exp', 'a2-expwarn');
       document.getElementById('a2-ref').focus();
     });
     ccBeepInit();
@@ -4087,7 +4116,7 @@ var GLOSS = {
         '<input id="u-mref" class="cc-in" placeholder="REF (part number)">' +
         '<input id="u-mdesc" class="cc-in" placeholder="Description">' +
         '<input id="u-mlot" class="cc-in" placeholder="LOT">' +
-        '<div class="fa2-2col"><input id="u-mexp" class="cc-in" type="date"><input id="u-mqty" class="cc-in" type="number" min="1" value="1" placeholder="Qty"></div>' +
+        fa2ExpQtyRow('u-mexp', 'u-mqty', 'u-mexpwarn') +
         '<div class="cc-sub2">For product that was never entered \u2014 on save you\u2019ll confirm where it came from and it\u2019s recorded as a late entry.</div>' +
         '<button id="u-addman" type="button" class="cc-mini">Add to list</button>' +
       '</div>' +
@@ -4108,6 +4137,7 @@ var GLOSS = {
       var w = document.getElementById('u-manwrap'); w.hidden = !w.hidden;
       if (!w.hidden) document.getElementById('u-mref').focus();
     });
+    fa2ExpWire('u-mexp', 'u-mexpwarn');
     document.getElementById('u-mref').addEventListener('input', function (e) {
       var d = document.getElementById('u-mdesc');
       if (d && !d.value) { var dv = fa2DescOf(e.target.value); if (dv) d.value = dv; }
@@ -4129,8 +4159,10 @@ var GLOSS = {
       else if (m) { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: fa2Num(m[4]), qty: qty }; tray.order.push(k); }
       else { tray.items[k] = { ref: ref, desc: document.getElementById('u-mdesc').value.trim(), lot: lot, exp: exp, onhand: 0, qty: qty }; tray.order.push(k); }
       trayApi.redraw();
-      ['u-mref', 'u-mdesc', 'u-mlot', 'u-mexp'].forEach(function (id) { document.getElementById(id).value = ''; });
+      ['u-mref', 'u-mdesc', 'u-mlot'].forEach(function (id) { document.getElementById(id).value = ''; });
+      document.getElementById('u-mexp').value = fa2Today();
       document.getElementById('u-mqty').value = '1';
+      fa2ExpWire('u-mexp', 'u-mexpwarn');
       document.getElementById('u-mref').focus();
     });
     function drawPick() {

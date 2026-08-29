@@ -155,6 +155,25 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     const autoDesc = await page.inputValue('#a2-desc');
     check('S2g REF autofills description from catalog', autoDesc.length > 0, autoDesc);
     await page.fill('#a2-lot', 'LOTA');
+    if (FIXED) {
+      const row = await page.evaluate(() => {
+        const lab = [].map.call(document.querySelectorAll('#a2-manwrap .a2fl'), n => n.innerText.trim());
+        const e = document.getElementById('a2-exp'), q = document.getElementById('a2-qty');
+        const er = e.getBoundingClientRect(), qr = q.getBoundingClientRect();
+        const d = new Date(); const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        return { labels: lab, exp: e.value, today: today, qty: q.value, sameRow: Math.abs(er.top - qr.top) < 2, expW: Math.round(er.width), qtyW: Math.round(qr.width), warn: document.getElementById('a2-expwarn').hidden === false, warnTxt: document.getElementById('a2-expwarn').innerText };
+      });
+      check('R9a Manual add: both fields labelled Expiration + QTY, side by side', JSON.stringify(row.labels.map(x => x.toLowerCase())) === '["expiration","qty"]' && row.sameRow && row.expW > 100 && row.qtyW > 100, JSON.stringify(row));
+      check('R9b Date pre-fills to today (never blank) and qty defaults to 1', row.exp === row.today && row.qty === '1', 'exp=' + row.exp + ' today=' + row.today + ' qty=' + row.qty);
+      check('R9c Default (today) is flagged as expiring at the end of the day', row.warn && /expires at the end of the day/.test(row.warnTxt), row.warnTxt);
+      await page.fill('#a2-exp', '2020-01-01');
+      const past = await page.evaluate(() => ({ hidden: document.getElementById('a2-expwarn').hidden, txt: document.getElementById('a2-expwarn').innerText }));
+      check('R9g A past expiration warns that it will land as EXPIRED', !past.hidden && /already passed/.test(past.txt), JSON.stringify(past));
+      await page.fill('#a2-exp', '2027-03-31');
+      const cleared = await page.evaluate(() => document.getElementById('a2-expwarn').hidden);
+      check('R9d Warning clears once a future date is picked', cleared);
+      await page.fill('#a2-exp', '');
+    }
     await page.click('#a2-addman');
     check('S2h Manual add requires a full date', /full expiration date/.test(await text(page, '#fa2-err')));
     await page.fill('#a2-exp', '2027-03-31');
@@ -162,6 +181,10 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.click('#a2-addman');
     const trayRows = await page.locator('#a2-tray .k-trow').count();
     check('S2i Manual item lands in tray', trayRows === 1);
+    if (FIXED) {
+      const after = await page.evaluate(() => { const d = new Date(); const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); return { exp: document.getElementById('a2-exp').value, today: today, qty: document.getElementById('a2-qty').value, ref: document.getElementById('a2-ref').value }; });
+      check('R9f After adding, the row resets to today + qty 1 (ref cleared)', after.exp === after.today && after.qty === '1' && after.ref === '', JSON.stringify(after));
+    }
     check('S2j Save enabled once tray valid', !(await page.locator('#a2-go').isDisabled()));
     // same ref+lot again merges qty
     await page.fill('#a2-ref', '3105000740'); await page.fill('#a2-lot', 'LOTA'); await page.fill('#a2-exp', '2027-03-31'); await page.fill('#a2-qty', '1'); await page.click('#a2-addman');
@@ -306,6 +329,8 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     bug('S6f usage of a ref/lot never entered: baseline has no manual add / fixed has + Manual', manualBtn === 0, manualBtn === 1, 'u-man=' + manualBtn);
     if (FIXED) {
       await page.click('#u-man');
+      const urow = await page.evaluate(() => { const lab = [].map.call(document.querySelectorAll('#u-manwrap .a2fl'), n => n.innerText.trim()); const d = new Date(); const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); return { labels: lab, exp: document.getElementById('u-mexp').value, today: today }; });
+      check('R9e Usage manual add gets the same labelled, pre-filled row', JSON.stringify(urow.labels.map(x => x.toLowerCase())) === '["expiration","qty"]' && urow.exp === urow.today, JSON.stringify(urow));
       await page.fill('#u-mref', '0132'); await page.fill('#u-mlot', 'NEWLOT'); await page.fill('#u-mexp', '2027-09-30'); await page.fill('#u-mqty', '2');
       const mdesc = await page.inputValue('#u-mdesc');
       await page.click('#u-addman');
