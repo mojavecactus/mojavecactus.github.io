@@ -555,6 +555,8 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await page.locator('.sw-em[value="jordan@example.com"]').check();
       await page.fill('#sw-man', 'outsider@example.com');
       await page.fill('#sw-name', 'Outside Person');
+      const roleChips = await page.locator('#sw-role .fa2-chip').allInnerTexts();
+      check('R17b2 Role chips read Sports / F&A (not the escaped entity)', JSON.stringify(roleChips) === '["Sports","F&A"]', JSON.stringify(roleChips));
       await page.locator('#sw-role .fa2-chip', { hasText: 'F&A' }).click();
       const before2 = (hub.welcomeSends || []).length;
       await page.click('#sw-go');
@@ -581,9 +583,9 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       const dupTag = await page.evaluate(() => (document.getElementById('a-body') || {}).innerText || '');
       check('R6a Admin ↻ only re-reads — no sharing sync (no share emails)', syncAfterRf === 0, 'sync_sharing calls on refresh=' + syncAfterRf);
       check('R6b Email listed on both teams is flagged as getting every share email twice', /listed 2× — gets every share email 2×/.test(dupTag), dupTag.replace(/\s+/g, ' ').slice(0, 160));
-      await page.click('#a-sync'); await sleep(800);
-      const syncAfterBtn = hub.log.filter(b => b.action === 'admin' && b.op === 'sync_sharing').length - syncBefore;
-      check('R6c Explicit "Sync sheet & folder access" (confirmed) runs exactly one sync', syncAfterBtn === 1 && dialogs === 2, 'sync=' + syncAfterBtn + ' confirms=' + dialogs);
+      check('R6c The manual sharing-sync button is gone (teams_set syncs silently on save)', (await page.locator('#a-sync').count()) === 0);
+      const labels = await page.evaluate(() => [].map.call(document.querySelectorAll('.cc-card .fa2-mrow button, #a-body .fa2-mrow button'), b => b.textContent.trim()));
+      check('R6d Toolbar reads Send full report / Send welcome email / Send weekly Exp. now / Send monthly Exp. now', JSON.stringify(labels) === '["Send full report","Send welcome email","Send weekly Exp. now","Send monthly Exp. now"]', JSON.stringify(labels));
       hub.teams = hub.teams.filter(t => t.name !== 'Nate (F&A too)');
     }
 

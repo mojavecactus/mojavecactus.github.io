@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.95';
+  var APPVER = '4.96';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -4597,19 +4597,9 @@ var GLOSS = {
       return;
     }
     fa2Shell('Admin', 'Teams control sheet access and email recipients. Changes save instantly.',
-      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rep" class="cc-mini">Send Report</button><button type="button" id="a-welb" class="cc-mini">Send welcome email</button><button type="button" id="a-sync" class="cc-mini">Sync sheet &amp; folder access</button></div>' +
+      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rep" class="cc-mini">Send full report</button><button type="button" id="a-welb" class="cc-mini">Send welcome email</button></div>' +
       '<div id="a-body"><div class="cc-empty">Loading\u2026</div></div>',
       function () { fa2CacheKill(); return fa2AdminLoad(); });
-    // Sharing sync is deliberate, never a side effect of refresh: every sync re-shares the PDF folder and Google emails each person.
-    document.getElementById('a-sync').addEventListener('click', function () {
-      if (!confirm('Re-share the inventory sheet and the Bill Only PDF folder with everyone on both teams?\n\nGoogle emails a "shared with you" notice to each person every time this runs.')) return;
-      var o = document.getElementById('a-out'); if (o) o.textContent = 'Syncing\u2026';
-      fa2CacheKill();
-      fa2Call('admin', { adminPw: FA2.adminPw, op: 'sync_sharing' }).then(function (j) {
-        fa2AdminLoad();
-        var o2 = document.getElementById('a-out'); if (o2) o2.textContent = (j && j.ok) ? ('Access synced' + (j.sharing && j.sharing.added && j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : ' \u2014 nothing new') + '.') : 'Sync failed.';
-      }).catch(function () { fa2AdminLoad(); fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
-    });
     document.getElementById('a-rep').addEventListener('click', function () { fa2SendReport(); });
     document.getElementById('a-welb').addEventListener('click', function () { fa2SendWelcome(); });
     fa2AdminLoad();
@@ -4645,8 +4635,8 @@ var GLOSS = {
         '<label class="fa2-chk"><input id="a-tm" type="checkbox"' + (tg.monthlyEmail ? ' checked' : '') + '> Monthly sports summary (1st, 8 AM)</label>' +
         '<div class="fa2-lab">Test &amp; tools</div>' +
         '<div class="fa2-mrow">' +
-          '<button type="button" id="a-ew" class="cc-mini">Send weekly now</button>' +
-          '<button type="button" id="a-em2" class="cc-mini">Send monthly now</button>' +
+          '<button type="button" id="a-ew" class="cc-mini">Send weekly Exp. now</button>' +
+          '<button type="button" id="a-em2" class="cc-mini">Send monthly Exp. now</button>' +
         '</div>' +
         '<div id="a-out" class="cc-sub2"></div>';
       function saveTeams() {
@@ -4724,13 +4714,13 @@ var GLOSS = {
         '<div class="fa2-lab">Or send to someone not on a team</div>' +
         '<input id="sw-man" class="cc-in" placeholder="name@example.com">' +
         '<input id="sw-name" class="cc-in" placeholder="Their name (optional)">' +
-        '<div class="fa2-lab">Which password should that person get?</div>' + fa2Chips('sw-role', ['Sports', 'F&amp;A'], 'Sports') +
+        '<div class="fa2-lab">Which password should that person get?</div>' + fa2Chips('sw-role', ['Sports', 'F&A'], 'Sports') +
         '<div id="sw-err" class="cc-err" hidden></div>' +
         '<div class="fa2-mrow"><button type="button" id="sw-cancel" class="cc-mini">Cancel</button><button type="button" id="sw-go" class="cc-btn">Send</button></div>' +
       '</div>';
     document.body.appendChild(wrap);
     var role = 'sports';
-    fa2ChipWire('sw-role', function (v) { role = /F&A|F&amp;A/.test(v) ? 'fa' : 'sports'; });
+    fa2ChipWire('sw-role', function (v) { role = v.indexOf('F&A') > -1 ? 'fa' : 'sports'; });
     document.getElementById('sw-cancel').addEventListener('click', function () { wrap.remove(); });
     document.getElementById('sw-go').addEventListener('click', function () {
       var to = [].slice.call(wrap.querySelectorAll('.sw-em:checked')).map(function (c) { return { email: c.value }; });
