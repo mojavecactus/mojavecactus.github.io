@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.96';
+  var APPVER = '4.97';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3024,11 +3024,40 @@ var GLOSS = {
   function fa2TryUnlock(pw) { return fa2Dec('fa2.enc.json', pw).then(fa2Save).catch(function () {}); }
   function fa2TryUnlockFA(pw) { return fa2Dec('fa2-fa.enc.json', pw).then(function (c) { fa2Save(c); return true; }).catch(function () { return false; }); }
   function fa2IsFA() { var c = fa2Creds(); return !!(c && c.scope === 'fa'); }
+  // Reads are safe to repeat; anything that writes is not (a blind retry could
+  // double-send a welcome or re-approve an import).
+  function fa2Retryable(action, extra) {
+    if (action === 'read' || action === 'ping' || action === 'import_list') return true;
+    if (action === 'admin' && extra && /^(toggles_get|teams_get|report_preview)$/.test(String(extra.op))) return true;
+    return false;
+  }
   function fa2Call(action, extra) {
     var c = fa2Creds(); if (!c) return Promise.reject(new Error('locked'));
     var b = { action: action, token: c.token };
     if (extra) { for (var k in extra) b[k] = extra[k]; }
-    return fetch(c.url, { method: 'POST', body: JSON.stringify(b) }).then(function (r) { return r.json(); });
+    var body = JSON.stringify(b), tries = fa2Retryable(action, extra) ? 2 : 1;
+    function once(left) {
+      var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var opts = { method: 'POST', body: body };
+      if (ctl) opts.signal = ctl.signal;
+      // Apps Script can sit on a request for minutes when it is busy; don't leave
+      // the phone spinning on "Checking..." with no way to tell what happened.
+      var to = setTimeout(function () { if (ctl) ctl.abort(); }, 25000);
+      return fetch(c.url, opts).then(function (r) {
+        clearTimeout(to);
+        return r.text().then(function (t) {
+          try { return JSON.parse(t); }
+          catch (e2) { var eb = new Error('badreply'); eb.status = r.status; throw eb; }
+        });
+      }, function (e) {
+        clearTimeout(to);
+        throw new Error((e && e.name === 'AbortError') ? 'timeout' : 'net');
+      }).catch(function (e) {
+        if (left > 1) return new Promise(function (res) { setTimeout(res, 1200); }).then(function () { return once(left - 1); });
+        throw e;
+      });
+    }
+    return once(tries);
   }
   function fa2Ensure(then) {
     if (fa2IsFA()) return true;
@@ -3132,7 +3161,10 @@ var GLOSS = {
   var FA2_ERRS = { scope: 'This login can only send product back to Stryker.', auth: 'Access token rejected \u2014 re-enter the CT password.', tracking: 'Tracking # is required.', exp: 'Expiration is required.', qty: 'Quantity can\u2019t be zero.', reverses: 'Nothing to void.', type: 'Unknown event type.', dup: 'Already saved.' };
   function fa2FailMsg(e, net) {
     if (e && e.hub) { var m = String(e.message || 'server'); return (FA2_ERRS[m] || (m.length > 24 ? m : 'Server rejected this (' + m + ').')) + (typeof e.at === 'number' ? ' Line ' + (e.at + 1) + '.' : ''); }
-    return net || 'Couldn\u2019t reach the server \u2014 tap again to retry.';
+    var k = e && e.message;
+    if (k === 'timeout') return 'The sheet server didn\u2019t answer in time \u2014 it\u2019s usually busy for a minute. Try again.';
+    if (k === 'badreply') return 'The sheet server sent back an error page instead of data \u2014 try again in a minute.';
+    return net || 'Couldn\u2019t reach the server \u2014 check your signal and tap again.';
   }
   function fa2Err(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg; el.hidden = false; } }
   function fa2Wide(on) { if (document.body) document.body.classList.toggle('fa2-wide', !!on); }
@@ -4586,11 +4618,12 @@ var GLOSS = {
       var go = document.getElementById('a-go');
       function tryA() {
         var v = document.getElementById('a-pw').value; if (!v) return;
+        var er = document.getElementById('fa2-err'); if (er) er.hidden = true; // don't leave the last failure on screen
         go.disabled = true; go.textContent = 'Checking\u2026';
         fa2Call('admin', { adminPw: v, op: 'toggles_get' }).then(function (j) {
           if (j && j.ok) { FA2.adminPw = v; fa2Admin(); }
           else { go.disabled = false; go.textContent = 'Unlock'; fa2Err('fa2-err', j && j.err === 'adminpw' ? 'Wrong password.' : 'Server error.'); }
-        }).catch(function () { go.disabled = false; go.textContent = 'Unlock'; fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
+        }).catch(function (e) { go.disabled = false; go.textContent = 'Unlock'; fa2Err('fa2-err', fa2FailMsg(e)); });
       }
       go.addEventListener('click', tryA);
       document.getElementById('a-pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') tryA(); });

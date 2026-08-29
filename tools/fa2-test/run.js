@@ -114,6 +114,12 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.click('#fa2-go');
     check('S2b Add step-1 validation (from)', /came from/.test(await text(page, '#fa2-err')));
     if (FIXED) {
+      const gone = hub.log.length;
+      hub.abortReads = 1;
+      await page.evaluate(() => document.getElementById('fa2-rf').click());
+      await page.waitForFunction(() => !/didn|reach the server/.test((document.getElementById('fa2-err') || {}).textContent || '') , null, { timeout: 12000 }).catch(() => {});
+      await sleep(2500);
+      check('R18 A dropped read retries once instead of surfacing an error', hub.abortReads === 0 && hub.log.length > gone && !(await page.locator('#fa2-err:visible').count()), 'abortReads left=' + hub.abortReads);
       const box = () => page.evaluate(() => { const e = document.getElementById('fa2-fromo'); const r = e.getBoundingClientRect(); return { vis: r.height > 0, ph: e.placeholder }; });
       check('R7a From detail box is hidden until a chip needs it', !(await box()).vis, JSON.stringify(await box()));
       await pickChip(page, 'fa2-from', 'Territory Transfer');
@@ -227,7 +233,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       hub.delayMs = 0;
     } else {
       await page.click('#a2-go');
-      await page.waitForFunction(() => location.hash === '#/fa2' || /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
+      await page.waitForFunction(() => location.hash === '#/fa2' || /tap again|check your signal|didn.t answer/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
       if (!(await page.evaluate(() => location.hash === '#/fa2'))) { await page.click('#a2-go'); await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 10000 }); }
     }
     bug('S2l lost reply after apply: baseline blocks on the scanner screen / fixed reports on Home', !FIXED, FIXED, 'save is now a background hand-off');
@@ -245,7 +251,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await page.fill('#fa2-drop', 'Failed drop'); await pickChip(page, 'fa2-from', 'Mia'); await pickChip(page, 'fa2-rb', 'Katie F');
       await page.click('#fa2-go'); await page.waitForSelector('#a2-go', { timeout: 10000 });
       await page.click('#a2-man'); await page.fill('#a2-ref', '0130'); await page.fill('#a2-lot', 'FAILLOT'); await page.fill('#a2-exp', '2028-01-31'); await page.click('#a2-addman');
-      hub.abortNext = true; hub.abortReads = 1;
+      hub.abortNext = true; hub.abortReads = 3;
       await page.click('#a2-go');
       await page.waitForFunction(() => /didn/.test((document.getElementById('fa2-flash') || {}).innerText || ''), null, { timeout: 15000 });
       const bad = await page.evaluate(() => ({ hash: location.hash, cls: document.getElementById('fa2-flash').className, txt: document.getElementById('fa2-flash').innerText.replace(/\s+/g, ' '), retry: !!document.getElementById('fa2-flgo') }));
@@ -338,7 +344,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     check('S4a Choosing 2 on a card puts 2 in the tray', (await text(page, '#fa2-tray .k-trow .k-step b')) === '2');
     hub.failNext = { action: 'batch', mode: 'abort-after-apply' };
     await page.click('#fa2-go');
-    await page.waitForFunction(() => !!document.querySelector('.k-ban') || /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
+    await page.waitForFunction(() => !!document.querySelector('.k-ban') || /tap again|check your signal|didn.t answer/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
     if (!(await page.locator('.k-ban').count())) { await page.click('#fa2-go'); await page.waitForSelector('.k-ban', { timeout: 10000 }); }
     const rb = hub.batches().filter(x => x.events.some(e => e.type === 'Written Off' && e.lot === 'LOTC'));
     const woC = hub.events('Written Off').filter(e => e.lot === 'LOTC').length;
@@ -347,9 +353,9 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await pickChip(page, 'fa2-rty', 'Written Off');
       await page.fill('#rf-reason', 'damaged');
       await pick('InSpace D', 1);
-      hub.failNext = { action: 'batch', mode: 'abort-after-apply' }; hub.abortReads = 1; // batch reply lost AND the landed-probe fails (offline)
+      hub.failNext = { action: 'batch', mode: 'abort-after-apply' }; hub.abortReads = 3; // batch reply lost AND the landed-probe fails (offline; reads retry once)
       await page.click('#fa2-go');
-      await page.waitForFunction(() => /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
+      await page.waitForFunction(() => /tap again|check your signal|didn.t answer/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
       await pick('Test screw B', 1); // edit the tray, then retry
       const woBefore = hub.events('Written Off').length;
       await page.click('#fa2-go');
@@ -366,7 +372,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     check('S5b Enabled after pick + tracking', !(await page.locator('#fa2-go').isDisabled()));
     hub.failNext = { action: 'batch', mode: 'abort-after-apply' };
     await page.click('#fa2-go');
-    await page.waitForFunction(() => location.hash === '#/fa2' || /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
+    await page.waitForFunction(() => location.hash === '#/fa2' || /tap again|check your signal|didn.t answer/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
     if (!(await page.evaluate(() => location.hash === '#/fa2'))) { await page.click('#fa2-go'); await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 10000 }); }
     if (FIXED) {
       await go(page, '#/fa2/send', '#fa2-pick .fa2-row');
