@@ -95,6 +95,12 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.fill('#fa2-q', 'inspace');
     const filtered = await page.locator('#fa2-list .f2c').count();
     check('S1d On hand search filters by description', filtered === 2, 'matches=' + filtered);
+    if (FIXED) {
+      await page.fill('#fa2-q', '');
+      const eb = await page.evaluate(() => { const list = document.getElementById('fa2-list').getBoundingClientRect(); const rows = document.querySelector('#fa2-list .f2c').getBoundingClientRect(); const cs = getComputedStyle(document.querySelector('.fa2-eyebrow.warn')); return { classes: [].map.call(document.querySelectorAll('#fa2-list .fa2-eyebrow'), n => n.className), listW: Math.round(list.width), eyeW: Math.round(document.querySelector('.fa2-eyebrow').getBoundingClientRect().width), contentW: Math.round(document.getElementById('content').getBoundingClientRect().width), rowW: Math.round(rows.width), bg: cs.backgroundColor, display: cs.display }; });
+      check('R3 Section labels span the full list width with a coloured band', eb.eyeW === eb.listW && eb.display === 'block' && /rgba\(240, 180, 60/.test(eb.bg) && eb.classes.join(',') === 'fa2-eyebrow bad,fa2-eyebrow warn,fa2-eyebrow ok', JSON.stringify(eb));
+      check('R4a On hand rows run edge-to-edge like the catalog (no outer panel inset)', eb.rowW === eb.contentW && eb.contentW === 362, 'row=' + eb.rowW + ' content=' + eb.contentW);
+    }
 
     // ---------------- S2: Add inventory (manual path) ----------------
     await go(page, '#/fa2/add', '#fa2-drop');
@@ -118,6 +124,10 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.click('#fa2-go');
     await page.waitForSelector('#a2-go', { timeout: 10000 });
     check('S2f Step 2 renders, Save disabled with empty tray', await page.locator('#a2-go').isDisabled());
+    if (FIXED) {
+      const cam = await page.evaluate(() => { const r = document.querySelector('.a2top').getBoundingClientRect(); const c = document.getElementById('content').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), cw: Math.round(c.width), vh: window.innerHeight }; });
+      check('R4b Scanner box is full content width and sized like the Cycle Count camera (34vh, ≥207px)', cam.w === cam.cw && cam.h >= 207 && Math.abs(cam.h - Math.round(cam.vh * 0.34)) <= 2, JSON.stringify(cam));
+    }
     await page.click('#a2-man');
     await page.fill('#a2-ref', '3105000740');
     const autoDesc = await page.inputValue('#a2-desc');
@@ -287,12 +297,16 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     bug('S9c deleting one member after a prior save → stacked listeners (2 confirms, 2 teams_set)', dialogs === 2 && setCalls2 === 2, dialogs === 1 && setCalls2 === 1 && hub.teams.length === 3, 'confirms=' + dialogs + ' teams_set=' + setCalls2 + ' teams now=' + hub.teams.map(t => t.name).join(','));
 
     // ---------------- S8: Transactions ----------------
-    hub.imports.push({ importId: 'imp1', ts: '2026-08-28T10:00:00Z', source: 'email', bo: 'C777', outcome: 'pending', pdf: '', detail: { hdr: { facility: 'WCOSC', dos: '2026-08-27', surgeon: 'Dr. Modest' }, lines: [{ refRaw: '0130', desc: 'InSpace C', lot: '', qty: 1, issue: 'no-lot', unitPrice: 100, lineTotal: 100 }, { refRaw: '9999', desc: 'Not ours', lot: '', qty: 1, issue: 'unknown-ref' }] } });
+    hub.imports.push({ importId: 'imp1', ts: '2026-08-28T10:00:00Z', source: 'email', bo: 'C777', outcome: 'pending', pdf: '', detail: { hdr: { facility: 'WCOSC', dos: '2026-08-27', surgeon: 'Dr. Modest', po: 'PO-88' }, lines: [{ refRaw: '0130', desc: 'InSpace C', lot: '', qty: 1, issue: 'no-lot', unitPrice: 1250, lineTotal: 1250 }, { refRaw: '9999', desc: 'Not ours', lot: '', qty: 1, issue: 'unknown-ref', unitPrice: 75.5, lineTotal: 75.5 }] } });
     hub.imports.push({ importId: 'imp0', ts: '2026-08-27T10:00:00Z', source: 'email', bo: 'C700', outcome: 'auto', pdf: '', detail: { hdr: {}, lines: [] } });
     await go(page, '#/fa2', '#fa2-pills .cc-pill.ok');
     await page.waitForFunction(() => /pending/.test((document.getElementById('fa2-tsub') || {}).textContent || ''), null, { timeout: 10000 });
     check('S8a Home shows pending badge on Transactions', /1 pending/.test(await text(page, '#fa2-tsub')));
     await go(page, '#/fa2/trans', '.fa2-rev');
+    if (FIXED) {
+      const cardTxt = (await text(page, '#fa2-list .fa2-row')).replace(/\s+/g, ' ');
+      check('R1 Transactions card shows C#, account, surgeon, PO and total $', /C777/.test(cardTxt) && /WCOSC · Dr\. Modest/.test(cardTxt) && /PO PO-88/.test(cardTxt) && /\$1,325\.50/.test(cardTxt), cardTxt);
+    }
     await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(500); await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(500);
     await page.locator('.fa2-rev').first().click();
     await page.waitForSelector('#t-appr', { timeout: 5000 });
@@ -303,6 +317,36 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     const appr = hub.log.filter(b => b.action === 'import_approve');
     check('S8b Approve sends edited lot + skip flag', appr.length === 1 && appr[0].lines[0].lot === 'LOTC' && appr[0].lines[1].skipped === true, JSON.stringify(appr.map(a => a.lines.map(l => [l.lot, l.skipped]))));
     check('S8c Approved import applied as Used in case', hub.events('Used in case').filter(e => e.importId === 'imp1').length === 1);
+    if (FIXED) {
+      hub.imports.push({ importId: 'imp2', ts: '2026-08-28T12:00:00Z', source: 'email', bo: 'C888', outcome: 'pending', pdf: '', detail: { hdr: { facility: 'Danbury', dos: '2026-08-28', surgeon: 'Dr. Ganal' }, lines: [{ refRaw: '0131', desc: 'InSpace D', lot: 'LOTD', qty: 1, issue: 'overdraft', lineTotal: 500 }] } });
+      await page.evaluate(() => document.getElementById('fa2-rf').click()); await page.waitForSelector('.fa2-rev', { timeout: 10000 });
+      await page.locator('.fa2-rev').first().click(); await page.waitForSelector('#t-deny', { timeout: 5000 });
+      await page.click('#t-deny'); await page.waitForSelector('.fa2-eyebrow', { timeout: 10000 }); /* S9's dialog handler accepts the confirm */
+      await go(page, '#/fa2/history', '#fa2-list .h-ev');
+      const hist = await page.evaluate(() => [].map.call(document.querySelectorAll('#fa2-list .h-ev'), n => n.innerText.replace(/\s+/g, ' ')));
+      const appr = hist.find(t => /Bill only approved/.test(t)), den = hist.find(t => /Bill only denied/.test(t));
+      check('R2a History logs the approved bill only with reviewer, account, $ and the not-F&A skip', !!appr && /C777/.test(appr) && /by Nate/.test(appr) && /1 marked not F&A stock/.test(appr) && /\$1,325\.50/.test(appr), appr || 'missing');
+      check('R2b History logs the denied bill only', !!den && /C888/.test(den) && /Danbury/.test(den) && /by Nate/.test(den) && /DENIED/.test(den), den || 'missing');
+      await page.locator('#fa2-list .h-ev', { hasText: 'Bill only approved' }).click();
+      const apprLines = (await page.locator('#fa2-list .h-ev', { hasText: 'Bill only approved' }).locator('.h-ln').allInnerTexts()).join(' | ').replace(/\s+/g, ' ');
+      check('R2c Expanded review card shows the skipped line flagged', /9999.*SKIPPED — not F&A stock/.test(apprLines) && /0130.*Lot LOTC/.test(apprLines), apprLines);
+    }
+
+    // ---------------- R5: refresh button on every sheet-backed screen ----------------
+    if (FIXED) {
+      const rf = {};
+      for (const [n, h, sel] of [['home', '#/fa2', '#fa2-pills'], ['onhand', '#/fa2/onhand', '#fa2-list'], ['history', '#/fa2/history', '#fa2-list'], ['trans', '#/fa2/trans', '#fa2-list'], ['add', '#/fa2/add', '#fa2-drop'], ['return', '#/fa2/return', '#fa2-pick'], ['send', '#/fa2/send', '#fa2-pick'], ['use', '#/fa2/use', '#fa2-pick'], ['admin', '#/fa2/admin', '#a-body']]) {
+        await go(page, h, sel); await sleep(300);
+        rf[n] = await page.evaluate(() => { const b = document.getElementById('fa2-rf'); if (!b) return null; const r = b.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return [Math.round(r.top), Math.round(r.right), top === b || (top && b.contains(top))]; });
+      }
+      const allOk = Object.keys(rf).every(k => rf[k] && rf[k][0] > 60 && rf[k][0] < 140 && rf[k][1] >= 370 && rf[k][2]);
+      check('R5 ↻ present, visible and tappable at the top-right on all 9 sheet-backed screens', allOk, JSON.stringify(rf));
+      // the refresh on Send must not stack pick handlers (qty must step by 1 after a refresh)
+      await go(page, '#/fa2/send', '#fa2-pick .fa2-row');
+      await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(600);
+      await page.locator('.fa2-qb[data-d="1"]').first().click();
+      check('R5b Refresh on Send re-wires the picker without stacking handlers', (await text(page, '.fa2-qv')) === '1', 'qty=' + (await text(page, '.fa2-qv')));
+    }
 
     // ---------------- S13: legacy #/fa route ----------------
     await go(page, '#/fa', null); await sleep(600);

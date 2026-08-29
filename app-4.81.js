@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.80';
+  var APPVER = '4.81';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1769,7 +1769,7 @@ var GLOSS = {
     ccHomeLoad(terrTgt(), false);
   }
   function ccGate() {
-    CC.view = 'gate';
+    CC.view = 'gate'; fa2Wide(false);
     var TR = TERR[CC.terr];
     var gm = CC.gateMsg || TR.gate; CC.gateMsg = '';
     render(
@@ -1824,7 +1824,7 @@ var GLOSS = {
     setTimeout(function () { pw.focus(); }, 60);
   }
   function ccDevice() {
-    CC.view = 'device';
+    CC.view = 'device'; fa2Wide(false);
     function draw(list) {
       render(
         '<div class="card cc-card">' +
@@ -3117,14 +3117,36 @@ var GLOSS = {
     return net || 'Couldn\u2019t reach the server \u2014 tap again to retry.';
   }
   function fa2Err(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg; el.hidden = false; } }
-  function fa2Shell(title, sub, inner) {
+  function fa2Wide(on) { if (document.body) document.body.classList.toggle('fa2-wide', !!on); }
+  function fa2Spin(on) { var b = document.getElementById('fa2-rf'); if (b) { b.classList.toggle('spin', !!on); b.disabled = !!on; } }
+  // Every screen that draws from the sheet gets the same top-right refresh; onRefresh returns a promise.
+  function fa2Shell(title, sub, inner, onRefresh) {
     render(
       '<div class="card cc-card">' +
+        (onRefresh ? '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' : '') +
         '<h2 class="cc-h">' + title + '</h2>' +
         (sub ? '<div class="cc-sub">' + sub + '</div>' : '') +
         inner +
         '<div id="fa2-err" class="cc-err" hidden></div>' +
       '</div>');
+    if (onRefresh) document.getElementById('fa2-rf').addEventListener('click', function () {
+      fa2Spin(true);
+      Promise.resolve().then(onRefresh).then(function () { fa2Spin(false); }, function () { fa2Spin(false); });
+    });
+  }
+  function fa2Amt(v) { if (v == null || String(v).trim() === '') return null; var n = Number(String(v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : null; }
+  function fa2Money(n) { var t = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','); return (n < 0 ? '\u2212$' : '$') + t; }
+  function fa2ImpTotal(x) {
+    var hdr = (x.detail && x.detail.hdr) || {};
+    var t = fa2Amt(hdr.total != null ? hdr.total : hdr.poTotal != null ? hdr.poTotal : hdr.orderTotal != null ? hdr.orderTotal : x.total);
+    if (t != null) return t;
+    var sum = 0, any = false;
+    ((x.detail && x.detail.lines) || []).forEach(function (L) {
+      var v = fa2Amt(L.lineTotal);
+      if (v == null && fa2Amt(L.unitPrice) != null) v = fa2Amt(L.unitPrice) * (Number(L.qty) || 0);
+      if (v != null) { sum += v; any = true; }
+    });
+    return any ? sum : null;
   }
   function fa2Chips(id, opts, cur) {
     return '<div class="fa2-chips" id="' + id + '">' + opts.map(function (o) {
@@ -3146,7 +3168,7 @@ var GLOSS = {
     var fa = fa2IsFA();
     setTitle('F&A Inventory', 'v2'); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2Home)) return;
+    if (!fa2Ensure(fa2Home)) return; fa2Wide(true);
     CC.view = 'fa2home';
     var tiles;
     if (fa) {
@@ -3350,7 +3372,7 @@ var GLOSS = {
   function fa2OnHand() {
     setTitle('On hand', ''); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2OnHand)) return;
+    if (!fa2Ensure(fa2OnHand)) return; fa2Wide(true);
     CC.view = 'fa2onhand';
     fa2KitCss();
     render(
@@ -3386,7 +3408,7 @@ var GLOSS = {
     var html = '', last = -1;
     rows.forEach(function (r) {
       var b = expBand(r[3]);
-      if (b !== last) { html += '<div class="fa2-eyebrow">' + names[b] + '</div>'; last = b; }
+      if (b !== last) { html += '<div class="fa2-eyebrow ' + ['bad', 'warn', 'ok'][b] + '">' + names[b] + '</div>'; last = b; }
       html +=
           '<div class="f2c">' +
             '<div class="f2top"><b>' + esc(r[0]) + '</b>' + expChip(r[3]) + '</div>' +
@@ -3402,7 +3424,7 @@ var GLOSS = {
   function fa2History() {
     setTitle('History', ''); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2History)) return;
+    if (!fa2Ensure(fa2History)) return; fa2Wide(true);
     CC.view = 'fa2hist';
     render(
       '<div class="card cc-card">' +
@@ -3415,9 +3437,11 @@ var GLOSS = {
     fa2HistLoad(false);
   }
   function fa2HistLoad(force) {
-    fa2Load(force).then(function (d) {
+    var pi = fa2IsFA() ? Promise.resolve(null) : fa2Call('import_list').catch(function () { return null; });
+    Promise.all([fa2Load(force), pi]).then(function (rs) {
       if (CC.view !== 'fa2hist') return;
-      FA2.histD = d;
+      FA2.histD = rs[0];
+      FA2.histImps = (rs[1] && rs[1].ok && rs[1].imports) || [];
       fa2HistDraw();
     }).catch(function () {
       if (CC.view !== 'fa2hist') return;
@@ -3461,9 +3485,37 @@ var GLOSS = {
       grp.rows.push({ eid: eid, ref: g(r, 'Ref'), desc: g(r, 'Description'), lot: g(r, 'Lot'), exp: g(r, 'Exp'), qty: q, ty: ty, voided: !!voided[eid], reverses: g(r, 'Reverses'), flags: g(r, 'Flags') });
       if (!voided[eid] && ty !== 'Void') grp.units += q;
     });
+    // Bill-only imports that were reviewed (approved / denied / lines skipped as not-F&A) or auto-applied
+    (FA2.histImps || []).filter(function (x) { return x.outcome && x.outcome !== 'pending' && x.outcome !== 'revised-pending' && x.outcome !== 'duplicate' && x.outcome !== 'ignored-not-a-bo'; }).slice(0, 40).forEach(function (x) {
+      var hdr = (x.detail && x.detail.hdr) || {}, lines = (x.detail && x.detail.lines) || [];
+      var ts = String(x.resolvedAt || x.reviewedAt || x.updatedAt || x.ts || '');
+      var by = x.resolver || x.resolvedBy || x.reviewer || x.by || '';
+      var skipped = lines.filter(function (L) { return L.skipped; }).length;
+      var issues = lines.filter(function (L) { return L.issue && !L.skipped; }).length;
+      var tot = fa2ImpTotal(x);
+      groups.push({ imp: true, outcome: x.outcome, ts: ts, date: ts.slice(0, 10),
+        ty: 'Bill only ' + (x.outcome === 'auto' ? 'auto-applied' : x.outcome === 'approved' ? 'approved' : x.outcome === 'denied' ? 'denied' : String(x.outcome)),
+        bits: [ts.slice(0, 10), x.bo || '(no BO)', hdr.facility, hdr.surgeon, by ? 'by ' + by : '', tot != null ? fa2Money(tot) : '', skipped ? skipped + ' marked not F&A stock' : '', issues ? issues + ' issue' + (issues > 1 ? 's' : '') : ''].filter(Boolean),
+        rows: lines.map(function (L) { return { ref: L.refRaw || L.ref || '', desc: L.desc || '', lot: L.lot || '', qty: fa2Num(L.qty), skipped: !!L.skipped, issue: L.issue || '', resolved: !!L.resolve }; }),
+        units: lines.filter(function (L) { return !L.skipped; }).reduce(function (a, L) { return a + fa2Num(L.qty); }, 0) });
+    });
     groups.sort(function (x, y) { return x.ts < y.ts ? 1 : x.ts > y.ts ? -1 : 0; });
     var canFix = !fa2IsFA();
     el.innerHTML = groups.map(function (grp, gi) {
+      if (grp.imp) {
+        var applied = grp.outcome === 'approved' || grp.outcome === 'auto';
+        var ipc = grp.outcome === 'denied' ? 'bad' : applied ? 'ok' : 'wait';
+        var ilines = grp.rows.map(function (x) {
+          return '<div class="h-ln' + (x.skipped ? ' h-dim' : '') + '"><span class="h-lref"><b>' + esc(x.ref || '\u2014') + '</b>' +
+            '<span>' + (x.lot ? 'Lot ' + esc(x.lot) : 'No lot') + (x.desc ? ' \u00b7 ' + esc(x.desc) : '') + (x.skipped ? ' \u00b7 SKIPPED \u2014 not F&A stock' : '') + (x.issue ? ' \u00b7 ' + esc(x.issue) + (x.resolved ? ' (resolved)' : '') : '') + '</span></span>' +
+            '<span class="h-cnt">' + (x.skipped ? 'skip' : (applied ? '\u2212' : '\u00d7') + Math.abs(x.qty)) + '</span></div>';
+        }).join('');
+        return '<div class="h-ev' + (grp.outcome === 'denied' ? ' h-dim' : '') + '" data-g="' + gi + '">' +
+          '<div class="h-top"><span class="h-ty">' + esc(grp.ty) + '</span><span class="cc-pill ' + ipc + '">' + (grp.outcome === 'denied' ? 'DENIED' : applied ? '\u2212' + grp.units : esc(String(grp.outcome).toUpperCase())) + '</span></div>' +
+          '<div class="h-sub">' + esc(grp.bits.join(' \u00b7 ')) + ' \u00b7 ' + grp.rows.length + ' line' + (grp.rows.length === 1 ? '' : 's') + '</div>' +
+          '<div class="h-lines" hidden>' + ilines + '</div>' +
+        '</div>';
+      }
       var neg = fa2HistNeg(grp.ty);
       var sign = grp.ty === 'Void' ? '' : (grp.ty === 'Adjustment' ? (grp.units < 0 ? '\u2212' : '+') : (neg ? '\u2212' : '+'));
       var pc = grp.ty === 'Void' ? '' : (grp.ty === 'Adjustment' ? 'busy' : (neg ? 'bad' : 'ok'));
@@ -3598,7 +3650,7 @@ var GLOSS = {
   function fa2Add() {
     setTitle('Add inventory', ''); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2Add)) return;
+    if (!fa2Ensure(fa2Add)) return; fa2Wide(true);
     CC.view = 'fa2add';
     if (!FA2.form || FA2.form.kind !== 'add') FA2.form = { kind: 'add', drop: '', date: fa2Today(), from: '', fromOther: '', rb: '', accName: '', accLoc: '', note: '', items: [] };
     var f = FA2.form;
@@ -3615,7 +3667,8 @@ var GLOSS = {
         '<input id="fa2-accl" class="cc-in" placeholder="Where at the account? (required)" value="' + esc(f.accLoc) + '">' +
       '</div>' +
       '<input id="fa2-note" class="cc-in" placeholder="Notes" value="' + esc(f.note || '') + '">' +
-      '<button id="fa2-go" class="cc-btn">Save drop \u2014 add items</button>');
+      '<button id="fa2-go" class="cc-btn">Save drop \u2014 add items</button>',
+      function () { return fa2Load(true).then(function () { if (CC.view === 'fa2add') fa2Add(); }); });
     document.getElementById('fa2-drop').addEventListener('input', function (e) { f.drop = e.target.value; });
     document.getElementById('fa2-date').addEventListener('input', function (e) { f.date = e.target.value; });
     fa2ChipWire('fa2-from', function (v) { f.from = v; document.getElementById('fa2-fromo').hidden = v !== 'Other'; });
@@ -3704,7 +3757,7 @@ var GLOSS = {
     var f = FA2.form;
     if (!f || f.kind !== 'add' || !f.drop) { location.hash = '#/fa2/add'; return; }
     setTitle('Add items', ''); backBtn.hidden = false;
-    if (!fa2Ensure(fa2Add2)) return;
+    if (!fa2Ensure(fa2Add2)) return; fa2Wide(true);
     ccStop();
     CC.view = 'fa2add2';
     fa2KitCss();
@@ -3804,7 +3857,7 @@ var GLOSS = {
   function fa2PickWire(el, d, picks, allowOver, onChange) {
     var byKey = {};
     (d.master || []).forEach(function (r) { byKey[r[0] + '\u0001' + r[2]] = { ref: r[0], desc: r[1], lot: r[2], exp: r[3], onhand: fa2Num(r[4]) }; });
-    el.addEventListener('click', function (e) {
+    el.onclick = function (e) {
       var b = e.target.closest ? e.target.closest('.fa2-qb') : null; if (!b) return;
       var k = b.dataset.k, m = byKey[k]; if (!m) return;
       var cur = picks[k] ? picks[k].qty : 0;
@@ -3816,7 +3869,7 @@ var GLOSS = {
       if (!vEl) { el.querySelectorAll('.fa2-qv').forEach(function (x) { if (x.dataset.k === k) vEl = x; }); }
       if (vEl) vEl.textContent = next;
       if (onChange) onChange();
-    });
+    };
   }
 
   /* ---------- Remove / Return ---------- */
@@ -3824,7 +3877,7 @@ var GLOSS = {
   function fa2Return() {
     setTitle('Remove / Return', ''); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2Return)) return;
+    if (!fa2Ensure(fa2Return)) return; fa2Wide(true);
     CC.view = 'fa2ret';
     fa2KitCss();
     var tray = { items: {}, order: [] };
@@ -3839,7 +3892,8 @@ var GLOSS = {
       '<div class="fa2-lab">Selected</div><div id="fa2-tray"></div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
       '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
-      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Remove selected</button></div>');
+      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Remove selected</button></div>',
+      function () { return fa2Load(true).then(function (d) { if (CC.view !== 'fa2ret') return; OH = d; drawPick(); }); });
     var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 tap items below.', onChange: drawPick });
     fa2ChipWire('fa2-rty', function (v) {
       sel.type = v;
@@ -3915,7 +3969,7 @@ var GLOSS = {
   function fa2Send() {
     setTitle('Send back', ''); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2Send)) return;
+    if (!fa2Ensure(fa2Send)) return; fa2Wide(true);
     CC.view = 'fa2send';
     var fa = fa2IsFA();
     var picks = {}; var trk = { v: '' };
@@ -3924,11 +3978,12 @@ var GLOSS = {
       namePick +
       '<div class="fa2-lab">Items</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
       '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (required)">' +
-      '<button id="fa2-go" class="cc-btn" disabled>Complete send-back</button>');
+      '<button id="fa2-go" class="cc-btn" disabled>Complete send-back</button>',
+      function () { return loadSend(true); });
     var goBtn = document.getElementById('fa2-go');
     function gate() { goBtn.disabled = !(trk.v.trim() && Object.keys(picks).length && (!fa || FA2.faName)); }
     document.getElementById('fa2-trk').addEventListener('input', function (e) { trk.v = e.target.value; gate(); });
-    fa2Load(false).then(function (d) {
+    function loadSend(force) { return fa2Load(force).then(function (d) {
       if (CC.view !== 'fa2send') return;
       var el = document.getElementById('fa2-pick');
       el.innerHTML = fa2Picker(d, picks, false);
@@ -3939,7 +3994,8 @@ var GLOSS = {
         nw.innerHTML = names.length ? fa2Chips('fa2-nm', names, FA2.faName || '') : '<div class="cc-sub2">No F&amp;A team members set yet \u2014 ask Nate to add you in Admin.</div>';
         fa2ChipWire('fa2-nm', function (v) { FA2.faName = v; gate(); });
       }
-    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
+    }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; }); }
+    loadSend(false);
     goBtn.addEventListener('click', function () {
       var evs = Object.keys(picks).map(function (k) {
         var p = picks[k];
@@ -3955,7 +4011,7 @@ var GLOSS = {
   function fa2Use() {
     setTitle('Case usage', ''); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2Use)) return;
+    if (!fa2Ensure(fa2Use)) return; fa2Wide(true);
     CC.view = 'fa2use';
     fa2KitCss();
     if (!FA2.form || FA2.form.kind !== 'use') FA2.form = { kind: 'use', bo: '', po: '', fac: '', sur: '', dos: fa2Today() };
@@ -3981,7 +4037,8 @@ var GLOSS = {
       '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
       '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
-      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Save usage</button></div>');
+      '<div class="k-bar"><button id="fa2-go" class="cc-btn">Save usage</button></div>',
+      function () { return fa2Load(true).then(function (d) { if (CC.view !== 'fa2use') return; D2 = d; drawPick(); }); });
     ['bo', 'po', 'fac', 'sur', 'dos'].forEach(function (k) {
       document.getElementById('u-' + k).addEventListener('input', function (e) { f[k] = e.target.value; });
     });
@@ -4111,7 +4168,7 @@ var GLOSS = {
   function fa2Trans() {
     setTitle('Transactions', ''); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2Trans)) return;
+    if (!fa2Ensure(fa2Trans)) return; fa2Wide(true);
     CC.view = 'fa2trans';
     render(
       '<div class="card cc-card">' +
@@ -4149,13 +4206,20 @@ var GLOSS = {
       var pend = imps.filter(function (x) { return x.outcome === 'pending' || x.outcome === 'revised-pending'; });
       var rest = imps.filter(function (x) { return x.outcome !== 'pending' && x.outcome !== 'revised-pending'; });
       function card(x, isPend) {
-        var lines = (x.detail && x.detail.lines) || [];
+        var lines = (x.detail && x.detail.lines) || [], hdr = (x.detail && x.detail.hdr) || {};
         var iss = lines.filter(function (L) { return L.issue && !L.skipped; }).length;
-        var sub = [x.ts.slice(0, 10), x.source, lines.length + ' lines'].concat(iss ? [iss + ' issue' + (iss > 1 ? 's' : '')] : []).join(' \u00b7 ');
+        var tot = fa2ImpTotal(x);
+        var who = [hdr.facility, hdr.surgeon].filter(Boolean).join(' \u00b7 ');
+        var po = hdr.po || hdr.casePO || hdr.poNumber || '';
+        var sub = [String(x.ts || '').slice(0, 10), po ? 'PO ' + po : '', hdr.dos ? 'DOS ' + hdr.dos : '', lines.length + ' line' + (lines.length === 1 ? '' : 's')]
+          .concat(iss ? [iss + ' issue' + (iss > 1 ? 's' : '')] : []).filter(Boolean).join(' \u00b7 ');
+        var pc = isPend ? 'wait' : (x.outcome === 'auto' || x.outcome === 'approved' ? 'ok' : (x.outcome === 'denied' ? 'bad' : ''));
         return '<div class="fa2-row">' +
-          '<div class="fa2-l"><div class="fa2-t">' + esc(x.bo || '(no BO)') + ' <span class="cc-pill ' + (isPend ? 'wait' : (x.outcome === 'auto' || x.outcome === 'approved' ? 'ok' : '')) + '">' + esc(x.outcome) + '</span></div>' +
+          '<div class="fa2-l"><div class="fa2-t">' + esc(x.bo || '(no BO)') + ' <span class="cc-pill ' + pc + '">' + esc(x.outcome) + '</span></div>' +
+          (who ? '<div class="fa2-s fa2-who">' + esc(who) + '</div>' : '') +
           '<div class="fa2-s">' + esc(sub) + (x.pdf ? ' \u00b7 <a class="cc-link" href="' + esc(x.pdf) + '" target="_blank" rel="noopener">PDF</a>' : '') + '</div></div>' +
-          (isPend ? '<div class="fa2-r"><button type="button" class="cc-mini fa2-rev" data-id="' + esc(x.importId) + '">Review</button></div>' : '') +
+          '<div class="fa2-r">' + (tot != null ? '<b class="fa2-amt">' + fa2Money(tot) + '</b>' : '') +
+            (isPend ? '<button type="button" class="cc-mini fa2-rev" data-id="' + esc(x.importId) + '">Review</button>' : '') + '</div>' +
         '</div>';
       }
       el.innerHTML =
@@ -4244,7 +4308,7 @@ var GLOSS = {
   function fa2Admin() {
     setTitle('Admin', ''); backBtn.hidden = false;
     ccStop();
-    if (!fa2Ensure(fa2Admin)) return;
+    if (!fa2Ensure(fa2Admin)) return; fa2Wide(true);
     CC.view = 'fa2adm';
     if (!FA2.adminPw) {
       fa2Shell('Admin', 'Master password required.',
@@ -4264,9 +4328,9 @@ var GLOSS = {
       return;
     }
     fa2Shell('Admin', 'Teams control sheet access and email recipients. Changes save instantly.',
-      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rf" class="cc-mini">\u21bb Refresh</button><button type="button" id="a-rep" class="cc-mini">Send Report</button></div>' +
-      '<div id="a-body"><div class="cc-empty">Loading\u2026</div></div>');
-    document.getElementById('a-rf').addEventListener('click', function () { var o = document.getElementById('a-out'); if (o) o.textContent = 'Syncing\u2026'; fa2CacheKill(); fa2Call('admin', { adminPw: FA2.adminPw, op: 'sync_sharing' }).then(function () { fa2AdminLoad(); }).catch(function () { fa2AdminLoad(); }); });
+      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rep" class="cc-mini">Send Report</button></div>' +
+      '<div id="a-body"><div class="cc-empty">Loading\u2026</div></div>',
+      function () { var o = document.getElementById('a-out'); if (o) o.textContent = 'Syncing\u2026'; fa2CacheKill(); return fa2Call('admin', { adminPw: FA2.adminPw, op: 'sync_sharing' }).then(function () { fa2AdminLoad(); }, function () { fa2AdminLoad(); }); });
     document.getElementById('a-rep').addEventListener('click', function () { fa2SendReport(); });
     fa2AdminLoad();
   }
@@ -4412,6 +4476,7 @@ var GLOSS = {
     var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0 || h.indexOf('#/fa2') === 0);
     if (!inCT) ccStop();
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
+    if (h.indexOf('#/fa2') !== 0) fa2Wide(false);
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
     if (/^#\/fa2\/(add|add2|use|return|trans|admin)$/.test(h) && fa2IsFA()) { location.replace('#/fa2'); return; }

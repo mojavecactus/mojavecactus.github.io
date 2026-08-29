@@ -107,7 +107,7 @@ class FakeHub {
       }
       case 'import_list': return { ok: true, imports: this.imports };
       case 'poll_now': return { ok: true, threads: 0, results: [] };
-      case 'import_deny': { const x = this.imports.find(i => i.importId === body.importId); if (x) x.outcome = 'denied'; return { ok: true }; }
+      case 'import_deny': { const x = this.imports.find(i => i.importId === body.importId); if (x) { x.outcome = 'denied'; x.resolver = body.by; x.resolvedAt = this.now().toISOString(); } return { ok: true }; }
       case 'import_approve': {
         const x = this.imports.find(i => i.importId === body.importId); if (!x) return { ok: false, err: 'noimport' };
         const ts = this.now().toISOString();
@@ -116,7 +116,9 @@ class FakeHub {
           if (L.resolve) this.ledger.push({ eventId: uuid(), opId: 'imp-' + x.importId + '-r' + i, timestamp: ts, type: 'Received', ref: L.refRaw, desc: L.desc, lot: L.lot, exp: '2099-12', qty: L.qty, receivedBy: L.resolve.source, flags: 'Late entry', entryMethod: 'import-approved', importId: x.importId });
           this.ledger.push({ eventId: uuid(), opId: 'imp-' + x.importId, timestamp: ts, type: 'Used in case', ref: L.refRaw, desc: L.desc, lot: L.lot, qty: L.qty, caseBO: x.bo, facility: x.detail.hdr.facility, surgeon: x.detail.hdr.surgeon, dos: x.detail.hdr.dos, entryMethod: 'import-approved', enteredBy: body.by, importId: x.importId });
         });
-        x.outcome = 'approved'; return { ok: true };
+        x.outcome = 'approved'; x.resolver = body.by; x.resolvedAt = ts;
+        x.detail.lines = x.detail.lines.map((L, i) => Object.assign({}, L, body.lines[i] ? { lot: body.lines[i].lot, skipped: !!body.lines[i].skipped, resolve: body.lines[i].resolve || null } : {}));
+        return { ok: true };
       }
       case 'admin': {
         if (scope !== 'sports') return { ok: false, err: 'scope' };
