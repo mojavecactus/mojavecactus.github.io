@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.82';
+  var APPVER = '4.83';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3065,6 +3065,15 @@ var GLOSS = {
     }).catch(function (e) { if (c) return c.d; throw e; });
   }
   function fa2Num(x) { var n = Number(x); return isFinite(n) ? n : 0; }
+  // "From" needs a detail box for Other (free note) and Territory Transfer (which territory).
+  function fa2FromNeeds(v) { return v === 'Other' || v === 'Territory Transfer'; }
+  function fa2FromPh(v) { return v === 'Territory Transfer' ? 'Territory Received From?' : 'Notes'; }
+  function fa2FromValue(f) {
+    var x = String(f.fromOther || '').trim();
+    if (f.from === 'Other') return x;
+    if (f.from === 'Territory Transfer') return 'Territory Transfer \u2014 ' + x;
+    return f.from;
+  }
   function fa2Today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function fa2Uuid() { try { return crypto.randomUUID(); } catch (e) { return 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10); } }
   function fa2PillClass(s) {
@@ -3652,6 +3661,7 @@ var GLOSS = {
     ccStop();
     if (!fa2Ensure(fa2Add)) return; fa2Wide(true);
     CC.view = 'fa2add';
+    fa2KitCss();
     if (!FA2.form || FA2.form.kind !== 'add') FA2.form = { kind: 'add', drop: '', date: fa2Today(), from: '', fromOther: '', rb: '', accName: '', accLoc: '', note: '', items: [] };
     var f = FA2.form;
     var faNames = fa2Teams('fa');
@@ -3660,7 +3670,7 @@ var GLOSS = {
       '<input id="fa2-drop" class="cc-in" placeholder="Drop name (e.g. Hartford office drop)" value="' + esc(f.drop) + '">' +
       '<input id="fa2-date" class="cc-in" type="date" value="' + esc(f.date) + '">' +
       '<div class="fa2-lab">From</div>' + fa2Chips('fa2-from', ['Megan', 'Matt', 'Mia', 'Manny', 'Isabella', 'Nate', 'Territory Transfer', 'Other'], f.from) +
-      '<input id="fa2-fromo" class="cc-in" placeholder="Who? (free text)" value="' + esc(f.fromOther) + '"' + (f.from === 'Other' ? '' : ' hidden') + '>' +
+      '<input id="fa2-fromo" class="cc-in" placeholder="' + esc(fa2FromPh(f.from)) + '" value="' + esc(f.fromOther) + '"' + (fa2FromNeeds(f.from) ? '' : ' hidden') + '>' +
       '<div class="fa2-lab">Received by</div>' + (rbOpts.length > 2 ? '' : '<div class="cc-sub2">Tip: add F&amp;A members in Admin to pick them here.</div>') + fa2Chips('fa2-rb', rbOpts, f.rb) +
       '<div id="fa2-acc"' + (f.rb === 'Account' ? '' : ' hidden') + '>' +
         '<input id="fa2-accn" class="cc-in" placeholder="Account name (required)" value="' + esc(f.accName) + '">' +
@@ -3671,16 +3681,18 @@ var GLOSS = {
       function () { return fa2Load(true).then(function () { if (CC.view === 'fa2add') fa2Add(); }); });
     document.getElementById('fa2-drop').addEventListener('input', function (e) { f.drop = e.target.value; });
     document.getElementById('fa2-date').addEventListener('input', function (e) { f.date = e.target.value; });
-    fa2ChipWire('fa2-from', function (v) { f.from = v; document.getElementById('fa2-fromo').hidden = v !== 'Other'; });
+    fa2ChipWire('fa2-from', function (v) { f.from = v; var fo = document.getElementById('fa2-fromo'); fo.placeholder = fa2FromPh(v); fo.hidden = !fa2FromNeeds(v); });
     fa2ChipWire('fa2-rb', function (v) { f.rb = v; document.getElementById('fa2-acc').hidden = v !== 'Account'; });
     document.getElementById('fa2-fromo').addEventListener('input', function (e) { f.fromOther = e.target.value; });
     document.getElementById('fa2-accn').addEventListener('input', function (e) { f.accName = e.target.value; });
     document.getElementById('fa2-accl').addEventListener('input', function (e) { f.accLoc = e.target.value; });
     document.getElementById('fa2-note').addEventListener('input', function (e) { f.note = e.target.value; });
     document.getElementById('fa2-go').addEventListener('click', function () {
-      var from = f.from === 'Other' ? f.fromOther.trim() : f.from;
+      var detail = String(f.fromOther || '').trim();
       if (!f.drop.trim()) return fa2Err('fa2-err', 'Give the drop a name.');
-      if (!from) return fa2Err('fa2-err', 'Pick who it came from.');
+      if (!f.from) return fa2Err('fa2-err', 'Pick who it came from.');
+      if (f.from === 'Territory Transfer' && !detail) return fa2Err('fa2-err', 'Territory received from is required.');
+      if (f.from === 'Other' && !detail) return fa2Err('fa2-err', 'Add a note saying where it came from.');
       if (!f.rb) return fa2Err('fa2-err', 'Pick who received it.');
       if (f.rb === 'Account' && (!f.accName.trim() || !f.accLoc.trim())) return fa2Err('fa2-err', 'Account name and location are both required.');
       location.hash = '#/fa2/add2';
@@ -3766,7 +3778,7 @@ var GLOSS = {
     render(
       '<div class="card cc-card">' +
         '<h2 class="cc-h">Add items</h2>' +
-        '<div class="cc-sub">' + esc(f.drop) + ' \u00b7 ' + esc(f.date) + ' \u00b7 from ' + esc(f.from === 'Other' ? f.fromOther : f.from) + '</div>' +
+        '<div class="cc-sub">' + esc(f.drop) + ' \u00b7 ' + esc(f.date) + ' \u00b7 from ' + esc(fa2FromValue(f)) + '</div>' +
         '<div class="a2top">' +
           '<video id="ccvid" playsinline muted autoplay></video>' +
           '<div id="cc-flash" aria-hidden="true"></div>' +
@@ -3818,7 +3830,7 @@ var GLOSS = {
     document.getElementById('a2-go').addEventListener('click', function () {
       var t = FA2.a2;
       if (!t.order.length) return fa2Err('fa2-err', 'Add at least one item.');
-      var from = f.from === 'Other' ? f.fromOther.trim() : f.from;
+      var from = fa2FromValue(f);
       var evs = t.order.map(function (k) {
         var p = t.items[k];
         return { type: 'Received', ref: p.ref, desc: p.desc, lot: p.lot, exp: p.exp, qty: p.qty,

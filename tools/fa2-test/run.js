@@ -111,7 +111,29 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.fill('#fa2-drop', 'Bridgeport drop');
     await page.click('#fa2-go');
     check('S2b Add step-1 validation (from)', /came from/.test(await text(page, '#fa2-err')));
-    await pickChip(page, 'fa2-from', 'Matt');
+    if (FIXED) {
+      const box = () => page.evaluate(() => { const e = document.getElementById('fa2-fromo'); const r = e.getBoundingClientRect(); return { vis: r.height > 0, ph: e.placeholder }; });
+      check('R7a From detail box is hidden until a chip needs it', !(await box()).vis, JSON.stringify(await box()));
+      await pickChip(page, 'fa2-from', 'Territory Transfer');
+      const tt = await box();
+      check('R7b Territory Transfer shows the box labelled "Territory Received From?"', tt.vis && tt.ph === 'Territory Received From?', JSON.stringify(tt));
+      await page.click('#fa2-go');
+      check('R7c Territory Transfer requires the territory', /Territory received from is required/.test(await text(page, '#fa2-err')));
+      await page.fill('#fa2-fromo', 'Buffalo');
+      await page.click('#fa2-go');
+      check('R7d With the territory filled, step 1 moves past From', !/Territory received/.test(await text(page, '#fa2-err')));
+      await pickChip(page, 'fa2-from', 'Other');
+      const oth = await box();
+      check('R7e Other shows the same box labelled "Notes" (no "free text")', oth.vis && oth.ph === 'Notes', JSON.stringify(oth));
+      await page.fill('#fa2-fromo', '');
+      await page.click('#fa2-go');
+      check('R7f Other still requires a value', /where it came from/.test(await text(page, '#fa2-err')));
+      const dm = await page.evaluate(() => { const d = document.getElementById('fa2-date'), c = document.getElementById('content'); const dr = d.getBoundingClientRect(), cr = c.getBoundingClientRect(); const cs = getComputedStyle(d); return { right: Math.round(dr.right), cRight: Math.round(cr.right), box: cs.boxSizing, appear: cs.webkitAppearance || cs.appearance, maxW: cs.maxWidth, scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth }; });
+      check('R7g Date box is constrained to the content width (no overflow)', dm.right <= dm.cRight && dm.box === 'border-box' && dm.scrollW <= dm.innerW, JSON.stringify(dm));
+      await pickChip(page, 'fa2-from', 'Matt');
+    } else {
+      await pickChip(page, 'fa2-from', 'Matt');
+    }
     await page.click('#fa2-go');
     check('S2c Add step-1 validation (received by)', /received it/.test(await text(page, '#fa2-err')));
     const rbChips = await page.locator('#fa2-rb .fa2-chip').allInnerTexts();
@@ -162,6 +184,14 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
 
     // ---------------- S4: Remove/Return idempotency ----------------
     await go(page, '#/fa2/return', '#fa2-pick .fa2-pk');
+    if (FIXED) {
+      const shown = () => page.evaluate(() => ['fa2-trk2', 'fa2-terr', 'fa2-recv'].filter(id => document.getElementById(id).getBoundingClientRect().height > 0));
+      check('R7h Remove/Return: no conditional box before a type is picked', (await shown()).length === 0, JSON.stringify(await shown()));
+      await pickChip(page, 'fa2-rty', 'External Transfer');
+      check('R7i Only the External Transfer box shows', JSON.stringify(await shown()) === '["fa2-terr"]', JSON.stringify(await shown()));
+      await pickChip(page, 'fa2-rty', 'Returned to Stryker');
+      check('R7j Switching type swaps which box shows', JSON.stringify(await shown()) === '["fa2-trk2"]', JSON.stringify(await shown()));
+    }
     await pickChip(page, 'fa2-rty', 'Written Off');
     await page.fill('#fa2-rsn2', 'damaged');
     await page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace C' }).click();

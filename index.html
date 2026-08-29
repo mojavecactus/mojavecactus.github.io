@@ -439,6 +439,7 @@ body.cc-fixed #cclist{flex:1; min-height:0; overflow-y:auto; -webkit-overflow-sc
 .fa2-r b{font-size:15px;}
 /* F&A v2 — full-width like the catalog (no outer panel), highlighted section bands, visible refresh */
 .cc-card{position:relative;}
+.cc-in[hidden], .cc-in[hidden=""]{display:none;}
 body.fa2-wide #content > .card.cc-card{max-width:none; margin:0; padding:0; background:transparent; border:0; text-align:left;}
 body.fa2-wide .cc-h{text-align:left; margin:2px 0 4px; padding-right:46px;}
 body.fa2-wide .cc-sub{text-align:left;}
@@ -489,7 +490,7 @@ body.fa2-wide .a2top{aspect-ratio:auto; height:34vh; height:34dvh; min-height:20
 @keyframes ccspin{to{transform:rotate(360deg);}}
 .cc-sync{margin-top:8px; font-size:11.5px; color:var(--muted); min-height:15px;}
 /* iOS renders datetime-local with its own centered pill; normalize it to match .cc-in */
-input[type="datetime-local"].cc-in{-webkit-appearance:none; appearance:none; display:block; width:100%;
+input[type="date"].cc-in, input[type="datetime-local"].cc-in{-webkit-appearance:none; appearance:none; display:block; width:100%;
   box-sizing:border-box; min-height:47px; text-align:left;}
 input[type="datetime-local"].cc-in::-webkit-date-and-time-value{text-align:left; margin:0;}
 
@@ -845,6 +846,6 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 })();
 </script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.82.js"></script>
+<script src="app-4.83.js"></script>
 </body>
 </html>
