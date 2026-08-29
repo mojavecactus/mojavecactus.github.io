@@ -104,6 +104,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
 
     // ---------------- S2: Add inventory (manual path) ----------------
     await go(page, '#/fa2/add', '#fa2-drop');
+    if (FIXED) check('R10a Add subtitle no longer mentions the expiration rule', !/Expiration is required/.test(await text(page, '.cc-sub')), await text(page, '.cc-sub'));
     await page.click('#fa2-go');
     check('S2a Add step-1 validation (drop name)', (await text(page, '#fa2-err')) === 'Give the drop a name.');
     const defDate = await page.inputValue('#fa2-date');
@@ -186,6 +187,23 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     if (FIXED) {
       const after = await page.evaluate(() => { const d = new Date(); const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); return { exp: document.getElementById('a2-exp').value, today: today, qty: document.getElementById('a2-qty').value, ref: document.getElementById('a2-ref').value }; });
       check('R9f After adding, the row resets to today + qty 1 (ref cleared)', after.exp === after.today && after.qty === '1' && after.ref === '', JSON.stringify(after));
+      const sub = await text(page, '#a2-tray .k-ts');
+      check('R10b Tray row shows lot and expiration', /Lot LOTA/.test(sub) && /Exp 2027-03-31/.test(sub), sub);
+      // typo fix in place: change the lot, row must update without being deleted
+      await page.locator('#a2-tray .k-trow .k-tmain').first().click();
+      await page.waitForSelector('#ie-save', { timeout: 5000 });
+      const pre = await page.evaluate(() => ({ ref: document.getElementById('ie-ref').value, lot: document.getElementById('ie-lot').value, exp: document.getElementById('ie-exp').value, qty: document.getElementById('ie-qty').value }));
+      check('R10c Tapping a row opens the editor prefilled from that row', pre.ref === '3105000740' && pre.lot === 'LOTA' && pre.exp === '2027-03-31' && pre.qty === '2', JSON.stringify(pre));
+      await page.fill('#ie-lot', 'LOTA-FIXED'); await page.fill('#ie-qty', '4');
+      await page.click('#ie-save'); await sleep(300);
+      const fixed = await page.evaluate(() => ({ rows: document.querySelectorAll('#a2-tray .k-trow').length, sub: document.querySelector('#a2-tray .k-ts').innerText, qty: document.querySelector('#a2-tray .k-step b').innerText }));
+      check('R10d Edit updates the row in place — not deleted, count preserved', fixed.rows === 1 && /LOTA-FIXED/.test(fixed.sub) && fixed.qty === '4', JSON.stringify(fixed));
+      await page.fill('#a2-ref', '3105000740'); await page.fill('#a2-lot', 'LOTA-FIXED'); await page.fill('#a2-exp', '2027-03-31'); await page.fill('#a2-qty', '1'); await page.click('#a2-addman'); await sleep(200);
+      check('R10e Re-adding the corrected ref+lot merges rather than duplicating', (await page.locator('#a2-tray .k-trow').count()) === 1 && (await text(page, '#a2-tray .k-step b')) === '5');
+      // put it back so the rest of the suite keeps its expected quantities
+      await page.locator('#a2-tray .k-trow .k-edit').first().click(); await page.waitForSelector('#ie-save', { timeout: 5000 });
+      await page.fill('#ie-lot', 'LOTA'); await page.fill('#ie-qty', '2'); await page.click('#ie-save'); await sleep(300);
+      check('R10f Editing back leaves one clean row (restores the pre-edit state)', (await page.locator('#a2-tray .k-trow').count()) === 1 && /Lot LOTA \u00b7/.test(await text(page, '#a2-tray .k-ts')) && (await text(page, '#a2-tray .k-step b')) === '2', await text(page, '#a2-tray .k-ts'));
     }
     check('S2j Save enabled once tray valid', !(await page.locator('#a2-go').isDisabled()));
     // same ref+lot again merges qty
@@ -490,11 +508,16 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.evaluate(() => window.__TBX_ONCODE('(01)07613327570463'));
     await sleep(300);
     const row1 = await text(page, '#a2-tray .k-trow');
-    check('S10a GTIN-only scan adds a lot-less row', /3105000740/.test(row1) && /Lot\s*$/m.test(row1) || /Lot\s/.test(row1), row1.replace(/\n/g, ' | '));
+    check('S10a GTIN-only scan adds a row flagged as missing its lot', /3105000740/.test(row1) && /No lot/.test(row1), row1.replace(/\n/g, ' | '));
+    if (FIXED) {
+      const miss = await page.evaluate(() => ({ txt: document.querySelector('#a2-tray .k-ts').innerText, flags: document.querySelectorAll('#a2-tray .k-miss').length }));
+      check('R10g A scan with no lot/expiry flags both on the row', /No lot/.test(miss.txt) && /No expiry/.test(miss.txt) && miss.flags === 2, JSON.stringify(miss));
+    }
     check('S10b Save stays disabled, warn says "tap the item to fix"', (await page.locator('#a2-go').isDisabled()) && /(tap the item to fix|scan its lot barcode)/.test(await text(page, '#a2-warn')), await text(page, '#a2-warn'));
-    await page.locator('#a2-tray .k-trow .k-tmain').click(); await sleep(200);
-    const afterTap = await page.evaluate(() => ({ modal: !!document.querySelector('.fa2-modal'), rows: document.querySelectorAll('#a2-tray .k-trow').length, inputs: document.querySelectorAll('#a2-tray input').length }));
-    note('S10c tapping the lot-less row', JSON.stringify(afterTap) + ' (no editor either way — the fix attaches the next lot scan instead)');
+    await page.locator('#a2-tray .k-trow .k-tmain').click(); await sleep(300);
+    const afterTap = await page.evaluate(() => ({ modal: !!document.querySelector('.fa2-modal'), ref: (document.getElementById('ie-ref') || {}).value, lot: (document.getElementById('ie-lot') || {}).value }));
+    bug('S10c tapping a bad scan opens the row editor prefilled (baseline: nothing happens)', !afterTap.modal, afterTap.modal && afterTap.ref === '3105000740' && afterTap.lot === '', JSON.stringify(afterTap));
+    if (FIXED) { await page.click('#ie-cancel'); await sleep(200); check('S10c2 Cancel closes the editor and leaves the row untouched', !(await page.evaluate(() => !!document.querySelector('.fa2-modal'))) && (await page.locator('#a2-tray .k-trow').count()) === 1); }
     // lot/exp-only barcode scanned AFTER the GTIN
     await page.evaluate(() => window.__TBX_ONCODE('(17)270600(10)ZLOT1'));
     await sleep(300);

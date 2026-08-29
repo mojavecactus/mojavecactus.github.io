@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.86';
+  var APPVER = '4.87';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3368,11 +3368,16 @@ var GLOSS = {
       var h = '';
       order.forEach(function (k) {
         var p = items[k]; if (!p) return;
-        h += '<div class="k-trow" data-k="' + esc(k) + '">' +
+        var bits = [p.lot ? 'Lot ' + esc(p.lot) : '<em class="k-miss">No lot</em>'];
+        if (p.exp) bits.push('Exp ' + esc(p.exp));
+        else if (opts.needExp) bits.push('<em class="k-miss">No expiry</em>');
+        if (p.onhand != null) bits.push(p.onhand + ' on hand');
+        h += '<div class="k-trow' + (opts.onEdit ? ' k-can' : '') + '" data-k="' + esc(k) + '">' +
           '<span class="k-handle" aria-label="Reorder">\u2261</span>' +
           '<span class="k-arrows"><button data-mv="-1">\u25b2</button><button data-mv="1">\u25bc</button></span>' +
           '<span class="k-tmain"><span class="k-tt">' + esc(p.ref) + (p.desc ? ' \u00b7 ' + esc(p.desc) : '') + '</span>' +
-          '<span class="k-ts">Lot ' + esc(p.lot) + (p.onhand != null ? ' \u00b7 ' + p.onhand + ' on hand' : '') + '</span></span>' +
+          '<span class="k-ts">' + bits.join(' \u00b7 ') + '</span></span>' +
+          (opts.onEdit ? '<button class="k-edit" type="button" aria-label="Edit item">\u270e</button>' : '') +
           '<span class="k-step"><button data-d="-1">\u2212</button><b>' + p.qty + '</b><button data-d="1">+</button></span>' +
           '<button class="k-x" aria-label="Remove">\u00d7</button>' +
         '</div>';
@@ -3394,6 +3399,11 @@ var GLOSS = {
           });
         });
         row.querySelector('.k-x').addEventListener('click', function () { delete state.items[k]; state.order = state.order.filter(function (x) { return x !== k; }); draw(); });
+        if (opts.onEdit) {
+          var ed = row.querySelector('.k-edit');
+          if (ed) ed.addEventListener('click', function (e) { e.stopPropagation(); opts.onEdit(k); });
+          row.querySelector('.k-tmain').addEventListener('click', function () { opts.onEdit(k); });
+        }
         row.querySelectorAll('.k-arrows button').forEach(function (b) {
           b.addEventListener('click', function () { var mv = Number(b.getAttribute('data-mv')); var i = state.order.indexOf(k), j = i + mv; if (j < 0 || j >= state.order.length) return; state.order.splice(i, 1); state.order.splice(j, 0, k); draw(); });
         });
@@ -3689,14 +3699,17 @@ var GLOSS = {
   // A bare type=date renders empty until it is tapped, and a number input never shows
   // its placeholder once it has a value — so both fields get a visible label, and the
   // date is pre-filled with today (editable) rather than looking broken.
-  function fa2ExpQtyRow(expId, qtyId) {
+  function fa2ExpQtyRow(expId, qtyId, expVal, qtyVal) {
     return '<div class="fa2-2col">' +
         '<label class="a2f" for="' + expId + '"><span class="a2fl">Expiration</span>' +
-          '<input id="' + expId + '" class="cc-in" type="date" value="' + fa2Today() + '"></label>' +
+          '<input id="' + expId + '" class="cc-in" type="date" value="' + esc(expVal === undefined ? fa2Today() : (expVal || '')) + '"></label>' +
         '<label class="a2f" for="' + qtyId + '"><span class="a2fl">QTY</span>' +
-          '<input id="' + qtyId + '" class="cc-in" type="number" min="1" inputmode="numeric" value="1"></label>' +
+          '<input id="' + qtyId + '" class="cc-in" type="number" min="1" inputmode="numeric" value="' + esc(String(qtyVal === undefined ? 1 : qtyVal)) + '"></label>' +
       '</div>';
   }
+  // A date input only accepts YYYY-MM-DD; a scanned YYYY-MM becomes the end of that
+  // month, which is exactly how the hub reads it.
+  function fa2DateVal(e) { var n = expNorm(e); return /^\d{4}-\d{2}-\d{2}$/.test(n) ? n : ''; }
   // The field itself carries the status: red = today or already past, amber = inside
   // 3 months, green = good. Same bands the On hand list uses.
   function fa2ExpWire(expId) {
@@ -3735,7 +3748,7 @@ var GLOSS = {
     var f = FA2.form;
     var faNames = fa2Teams('fa');
     var rbOpts = faNames.concat(['Bloomfield Warehouse', 'Account']);
-    fa2Shell('Add inventory', 'Record a drop to the F&amp;A team. Expiration is required.',
+    fa2Shell('Add inventory', 'Record a drop to the F&amp;A team.',
       '<input id="fa2-drop" class="cc-in" placeholder="Drop name (e.g. Hartford office drop)" value="' + esc(f.drop) + '">' +
       '<input id="fa2-date" class="cc-in" type="date" value="' + esc(f.date) + '">' +
       '<div class="fa2-lab">From</div>' + fa2Chips('fa2-from', ['Megan', 'Matt', 'Mia', 'Manny', 'Isabella', 'Nate', 'Territory Transfer', 'Other'], f.from) +
@@ -3825,6 +3838,56 @@ var GLOSS = {
     fa2A2Gate();
     return true;
   }
+  // Fix a typo or a bad scan in place — nobody should have to delete a line and rescan.
+  function fa2ItemEdit(key) {
+    var t = FA2.a2, p = t.items[key]; if (!p) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'fa2-modal';
+    wrap.innerHTML =
+      '<div class="fa2-mcard">' +
+        '<div class="fa2-t">Edit item</div>' +
+        '<div class="fa2-s" style="margin:6px 0 10px">' + (p.src === 'scan' ? 'Scanned' : 'Added by hand') + ' \u2014 corrections stay in this drop.</div>' +
+        '<input id="ie-ref" class="cc-in" placeholder="REF (part number)" value="' + esc(p.ref || '') + '">' +
+        '<input id="ie-desc" class="cc-in" placeholder="Description" value="' + esc(p.desc || '') + '">' +
+        '<input id="ie-lot" class="cc-in" placeholder="LOT" value="' + esc(p.lot || '') + '">' +
+        fa2ExpQtyRow('ie-exp', 'ie-qty', fa2DateVal(p.exp), p.qty) +
+        '<div id="ie-err" class="cc-err" hidden></div>' +
+        '<div class="fa2-mrow"><button type="button" id="ie-cancel" class="cc-mini">Cancel</button><button type="button" id="ie-save" class="cc-btn">Save changes</button></div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    fa2ExpWire('ie-exp');
+    document.getElementById('ie-ref').addEventListener('input', function (e) {
+      var d = document.getElementById('ie-desc');
+      if (d && !d.value) { var dv = fa2DescOf(e.target.value); if (dv) d.value = dv; }
+    });
+    document.getElementById('ie-cancel').addEventListener('click', function () { wrap.remove(); });
+    document.getElementById('ie-save').addEventListener('click', function () {
+      var ref = document.getElementById('ie-ref').value.trim();
+      var desc = document.getElementById('ie-desc').value.trim();
+      var lot = document.getElementById('ie-lot').value.trim();
+      var exp = document.getElementById('ie-exp').value;
+      var qty = Math.round(+document.getElementById('ie-qty').value || 0);
+      if (!ref) return fa2Err('ie-err', 'REF is required.');
+      if (qty < 1) return fa2Err('ie-err', 'Qty must be at least 1.');
+      var changed = ref !== p.ref || lot !== (p.lot || '') || exp !== fa2DateVal(p.exp);
+      var src = (p.src === 'scan' && changed) ? 'manual' : p.src;
+      var nk = ref + '\u0001' + lot, i = t.order.indexOf(key);
+      delete t.items[key];
+      if (nk !== key && t.items[nk]) {
+        // merged into a line that already exists — keep one row, combine the counts
+        t.items[nk].qty += qty;
+        if (!t.items[nk].exp && exp) t.items[nk].exp = exp;
+        if (!t.items[nk].desc && desc) t.items[nk].desc = desc;
+        if (i > -1) t.order.splice(i, 1);
+      } else {
+        t.items[nk] = { ref: ref, desc: desc, lot: lot, exp: exp, qty: qty, src: src };
+        if (i > -1) t.order[i] = nk; else t.order.push(nk);
+      }
+      wrap.remove();
+      if (FA2.a2api) FA2.a2api.redraw();
+      fa2A2Gate();
+    });
+  }
   function fa2A2Gate() {
     var b = document.getElementById('a2-go'); if (!b) return;
     var t = FA2.a2, bad = 0;
@@ -3868,7 +3931,7 @@ var GLOSS = {
         '<div id="fa2-err" class="cc-err" hidden></div>' +
         '<div class="k-bar"><button id="a2-go" class="cc-btn" disabled>Save drop</button></div>' +
       '</div>');
-    FA2.a2api = kitTray(document.getElementById('a2-tray'), FA2.a2, { empty: 'Scan a barcode or use + Manual.', onChange: fa2A2Gate });
+    FA2.a2api = kitTray(document.getElementById('a2-tray'), FA2.a2, { empty: 'Scan a barcode or use + Manual.', onChange: fa2A2Gate, onEdit: fa2ItemEdit, needExp: true });
     document.getElementById('a2-man').addEventListener('click', function () {
       var w = document.getElementById('a2-manwrap'); w.hidden = !w.hidden;
       if (!w.hidden) document.getElementById('a2-ref').focus();
