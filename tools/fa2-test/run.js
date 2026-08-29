@@ -536,6 +536,10 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.fill('.a-nm[data-r="fa"]', 'New Person'); await page.fill('.a-em[data-r="fa"]', 'new@example.com');
     await page.locator('.a-add[data-r="fa"]').click();
     await page.waitForFunction(() => document.body.innerText.indexOf('New Person') > -1 && !document.querySelector('.a-busy'), null, { timeout: 10000 });
+    if (FIXED) {
+      const tools = await page.evaluate(() => [].map.call(document.querySelectorAll('#a-body .fa2-mrow button'), x => x.id));
+      check('R15 Admin keeps only the two email tools — the duplicate inbox poll is gone', JSON.stringify(tools) === '["a-ew","a-em2"]', JSON.stringify(tools));
+    }
     const setCalls1 = hub.log.filter(b => b.action === 'admin' && b.op === 'teams_set').length;
     check('S9b Add member → one teams_set', setCalls1 === 1 && hub.teams.length === 4, 'teams_set calls=' + setCalls1);
     // now delete one member: count confirm dialogs + teams_set calls

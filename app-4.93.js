@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.92';
+  var APPVER = '4.93';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -4645,7 +4645,6 @@ var GLOSS = {
         '<div class="fa2-mrow">' +
           '<button type="button" id="a-ew" class="cc-mini">Send weekly now</button>' +
           '<button type="button" id="a-em2" class="cc-mini">Send monthly now</button>' +
-          '<button type="button" id="a-poll" class="cc-mini">Check inbox now</button>' +
         '</div>' +
         '<div id="a-out" class="cc-sub2"></div>';
       function saveTeams() {
@@ -4683,7 +4682,7 @@ var GLOSS = {
           fa2Call('admin', { adminPw: FA2.adminPw, op: op }).then(function (j) { o.textContent = JSON.stringify(j); }).catch(function () { o.textContent = 'Server unreachable.'; });
         });
       }
-      tool('a-ew', 'email_weekly_now'); tool('a-em2', 'email_monthly_now'); tool('a-poll', 'poll_now');
+      tool('a-ew', 'email_weekly_now'); tool('a-em2', 'email_monthly_now');
     }).catch(function () {
       var body = document.getElementById('a-body');
       if (body) body.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server.</div>';
