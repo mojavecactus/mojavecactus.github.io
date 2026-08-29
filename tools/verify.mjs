@@ -6,6 +6,8 @@ import { readFileSync, existsSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 
 const R = process.cwd();
+// The app bundle is versioned by filename (app-<ver>.js); index.html's script tag is the source of truth.
+const APP = ((readFileSync(R + '/index.html', 'utf8').match(/<script src="(app[^"]*\.js)"/) || [])[1]) || 'app.js';
 const fails = [], warns = [];
 const FAIL = (m) => fails.push(m);
 const WARN = (m) => warns.push(m);
@@ -20,12 +22,12 @@ new Function('window', dataRaw)(global.window);
 const D = global.window.TOOLBOX;
 new Function('window', readFileSync(R + '/gtin.js', 'utf8'))(global.window);
 const G = global.window.TBX_GTIN || {};
-const app = readFileSync(R + '/app.js', 'utf8');
+const app = readFileSync(R + '/' + APP, 'utf8');
 const sw = readFileSync(R + '/sw.js', 'utf8');
 const all = [...D.items.map(i => ({ ...i, _k: 'item' })), ...D.probes.map(i => ({ ...i, _k: 'probe' })), ...D.shavers.map(i => ({ ...i, _k: 'shaver' }))];
 
 // ---- 1 syntax ----
-for (const f of ['app.js', 'sw.js']) {
+for (const f of [APP, 'sw.js']) {
   try { execFileSync('node', ['--check', R + '/' + f], { stdio: 'pipe' }); }
   catch (e) { FAIL(f + ' syntax: ' + String(e.stderr).slice(0, 200)); }
 }
@@ -90,7 +92,7 @@ D.items.forEach(i => {
   });
   assets.forEach(a => { if (!existsSync(R + '/' + a)) FAIL('ASSETS entry missing on disk: ' + a); });
   disk.forEach(f => { if (!refs.has(f)) FAIL('orphan image on disk (unreferenced by any card): ' + f); });
-  ['./index.html', './app.js', './payload.enc.json'].forEach(core => {
+  ['./index.html', './' + APP, './payload.enc.json'].forEach(core => {
     if (!sw.includes("'" + core + "'")) FAIL('core asset missing from precache: ' + core);
   });
 }
@@ -99,7 +101,7 @@ D.items.forEach(i => {
 {
   const parseGroups = (name) => {
     const m = new RegExp('var ' + name + ' = \\{([\\s\\S]*?)\\n  \\};').exec(app);
-    if (!m) { FAIL('could not parse ' + name + ' from app.js'); return null; }
+    if (!m) { FAIL('could not parse ' + name + ' from ' + APP); return null; }
     const g = {};
     for (const mm of m[1].matchAll(/'([^']+)':\s*\[([^\]]*)\]/g)) {
       g[mm[1]] = [...mm[2].matchAll(/'([^']+)'/g)].map(x => x[1]);

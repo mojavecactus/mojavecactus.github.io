@@ -43,7 +43,10 @@ a new password.
    the new CACHE to that number **+1** (`tbx-vNNN-YYYYMMDD`). Never reuse or guess a number —
    this is what prevents two sessions colliding on the same version.
 7. `node tools/verify.mjs` — must print VERIFY PASSED. Fix any FAIL before committing.
-8. Commit payload.enc.json + sw.js (+ app.js/img as needed), push, then trigger a Pages build
+8. Commit payload.enc.json + sw.js (+ app-<ver>.js/img as needed), push, then trigger a Pages build.
+   The app bundle is versioned by filename: `git mv app-<old>.js app-<new>.js`, then update the
+   `<script src>` in index.html and both sw.js entries (ASSETS + CORE); verify.mjs/integrity.py read
+   the name from index.html
    (`POST /repos/<owner>/<repo>/pages/builds`) and poll `/pages/builds/latest` until
    `status=built` on the pushed SHA; re-trigger if a stale SHA reports built.
 

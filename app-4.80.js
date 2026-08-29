@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.79';
+  var APPVER = '4.80';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3065,6 +3065,7 @@ var GLOSS = {
     }).catch(function (e) { if (c) return c.d; throw e; });
   }
   function fa2Num(x) { var n = Number(x); return isFinite(n) ? n : 0; }
+  function fa2Today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function fa2Uuid() { try { return crypto.randomUUID(); } catch (e) { return 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10); } }
   function fa2PillClass(s) {
     if (s === 'EXPIRED') return 'bad';
@@ -3081,15 +3082,39 @@ var GLOSS = {
   // pending (idempotent retry) queue: one batch at a time
   function fa2PendGet() { try { return JSON.parse(localStorage.getItem('tbx_fa2_pend') || 'null'); } catch (e) { return null; } }
   function fa2PendSet(p) { try { if (p) localStorage.setItem('tbx_fa2_pend', JSON.stringify(p)); else localStorage.removeItem('tbx_fa2_pend'); } catch (e) {} }
+  function fa2Sig(events) { var t = JSON.stringify(events), h = 5381; for (var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(16); }
+  // Did a batch with this opId reach the ledger? Used when the reply was lost,
+  // so a dropped response never turns into a "tap again" that double-applies.
+  function fa2Landed(opId) {
+    return fa2Call('read', { limit: 40 }).then(function (j) {
+      if (!fa2Sane(j)) return null;
+      var ix = j.ledgerCols.indexOf('OpId'); if (ix < 0) return null;
+      return (j.ledger || []).some(function (r) { return String(r[ix]) === opId; });
+    }).catch(function () { return null; });
+  }
   function fa2Submit(events, label, btn) {
-    var p = fa2PendGet();
-    var opId = (p && p.label === label) ? p.opId : fa2Uuid();
-    fa2PendSet({ opId: opId, label: label });
+    var p = fa2PendGet(), sig = fa2Sig(events);
+    // Same screen + same content after a failed attempt = same opId (the hub dedups).
+    // Same screen but edited content = check whether the earlier attempt landed first.
+    var opId = (p && p.label === label && p.sig === sig) ? p.opId : fa2Uuid();
+    var stale = (p && p.label === label && p.sig !== sig) ? p.opId : null;
     if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
-    return fa2Call('batch', { opId: opId, events: events }).then(function (j) {
-      if (j && j.ok) { fa2PendSet(null); fa2CacheKill(); return j; }
-      throw new Error((j && j.err) || 'server');
+    var pre = stale ? fa2Landed(stale) : Promise.resolve(false);
+    return pre.then(function (landed) {
+      if (landed) { fa2PendSet(null); fa2CacheKill(); var e0 = new Error('Your earlier attempt did go through \u2014 check History before saving this again.'); e0.hub = true; throw e0; }
+      fa2PendSet({ opId: opId, label: label, sig: sig });
+      return fa2Call('batch', { opId: opId, events: events }).then(function (j) {
+        if (j && j.ok) return j;
+        var e1 = new Error((j && j.err) || 'server'); e1.hub = true; e1.at = j ? j.at : undefined; throw e1;
+      }, function () {
+        return fa2Landed(opId).then(function (landed2) { if (landed2) return { ok: true, recovered: true }; throw new Error('net'); });
+      }).then(function (j) { fa2PendSet(null); fa2CacheKill(); return j; });
     });
+  }
+  var FA2_ERRS = { scope: 'This login can only send product back to Stryker.', auth: 'Access token rejected \u2014 re-enter the CT password.', tracking: 'Tracking # is required.', exp: 'Expiration is required.', qty: 'Quantity can\u2019t be zero.', reverses: 'Nothing to void.', type: 'Unknown event type.', dup: 'Already saved.' };
+  function fa2FailMsg(e, net) {
+    if (e && e.hub) { var m = String(e.message || 'server'); return (FA2_ERRS[m] || (m.length > 24 ? m : 'Server rejected this (' + m + ').')) + (typeof e.at === 'number' ? ' Line ' + (e.at + 1) + '.' : ''); }
+    return net || 'Couldn\u2019t reach the server \u2014 tap again to retry.';
   }
   function fa2Err(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg; el.hidden = false; } }
   function fa2Shell(title, sub, inner) {
@@ -3235,7 +3260,16 @@ var GLOSS = {
       '.a-busy{background:rgba(90,200,120,.25) !important;border-color:rgba(90,200,120,.6) !important;color:#bfe9cc !important}';
     document.head.appendChild(st);
   }
-  function expNorm(e) { e = String(e == null ? '' : e).trim(); var m = e.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/); if (!m) return e; return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + (m[3] || '1')).slice(-2); }
+  function expNorm(e) {
+    e = String(e == null ? '' : e).trim();
+    var y, mo, d, m;
+    if ((m = e.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/))) { y = +m[1]; mo = +m[2]; d = m[3] ? +m[3] : 0; }
+    else if ((m = e.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))) { y = +m[3]; mo = +m[1]; d = +m[2]; }
+    else if ((m = e.match(/^(\d{1,2})\/(\d{4})$/))) { y = +m[2]; mo = +m[1]; d = 0; }
+    else return e;
+    if (!d) d = new Date(y, mo, 0).getDate(); // month-only = good through the end of that month
+    return y + '-' + ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2);
+  }
   function expBand(e) { var n = expNorm(e); if (!/^\d{4}-\d{2}-\d{2}$/.test(n)) return 2; var d = new Date(n + 'T12:00:00'); var now = new Date(); now.setHours(0, 0, 0, 0); if (d < now) return 0; var soon = new Date(now); soon.setMonth(soon.getMonth() + 3); return d <= soon ? 1 : 2; }
   function expChip(e) { var b = expBand(e); return '<span class="f2chip ' + (b === 0 ? 'exp">Expired' : b === 1 ? 'soon">\u22643 mo' : 'ok">OK') + '</span>'; }
   function fa2BandSort(rows) {
@@ -3415,6 +3449,8 @@ var GLOSS = {
           ts: g(r, 'Timestamp'),
           from: g(r, 'From') || g(r, 'EnteredBy'),
           to: g(r, 'DropName') || g(r, 'ReceivedBy') || g(r, 'Facility') || '',
+          drop: g(r, 'DropName'), fromRaw: g(r, 'From'), rb: g(r, 'ReceivedBy'), acc: g(r, 'AccountName'), accl: g(r, 'AccountLocation'), note: g(r, 'Note'),
+          po: g(r, 'CasePO'), fac: g(r, 'Facility'), sur: g(r, 'Surgeon'), dos: g(r, 'DOS'), pid: g(r, 'PatientId'),
           bo: g(r, 'CaseBO'), reason: g(r, 'Reason'), track: g(r, 'Tracking'),
           rows: [], units: 0
         };
@@ -3477,6 +3513,7 @@ var GLOSS = {
         '<div id="fc-fields">' +
           '<input id="fc-ref" class="cc-in" placeholder="REF" value="' + esc(row.ref) + '">' +
           '<input id="fc-lot" class="cc-in" placeholder="LOT" value="' + esc(row.lot) + '">' +
+          '<input id="fc-exp" class="cc-in" placeholder="Exp (YYYY-MM-DD)" value="' + esc(row.exp) + '">' +
           '<input id="fc-qty" class="cc-in" type="number" min="1" placeholder="Qty" value="' + Math.abs(row.qty) + '">' +
           '<div id="fc-warn" class="cc-sub2" hidden></div>' +
         '</div>' +
@@ -3516,14 +3553,21 @@ var GLOSS = {
         var ref = document.getElementById('fc-ref').value.trim();
         var lot = document.getElementById('fc-lot').value.trim();
         var qty = +document.getElementById('fc-qty').value || 0;
+        var exp = document.getElementById('fc-exp').value.trim();
         if (!ref) return fa2Err('fc-err', 'REF is required.');
         if (!lot) return fa2Err('fc-err', 'LOT is required.');
         if (qty < 1) return fa2Err('fc-err', 'Qty must be at least 1.');
-        var rep = { type: row.ty, ref: ref, desc: row.desc, lot: lot, exp: row.exp, qty: qty,
+        if (row.ty === 'Received' && !exp) return fa2Err('fc-err', 'Expiration is required.');
+        if (exp && !/^\d{4}-\d{2}(-\d{2})?$/.test(exp)) return fa2Err('fc-err', 'Expiration must be YYYY-MM-DD (or YYYY-MM).');
+        var rep = { type: row.ty, ref: ref, desc: row.desc, lot: lot, exp: exp || row.exp, qty: qty,
           reason: 'Correction: ' + why, linkedTo: eid, flags: 'Corrected', entryMethod: 'manual', enteredBy: fa2Who() };
         if (grp) {
+          // carry the original event's own fields, not the display fallbacks
           if (grp.bo) rep.caseBO = grp.bo;
-          if (grp.ty === 'Received') { rep.dropName = grp.to || ''; rep.from = grp.from || ''; rep.receivedBy = grp.to || ''; }
+          if (grp.ty === 'Received') { rep.dropName = grp.drop; rep.from = grp.fromRaw; rep.receivedBy = grp.rb; if (grp.acc) rep.accountName = grp.acc; if (grp.accl) rep.accountLocation = grp.accl; }
+          else if (grp.rb) rep.receivedBy = grp.rb;
+          if (grp.ty === 'Used in case') { rep.casePO = grp.po; rep.facility = grp.fac; rep.surgeon = grp.sur; rep.dos = grp.dos; rep.patientId = grp.pid; }
+          if (grp.note) rep.note = grp.note;
           if (grp.track) rep.tracking = grp.track;
           if (grp.date) rep.eventDate = grp.date;
         }
@@ -3532,7 +3576,7 @@ var GLOSS = {
       var btn = document.getElementById('fc-go');
       fa2Submit(evs, 'fix-' + eid, btn)
         .then(function () { wrap.remove(); kitBanner(document.querySelector('.cc-card'), mode === 'Void entirely' ? 'Entry voided' : 'Correction filed'); fa2HistLoad(true); })
-        .catch(function () { fa2Err('fc-err', 'Couldn\u2019t save \u2014 try again.'); btn.disabled = false; btn.textContent = 'Save correction'; });
+        .catch(function (e) { fa2Err('fc-err', fa2FailMsg(e, 'Couldn\u2019t save \u2014 try again.')); btn.disabled = false; btn.textContent = 'Save correction'; });
     });
   }
 
@@ -3556,7 +3600,7 @@ var GLOSS = {
     ccStop();
     if (!fa2Ensure(fa2Add)) return;
     CC.view = 'fa2add';
-    if (!FA2.form || FA2.form.kind !== 'add') FA2.form = { kind: 'add', drop: '', date: new Date().toISOString().slice(0, 10), from: '', fromOther: '', rb: '', accName: '', accLoc: '', note: '', items: [] };
+    if (!FA2.form || FA2.form.kind !== 'add') FA2.form = { kind: 'add', drop: '', date: fa2Today(), from: '', fromOther: '', rb: '', accName: '', accLoc: '', note: '', items: [] };
     var f = FA2.form;
     var faNames = fa2Teams('fa');
     var rbOpts = faNames.concat(['Bloomfield Warehouse', 'Account']);
@@ -3607,8 +3651,10 @@ var GLOSS = {
     var p = r.p || {};
     var lot = p.lot || '', exp = ccExp(p.exp), ref = r.sku || '', desc = '';
     if (!ref && !p.gtin && (lot || exp)) {
+      ccFlashGreen();
+      if (fa2AttachLE(lot, exp)) { ccStatus((lot ? 'Lot ' + lot : 'Expiry') + ' attached to the last item'); ccSchedule(200); return; }
       FA2.pendLE = { lot: lot, exp: exp };
-      ccFlashGreen(); ccStatus('Lot/expiry held \u2014 now scan the product barcode');
+      ccStatus('Lot/expiry held \u2014 now scan the product barcode');
       ccSchedule(200); return;
     }
     if (!ref) {
@@ -3631,13 +3677,27 @@ var GLOSS = {
     if (FA2.a2api) FA2.a2api.redraw();
     fa2A2Gate();
   }
+  // A lot/expiry-only barcode scanned right after a product barcode belongs to
+  // that item (two-barcode labels in either order). Returns true when attached.
+  function fa2AttachLE(lot, exp) {
+    var t = FA2.a2; if (!t || !t.order.length) return false;
+    var lk = t.order[t.order.length - 1], li = t.items[lk];
+    if (!li || (li.lot && li.exp)) return false;
+    var nl = li.lot || lot, ne = li.exp || exp, nk = (li.ref || '') + '\u0001' + nl;
+    delete t.items[lk]; t.order.pop();
+    if (t.items[nk]) { t.items[nk].qty += li.qty; if (!t.items[nk].exp) t.items[nk].exp = ne; }
+    else { li.lot = nl; li.exp = ne; t.items[nk] = li; t.order.push(nk); }
+    if (FA2.a2api) FA2.a2api.redraw();
+    fa2A2Gate();
+    return true;
+  }
   function fa2A2Gate() {
     var b = document.getElementById('a2-go'); if (!b) return;
     var t = FA2.a2, bad = 0;
     t.order.forEach(function (k) { var p = t.items[k]; if (!p.ref || !p.lot || !p.exp || !(p.qty > 0)) bad++; });
     b.disabled = !t.order.length || bad > 0;
     var w = document.getElementById('a2-warn');
-    if (w) { w.hidden = !bad; w.textContent = bad ? bad + ' item' + (bad > 1 ? 's need' : ' needs') + ' a lot and expiration \u2014 tap the item to fix.' : ''; }
+    if (w) { w.hidden = !bad; w.textContent = bad ? bad + ' item' + (bad > 1 ? 's need' : ' needs') + ' a lot and expiration \u2014 scan its lot barcode next, or remove it and use + Manual.' : ''; }
   }
   window.__TBX_ONCODE = function (txt) { return ccOnCode(txt); };
   function fa2Add2() {
@@ -3719,7 +3779,7 @@ var GLOSS = {
           FA2.form = null; FA2.a2 = { items: {}, order: [] };
           location.hash = '#/fa2';
         })
-        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('a2-go'); if (b) { b.disabled = false; b.textContent = 'Save drop'; } });
+        .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); var b = document.getElementById('a2-go'); if (b) { b.disabled = false; b.textContent = 'Save drop'; } });
     });
   }
 
@@ -3769,7 +3829,7 @@ var GLOSS = {
     fa2KitCss();
     var tray = { items: {}, order: [] };
     var sel = { type: '', reason: '', trk: '', terr: '', recv: '' };
-    var D = null;
+    var OH = null, subKey = 'ret-' + fa2Uuid();
     fa2Shell('Remove / Return', 'Take product out of F&amp;A stock \u2014 pick where it went.',
       '<div class="fa2-lab">Removal type</div>' + fa2Chips('fa2-rty', FA2_REMOVE_TYPES, '') +
       '<input id="fa2-trk2" class="cc-in" placeholder="Tracking # (optional)" hidden>' +
@@ -3792,9 +3852,9 @@ var GLOSS = {
     });
     document.getElementById('fa2-q').addEventListener('input', function () { drawPick(); });
     function drawPick() {
-      var el = document.getElementById('fa2-pick'); if (!el || !D) return;
+      var el = document.getElementById('fa2-pick'); if (!el || !OH) return;
       var q = (document.getElementById('fa2-q') || {}).value || '';
-      var rows = (D.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+      var rows = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
       if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
       rows = fa2BandSort(rows);
       el.innerHTML = rows.map(function (r) {
@@ -3809,10 +3869,10 @@ var GLOSS = {
       }).join('');
     }
     document.getElementById('fa2-pick').addEventListener('click', function (e) {
-      var c = e.target.closest ? e.target.closest('.fa2-pk') : null; if (!c || !D) return;
+      var c = e.target.closest ? e.target.closest('.fa2-pk') : null; if (!c || !OH) return;
       var k = c.getAttribute('data-k');
       var m = null;
-      (D.master || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; });
+      (OH.master || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; });
       if (!m) return;
       var oh = fa2Num(m[4]);
       var it = tray.items[k];
@@ -3825,7 +3885,7 @@ var GLOSS = {
       }
       trayApi.redraw();
     });
-    fa2Load(false).then(function (d) { if (CC.view !== 'fa2ret') return; D = d; drawPick(); })
+    fa2Load(false).then(function (d) { if (CC.view !== 'fa2ret') return; OH = d; drawPick(); })
       .catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
     document.getElementById('fa2-go').addEventListener('click', function () {
       if (!sel.type) return fa2Err('fa2-err', 'Pick a removal type.');
@@ -3840,14 +3900,14 @@ var GLOSS = {
         if (sel.type === 'Returned to CT SM') ev.receivedBy = sel.recv.trim();
         return ev;
       });
-      fa2Submit(evs, 'ret-' + Date.now(), document.getElementById('fa2-go'))
+      fa2Submit(evs, subKey, document.getElementById('fa2-go'))
         .then(function () {
-          tray.items = {}; tray.order = []; trayApi.redraw();
+          tray.items = {}; tray.order = []; trayApi.redraw(); subKey = 'ret-' + fa2Uuid();
           kitBanner(document.querySelector('.cc-card'), 'Items Removed');
           var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; }
-          fa2Load(true).then(function (d2) { if (CC.view !== 'fa2ret') return; D = d2; drawPick(); }).catch(function () {});
+          fa2Load(true).then(function (d2) { if (CC.view !== 'fa2ret') return; OH = d2; drawPick(); }).catch(function () {});
         })
-        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; } });
+        .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Remove selected'; } });
     });
   }
 
@@ -3887,7 +3947,7 @@ var GLOSS = {
       });
       fa2Submit(evs, 'send-' + trk.v.trim(), goBtn)
         .then(function () { location.hash = '#/fa2'; })
-        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); goBtn.disabled = false; goBtn.textContent = 'Complete send-back'; });
+        .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); goBtn.disabled = false; goBtn.textContent = 'Complete send-back'; });
     });
   }
 
@@ -3898,7 +3958,7 @@ var GLOSS = {
     if (!fa2Ensure(fa2Use)) return;
     CC.view = 'fa2use';
     fa2KitCss();
-    if (!FA2.form || FA2.form.kind !== 'use') FA2.form = { kind: 'use', bo: '', po: '', fac: '', sur: '', dos: new Date().toISOString().slice(0, 10) };
+    if (!FA2.form || FA2.form.kind !== 'use') FA2.form = { kind: 'use', bo: '', po: '', fac: '', sur: '', dos: fa2Today() };
     var f = FA2.form;
     var tray = { items: {}, order: [] };
     var over = {};
@@ -3978,7 +4038,7 @@ var GLOSS = {
           var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save usage'; }
           fa2Load(true).then(function (d2) { if (CC.view !== 'fa2use') return; D2 = d2; drawPick(); }).catch(function () {});
         })
-        .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server \u2014 tap again to retry.'); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save usage'; } });
+        .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save usage'; } });
     });
   }
   function fa2Overdraft(p, key, over, done) {
@@ -4063,11 +4123,11 @@ var GLOSS = {
       el.innerHTML =
         (pend.length ? '<div class="fa2-eyebrow">Pending (' + pend.length + ')</div>' + pend.map(function (x) { return card(x, true); }).join('') : '') +
         (rest.length ? '<div class="fa2-eyebrow">Recent</div>' + rest.map(function (x) { return card(x, false); }).join('') : '');
-      el.addEventListener('click', function (e) {
+      el.onclick = function (e) {
         var b = e.target.closest ? e.target.closest('.fa2-rev') : null; if (!b) return;
         var x = pend.filter(function (p) { return p.importId === b.dataset.id; })[0];
         if (x) fa2TransEdit(x);
-      });
+      };
     }).catch(function () {
       if (CC.view !== 'fa2trans') return;
       var el = document.getElementById('fa2-list');
@@ -4211,7 +4271,7 @@ var GLOSS = {
           else fa2Err('fa2-err', 'Save failed.');
         }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
       }
-      body.addEventListener('click', function (e) {
+      body.onclick = function (e) {
         var d = e.target.closest ? e.target.closest('.a-del') : null;
         if (d) { if (confirm('Remove this person? Their sheet access is revoked too.')) { FA2.teams.splice(+d.dataset.i, 1); saveTeams(); } return; }
         var a = e.target.closest ? e.target.closest('.a-add') : null;
@@ -4227,7 +4287,7 @@ var GLOSS = {
           FA2.teams.push({ name: nm, email: em, role: r, active: true });
           saveTeams(); return;
         }
-      });
+      };
       function tgl() {
         fa2Call('admin', { adminPw: FA2.adminPw, op: 'toggles_set', weeklyEmail: document.getElementById('a-tw').checked, monthlyEmail: document.getElementById('a-tm').checked })
           .catch(function () { fa2Err('fa2-err', 'Couldn\u2019t save toggles.'); });
@@ -4316,6 +4376,7 @@ var GLOSS = {
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
+    if (/^#\/fa2\/(add|add2|use|return|trans|admin)$/.test(h) && fa2IsFA()) { location.replace('#/fa2'); return; }
     if (h === '#/fa2/add') { terrSet('ct'); return fa2Add(); }
     if (h === '#/fa2/add2') { terrSet('ct'); return fa2Add2(); }
     if (h === '#/fa2/use') { terrSet('ct'); return fa2Use(); }
