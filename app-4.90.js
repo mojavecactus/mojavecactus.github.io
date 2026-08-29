@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.89';
+  var APPVER = '4.90';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -4030,6 +4030,48 @@ var GLOSS = {
     };
   }
 
+  /* ---------- shared on-hand card picker: tap a card → stepper → Add ---------- */
+  function fa2PickCardHtml(r, key, have, open, pend) {
+    var oh = fa2Num(r[4]);
+    return '<div class="f2c fa2-pk' + (open ? ' pk-open' : '') + '" data-k="' + esc(key) + '">' +
+      '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + (have ? have + ' of ' + oh + ' selected' : oh + ' on hand') + '</span></div>' +
+      (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
+      '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + '</div>' +
+      (open ? '<div class="pk-qty">' +
+          '<span class="pk-step">' +
+            '<button type="button" class="pk-m" aria-label="Less"' + (pend <= 1 ? ' disabled' : '') + '>\u2212</button>' +
+            '<b class="pk-n">' + pend + '</b>' +
+            '<button type="button" class="pk-p" aria-label="More">+</button>' +
+          '</span>' +
+          '<button type="button" class="cc-btn pk-add">Add</button>' +
+        '</div>' : '') +
+    '</div>';
+  }
+  // state = {openKey, pickN}; api = {rowFor, cardFor, have, add, redraw}
+  function fa2PickBind(hostId, st, api) {
+    var host = document.getElementById(hostId); if (!host) return;
+    host.onclick = function (e) {
+      if (!e.target.closest) return;
+      var card = e.target.closest('.fa2-pk'); if (!card) return;
+      var k = card.getAttribute('data-k');
+      if (e.target.closest('.pk-add')) { api.add(k, st.pickN); return; }
+      var step = e.target.closest('.pk-m') ? -1 : e.target.closest('.pk-p') ? 1 : 0;
+      if (step) {
+        var m = api.rowFor(k), oh = m ? fa2Num(m[4]) : 1, have = api.have(k);
+        var next = st.pickN + step;
+        // never offer more than is left; asking anyway shakes the card
+        if (next > Math.max(1, oh - have)) { kitShake(card, card.querySelector('.f2bub')); return; }
+        st.pickN = Math.max(1, next); api.redraw(); return;
+      }
+      if (e.target.closest('.pk-qty')) return;
+      st.openKey = (st.openKey === k) ? '' : k;
+      st.pickN = 1;
+      api.redraw();
+      // the sticky action bar covers the bottom of the list, so bring the picker up to it
+      if (st.openKey) { var c2 = api.cardFor(st.openKey); if (c2) { try { c2.scrollIntoView({ block: 'center' }); } catch (e2) { c2.scrollIntoView(false); } } }
+    };
+  }
+
   /* ---------- Remove / Return ---------- */
   var FA2_REMOVE_TYPES = ['Returned to Stryker', 'External Transfer', 'Written Off', 'Returned to CT SM'];
   // Which detail fields each removal type asks for: [key, label, required]
@@ -4053,7 +4095,7 @@ var GLOSS = {
     fa2KitCss();
     var tray = { items: {}, order: [] };
     var sel = { type: '', v: {} };
-    var OH = null, subKey = 'ret-' + fa2Uuid(), openKey = '', pickN = 1;
+    var OH = null, subKey = 'ret-' + fa2Uuid(), st = { openKey: '', pickN: 1 };
     fa2Shell('Remove / Return', 'Take product out of F&amp;A stock \u2014 pick where it went.',
       '<div class="fa2-lab">Removal type</div>' + fa2Chips('fa2-rty', FA2_REMOVE_TYPES, '') +
       '<div id="fa2-rfields"></div>' +
@@ -4084,7 +4126,7 @@ var GLOSS = {
       });
     }
     fa2ChipWire('fa2-rty', function (v) { sel.type = v; drawFields(); });
-    document.getElementById('fa2-q').addEventListener('input', function () { openKey = ''; drawPick(); });
+    document.getElementById('fa2-q').addEventListener('input', function () { st.openKey = ''; drawPick(); });
     function rowFor(k) { var m = null; ((OH && OH.master) || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; }); return m; }
     function cardFor(k) { var c = null; [].forEach.call(document.querySelectorAll('#fa2-pick .fa2-pk'), function (x) { if (x.getAttribute('data-k') === k) c = x; }); return c; }
     function addToTray(k, n) {
@@ -4093,7 +4135,7 @@ var GLOSS = {
       if (have + n > oh) { var c = cardFor(k); kitShake(c, c && c.querySelector('.f2bub')); return false; }
       if (tray.items[k]) tray.items[k].qty = have + n;
       else { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, max: oh, qty: n }; tray.order.push(k); }
-      openKey = ''; pickN = 1;
+      st.openKey = ''; st.pickN = 1;
       trayApi.redraw();
       return true;
     }
@@ -4106,47 +4148,10 @@ var GLOSS = {
       el.innerHTML = rows.map(function (r) {
         var key = r[0] + '\u0001' + r[2];
         var oh = fa2Num(r[4]), have = tray.items[key] ? tray.items[key].qty : 0;
-        var open = openKey === key, pend = Math.min(pickN, Math.max(1, oh - have));
-        return '<div class="f2c fa2-pk' + (open ? ' pk-open' : '') + '" data-k="' + esc(key) + '">' +
-          '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + (have ? have + ' of ' + oh + ' selected' : oh + ' on hand') + '</span></div>' +
-          (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
-          '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + '</div>' +
-          (open ? '<div class="pk-qty">' +
-              '<span class="pk-step">' +
-                '<button type="button" class="pk-m" aria-label="Less"' + (pend <= 1 ? ' disabled' : '') + '>\u2212</button>' +
-                '<b class="pk-n">' + pend + '</b>' +
-                '<button type="button" class="pk-p" aria-label="More">+</button>' +
-              '</span>' +
-              '<button type="button" class="cc-btn pk-add">Add</button>' +
-            '</div>' : '') +
-        '</div>';
+        return fa2PickCardHtml(r, key, have, st.openKey === key, Math.min(st.pickN, Math.max(1, oh - have)));
       }).join('');
     }
-    document.getElementById('fa2-pick').addEventListener('click', function (e) {
-      if (!OH || !e.target.closest) return;
-      var card = e.target.closest('.fa2-pk'); if (!card) return;
-      var k = card.getAttribute('data-k');
-      if (e.target.closest('.pk-add')) { addToTray(k, pickN); return; }
-      var step = e.target.closest('.pk-m') ? -1 : e.target.closest('.pk-p') ? 1 : 0;
-      if (step) {
-        var m = rowFor(k), oh2 = m ? fa2Num(m[4]) : 1, have2 = tray.items[k] ? tray.items[k].qty : 0;
-        var next = pickN + step;
-        // never let the stepper offer more than is left; asking anyway shakes the card
-        if (next > Math.max(1, oh2 - have2)) { kitShake(card, card.querySelector('.f2bub')); return; }
-        pickN = Math.max(1, next);
-        drawPick();
-        return;
-      }
-      if (e.target.closest('.pk-qty')) return;
-      openKey = (openKey === k) ? '' : k;
-      pickN = 1;
-      drawPick();
-      // the sticky Submit bar sits over the bottom of the list — bring the picker up to it
-      if (openKey) {
-        var c2 = cardFor(openKey);
-        if (c2) { try { c2.scrollIntoView({ block: 'center' }); } catch (e2) { c2.scrollIntoView(false); } }
-      }
-    });
+    fa2PickBind('fa2-pick', st, { rowFor: rowFor, cardFor: cardFor, have: function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, add: addToTray, redraw: drawPick });
     // Scanning adds straight from stock — same guard rails as tapping.
     FA2.retScan = function (ref, lot) {
       if (!OH) return 'Still loading stock\u2026';
@@ -4193,7 +4198,7 @@ var GLOSS = {
       });
       fa2Submit(evs, subKey, document.getElementById('fa2-go'))
         .then(function () {
-          tray.items = {}; tray.order = []; openKey = ''; trayApi.redraw(); subKey = 'ret-' + fa2Uuid();
+          tray.items = {}; tray.order = []; st.openKey = ''; st.pickN = 1; trayApi.redraw(); subKey = 'ret-' + fa2Uuid();
           kitBanner(document.querySelector('.cc-card'), 'Items removed');
           var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Submit'; }
           fa2Load(true).then(function (d2) { if (CC.view !== 'fa2ret') return; OH = d2; drawPick(); }).catch(function () {});
@@ -4255,13 +4260,14 @@ var GLOSS = {
     var f = FA2.form;
     var tray = { items: {}, order: [] };
     var over = {};
-    var D2 = null;
-    fa2Shell('Record case usage', 'Manual bill-only entry \u2014 BO, facility, surgeon.',
-      '<input id="u-bo" class="cc-in" placeholder="BO # (C-number)" value="' + esc(f.bo) + '">' +
+    var D2 = null, st = { openKey: '', pickN: 1 };
+    fa2Shell('Record case usage', 'Manual bill-only entry.',
+      '<input id="u-bo" class="cc-in" placeholder="C-number (required)" value="' + esc(f.bo) + '">' +
       '<input id="u-po" class="cc-in" placeholder="PO # (optional)" value="' + esc(f.po) + '">' +
-      '<input id="u-fac" class="cc-in" placeholder="Facility" value="' + esc(f.fac) + '">' +
-      '<input id="u-sur" class="cc-in" placeholder="Surgeon" value="' + esc(f.sur) + '">' +
-      '<input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '">' +
+      '<input id="u-fac" class="cc-in" placeholder="Facility (required)" value="' + esc(f.fac) + '">' +
+      '<input id="u-sur" class="cc-in" placeholder="Surgeon (required)" value="' + esc(f.sur) + '">' +
+      '<label class="a2f" for="u-dos"><span class="a2fl">Date of surgery</span>' +
+        '<input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '"></label>' +
       '<div class="fa2-lab">Items used \u2014 drag \u2261 to match the bill only</div><div id="u-tray"></div>' +
       '<button id="u-man" type="button" class="cc-mini">+ Manual \u2014 not on the list</button>' +
       '<div id="u-manwrap" class="a2man" hidden>' +
@@ -4273,7 +4279,7 @@ var GLOSS = {
         '<button id="u-addman" type="button" class="cc-mini">Add to list</button>' +
       '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
-      '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
       '<div class="k-bar"><button id="fa2-go" class="cc-btn">Save usage</button></div>',
       function () { return fa2Load(true).then(function (d) { if (CC.view !== 'fa2use') return; D2 = d; drawPick(); }); });
     ['bo', 'po', 'fac', 'sur', 'dos'].forEach(function (k) {
@@ -4284,7 +4290,20 @@ var GLOSS = {
       onChange: drawPick,
       allowOver: function () { return true; }
     });
-    document.getElementById('fa2-q').addEventListener('input', function () { drawPick(); });
+    document.getElementById('fa2-q').addEventListener('input', function () { st.openKey = ''; drawPick(); });
+    function rowFor(k) { var m = null; ((D2 && D2.master) || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; }); return m; }
+    function cardFor(k) { var c = null; [].forEach.call(document.querySelectorAll('#fa2-pick .fa2-pk'), function (x) { if (x.getAttribute('data-k') === k) c = x; }); return c; }
+    function addToTray(k, n) {
+      var m = rowFor(k); if (!m) return false;
+      var oh = fa2Num(m[4]), have = tray.items[k] ? tray.items[k].qty : 0;
+      // using more than is on hand goes through + Manual (late entry), never a silent tap
+      if (have + n > oh) { var c = cardFor(k); kitShake(c, c && c.querySelector('.f2bub')); return false; }
+      if (tray.items[k]) tray.items[k].qty = have + n;
+      else { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, qty: n }; tray.order.push(k); }
+      st.openKey = ''; st.pickN = 1;
+      trayApi.redraw();
+      return true;
+    }
     document.getElementById('u-man').addEventListener('click', function () {
       var w = document.getElementById('u-manwrap'); w.hidden = !w.hidden;
       if (!w.hidden) document.getElementById('u-mref').focus();
@@ -4301,6 +4320,7 @@ var GLOSS = {
       var qty = +document.getElementById('u-mqty').value || 0;
       if (!ref) return fa2Err('fa2-err', 'REF is required.');
       if (!lot) return fa2Err('fa2-err', 'LOT is required.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) return fa2Err('fa2-err', 'Pick a full expiration date (day, month, year).');
       if (qty < 1) return fa2Err('fa2-err', 'Qty must be at least 1.');
       var er = document.getElementById('fa2-err'); if (er) er.hidden = true;
       // If this ref+lot is actually on hand, use that row so the overdraft math stays right.
@@ -4325,31 +4345,19 @@ var GLOSS = {
       rows = fa2BandSort(rows);
       el.innerHTML = rows.map(function (r) {
         var key = r[0] + '\u0001' + r[2];
-        var have = tray.items[key] ? tray.items[key].qty : 0;
-        var oh = fa2Num(r[4]);
-        return '<div class="f2c fa2-pk" data-k="' + esc(key) + '">' +
-          '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + oh + ' on hand</span></div>' +
-          (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
-          '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (have ? ' \u00b7 <b>' + have + ' selected</b>' : '') + '</div>' +
-        '</div>';
+        var oh = fa2Num(r[4]), have = tray.items[key] ? tray.items[key].qty : 0;
+        return fa2PickCardHtml(r, key, have, st.openKey === key, Math.min(st.pickN, Math.max(1, oh - have)));
       }).join('');
     }
-    document.getElementById('fa2-pick').addEventListener('click', function (e) {
-      var c = e.target.closest ? e.target.closest('.fa2-pk') : null; if (!c || !D2) return;
-      var k = c.getAttribute('data-k'), m = null;
-      (D2.master || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; });
-      if (!m) return;
-      var oh = fa2Num(m[4]);
-      if (tray.items[k]) tray.items[k].qty += 1;
-      else { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, qty: 1 }; tray.order.push(k); }
-      trayApi.redraw();
-    });
+    fa2PickBind('fa2-pick', st, { rowFor: rowFor, cardFor: cardFor, have: function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, add: addToTray, redraw: drawPick });
     fa2Load(false).then(function (d) { if (CC.view !== 'fa2use') return; D2 = d; drawPick(); })
       .catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
     document.getElementById('fa2-go').addEventListener('click', function () {
-      if (!f.bo.trim()) return fa2Err('fa2-err', 'BO # is required.');
+      if (!f.bo.trim()) return fa2Err('fa2-err', 'C-number is required.');
       if (!f.fac.trim()) return fa2Err('fa2-err', 'Facility is required.');
-      if (!tray.order.length) return fa2Err('fa2-err', 'Pick at least one item.');
+      if (!f.sur.trim()) return fa2Err('fa2-err', 'Surgeon is required.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(f.dos)) return fa2Err('fa2-err', 'Date of surgery is required.');
+      if (!tray.order.length) return fa2Err('fa2-err', 'Add at least one item.');
       var overs = tray.order.filter(function (k) { return tray.items[k].qty > tray.items[k].onhand && !over[k]; });
       if (overs.length) return fa2Overdraft(tray.items[overs[0]], overs[0], over, function () { document.getElementById('fa2-go').click(); });
       var evs = [];

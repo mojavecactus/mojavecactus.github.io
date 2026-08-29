@@ -384,12 +384,53 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     const dosDef = await page.inputValue('#u-dos');
     note('S6 default DOS (real clock)', dosDef);
     await page.click('#fa2-go');
-    check('S6a BO required', /BO #/.test(await text(page, '#fa2-err')));
-    await page.fill('#u-bo', 'C123456'); await page.fill('#u-fac', 'WCOSC'); await page.fill('#u-sur', 'Dr. Test');
-    // use InSpace D (4 on hand): tap 5 times → overdraft by 1
-    const dOnHand = (hub.master().find(r => r[0] === '0131') || [])[4];
-    for (let i = 0; i < 5; i++) await page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace D' }).click();
-    check('S6b Usage tray allows over on-hand (5 of 4)', (await text(page, '#u-tray .k-trow .k-step b')) === '5');
+    check('S6a C-number required', /C-number is required/.test(await text(page, '#fa2-err')), await text(page, '#fa2-err'));
+    if (FIXED) {
+      check('R12a Subtitle is just the manual bill-only line', (await text(page, '.cc-sub')) === 'Manual bill-only entry.', await text(page, '.cc-sub'));
+      await page.fill('#u-bo', 'C123456'); await page.click('#fa2-go');
+      check('R12b Facility required', /Facility is required/.test(await text(page, '#fa2-err')));
+      await page.fill('#u-fac', 'WCOSC'); await page.click('#fa2-go');
+      check('R12c Surgeon required', /Surgeon is required/.test(await text(page, '#fa2-err')));
+      await page.fill('#u-sur', 'Dr. Test');
+      await page.fill('#u-dos', ''); await page.click('#fa2-go');
+      check('R12d Date of surgery required', /Date of surgery is required/.test(await text(page, '#fa2-err')));
+      const dosLab = await page.evaluate(() => { const l = document.querySelector('label[for="u-dos"] .a2fl'); return l ? l.innerText.toLowerCase() : ''; });
+      check('R12e Date field is labelled', dosLab === 'date of surgery', dosLab);
+      const d0 = new Date(); await page.fill('#u-dos', d0.getFullYear() + '-' + String(d0.getMonth() + 1).padStart(2, '0') + '-' + String(d0.getDate()).padStart(2, '0'));
+      await page.click('#fa2-go');
+      check('R12f With the header complete, at least one item is required', /Add at least one item/.test(await text(page, '#fa2-err')), await text(page, '#fa2-err'));
+      // manual add now demands REF / LOT / date / qty
+      await page.click('#u-man'); await sleep(200);
+      await page.click('#u-addman'); check('R12g Manual add: REF required', /REF is required/.test(await text(page, '#fa2-err')));
+      await page.fill('#u-mref', '0132'); await page.click('#u-addman');
+      check('R12h Manual add: LOT required', /LOT is required/.test(await text(page, '#fa2-err')));
+      await page.fill('#u-mlot', 'NEWLOT'); await page.fill('#u-mexp', ''); await page.click('#u-addman');
+      check('R12i Manual add: full expiration date required', /full expiration date/.test(await text(page, '#fa2-err')));
+      await page.fill('#u-mexp', '2027-09-30'); await page.fill('#u-mqty', '0'); await page.click('#u-addman');
+      check('R12j Manual add: qty required', /Qty must be at least 1/.test(await text(page, '#fa2-err')));
+      await page.fill('#u-mqty', '1'); await page.click('#u-addman'); await sleep(200);
+      await page.locator('#u-tray .k-trow .k-x').first().click(); await sleep(200);
+      await page.click('#u-man'); await sleep(200);
+      // the card picker behaves exactly like Remove/Return
+      const uc = page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace D' });
+      const dOn0 = Number((hub.master().find(r => r[0] === '0131') || [])[4]);
+      await uc.locator('.f2sub').click(); await sleep(250);
+      check('R12k Usage cards open the same stepper', (await uc.locator('.pk-m').count()) === 1 && (await uc.locator('.pk-n').innerText()) === '1');
+      for (let i = 0; i < dOn0 + 1; i++) { await uc.locator('.pk-p').click(); await sleep(110); }
+      check('R12l Stepper caps at what is on hand', (await uc.locator('.pk-n').innerText()) === String(dOn0), 'stepper=' + (await uc.locator('.pk-n').innerText()) + ' onhand=' + dOn0);
+      const ov = await page.evaluate(() => { const c = [].filter.call(document.querySelectorAll('#fa2-pick .fa2-pk'), x => /InSpace D/.test(x.innerText))[0]; return { shake: c.classList.contains('k-shake'), red: c.querySelector('.f2bub').classList.contains('k-red') }; });
+      check('R12m Pushing past on-hand shakes the card and reddens the count', ov.shake && ov.red, JSON.stringify(ov));
+      await sleep(900);
+      await uc.locator('.pk-add').click(); await sleep(300);
+      check('R12n Chosen quantity lands in the tray', (await text(page, '#u-tray .k-trow .k-step b')) === String(dOn0), await text(page, '#u-tray .k-trow .k-step b'));
+    } else {
+      await page.fill('#u-bo', 'C123456'); await page.fill('#u-fac', 'WCOSC'); await page.fill('#u-sur', 'Dr. Test');
+      for (let i = 0; i < 5; i++) await page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace D' }).click();
+    }
+    const dOnHand = Number((hub.master().find(r => r[0] === '0131') || [])[4]);
+    const useQty = FIXED ? dOnHand + 1 : 5;
+    if (FIXED) { await page.locator('#u-tray .k-trow .k-step button').last().click(); await sleep(250); } // tray + is the deliberate overdraft path
+    check('S6b Tray can still be pushed one past on-hand for a late entry', (await text(page, '#u-tray .k-trow .k-step b')) === String(useQty), 'tray=' + (await text(page, '#u-tray .k-trow .k-step b')) + ' onhand=' + dOnHand);
     await page.click('#fa2-go');
     await page.waitForSelector('#od-chk', { timeout: 5000 });
     check('S6c Overdraft modal appears', true, await text(page, '.fa2-mcard .fa2-s'));
@@ -398,14 +439,14 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.waitForSelector('.k-ban', { timeout: 10000 });
     const last = hub.batches().slice(-1)[0];
     const late = last.events.find(e => e.flags === 'Late entry'), used = last.events.find(e => e.type === 'Used in case');
-    check('S6d Overdraft = late-entry Received(short) + Used(5) linked', late && late.qty === 5 - dOnHand && used && used.qty === 5 && late.linkedTo === used.eventId && late.exp === '2026-10-05', JSON.stringify({ lateQty: late && late.qty, lateExp: late && late.exp, usedQty: used && used.qty, receivedBy: late && late.receivedBy }));
+    check('S6d Overdraft = late-entry Received(short) + Used(all) linked', late && late.qty === useQty - dOnHand && used && used.qty === useQty && late.linkedTo === used.eventId && late.exp === '2026-10-05', JSON.stringify({ lateQty: late && late.qty, lateExp: late && late.exp, usedQty: used && used.qty, receivedBy: late && late.receivedBy }));
     check('S6e Used event carries case fields', used.caseBO === 'C123456' && used.facility === 'WCOSC' && used.surgeon === 'Dr. Test' && used.dos === dosDef);
     const manualBtn = await page.locator('#u-man').count();
     bug('S6f usage of a ref/lot never entered: baseline has no manual add / fixed has + Manual', manualBtn === 0, manualBtn === 1, 'u-man=' + manualBtn);
     if (FIXED) {
       await page.click('#u-man');
-      const urow = await page.evaluate(() => { const lab = [].map.call(document.querySelectorAll('#u-manwrap .a2fl'), n => n.innerText.trim()); const d = new Date(); const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); return { labels: lab, exp: document.getElementById('u-mexp').value, today: today }; });
-      check('R9e Usage manual add gets the same labelled, pre-filled row', JSON.stringify(urow.labels.map(x => x.toLowerCase())) === '["expiration","qty"]' && urow.exp === urow.today, JSON.stringify(urow));
+      const urow = await page.evaluate(() => { const lab = [].map.call(document.querySelectorAll('#u-manwrap .a2fl'), n => n.innerText.trim()); return { labels: lab }; });
+      check('R9e Usage manual add keeps the labelled EXPIRATION + QTY row', JSON.stringify(urow.labels.map(x => x.toLowerCase())) === '["expiration","qty"]', JSON.stringify(urow));
       await page.fill('#u-mref', '0132'); await page.fill('#u-mlot', 'NEWLOT'); await page.fill('#u-mexp', '2027-09-30'); await page.fill('#u-mqty', '2');
       const mdesc = await page.inputValue('#u-mdesc');
       await page.click('#u-addman');
