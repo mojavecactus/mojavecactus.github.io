@@ -127,7 +127,26 @@ class FakeHub {
           case 'toggles_get': return { ok: true, toggles: this.toggles };
           case 'toggles_set': this.toggles = { weeklyEmail: !!body.weeklyEmail, monthlyEmail: !!body.monthlyEmail }; return { ok: true };
           case 'teams_get': return { ok: true, teams: this.teams };
-          case 'teams_set': this.teams = (body.rows || []).map(t => Object.assign({}, t)); return { ok: true, teams: this.teams, sharing: { added: [], errors: [] }, welcomed: [], welcomeErrors: [] };
+          case 'teams_set': {
+            const prev = new Set((this.welcomed || []));
+            this.welcomed = this.welcomed || [];
+            const sent = [], skipped = [];
+            (body.rows || []).forEach(t => {
+              const k = String(t.email || '').trim().toLowerCase() + '|' + (t.role === 'fa' ? 'fa' : 'sports');
+              if (!t.email) return;
+              if (t.active === false) { skipped.push({ email: t.email, reason: 'inactive' }); return; }
+              if (prev.has(k)) { skipped.push({ email: t.email, reason: 'already-welcomed' }); return; }
+              this.welcomed.push(k); sent.push(t.email);
+            });
+            this.teams = (body.rows || []).map(t => Object.assign({}, t));
+            return { ok: true, teams: this.teams, sharing: { added: [], errors: [] }, welcomed: sent, welcomeSkipped: skipped, welcomeErrors: [] };
+          }
+          case 'welcome_send': {
+            const who = this.teams.find(t => String(t.email || '').trim().toLowerCase() === String(body.email || '').trim().toLowerCase());
+            if (!who) return { ok: false, err: 'notonteam' };
+            this.welcomeSends = (this.welcomeSends || []).concat([who.email]);
+            return { ok: true, sent: { ok: true, to: who.email, role: who.role, lots: this.master().length } };
+          }
           case 'sync_sharing': return { ok: true, sharing: { added: [], errors: [] } };
           case 'report_preview': { const m = this.master(); return { ok: true, lots: m.length, units: m.reduce((s, r) => s + r[4], 0), instruction: false }; }
           case 'send_report': return (body.to || []).length ? { ok: true, sent: body.to.length } : { ok: false, err: 'norecipients' };

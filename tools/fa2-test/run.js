@@ -539,6 +539,12 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     if (FIXED) {
       const tools = await page.evaluate(() => [].map.call(document.querySelectorAll('#a-body .fa2-mrow button'), x => x.id));
       check('R15 Admin keeps only the two email tools — the duplicate inbox poll is gone', JSON.stringify(tools) === '["a-ew","a-em2"]', JSON.stringify(tools));
+      const wel = await page.evaluate(() => [].map.call(document.querySelectorAll('#a-body .a-wel'), b => b.dataset.em));
+      check('R16a Every team member has a "send welcome" control', wel.length === hub.teams.length && wel.indexOf('katie@example.com') > -1, JSON.stringify(wel));
+      const sendsBefore = (hub.welcomeSends || []).length;
+      await page.locator('.a-wel[data-em="katie@example.com"]').click();
+      await page.waitForFunction(() => /Welcome email sent to katie/.test((document.getElementById('a-out') || {}).textContent || ''), null, { timeout: 8000 });
+      check('R16b Tapping it forces a welcome and reports back', (hub.welcomeSends || []).length === sendsBefore + 1, JSON.stringify(hub.welcomeSends));
     }
     const setCalls1 = hub.log.filter(b => b.action === 'admin' && b.op === 'teams_set').length;
     check('S9b Add member → one teams_set', setCalls1 === 1 && hub.teams.length === 4, 'teams_set calls=' + setCalls1);

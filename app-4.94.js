@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.93';
+  var APPVER = '4.94';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -4629,7 +4629,8 @@ var GLOSS = {
         return '<div class="fa2-lab">' + label + '</div>' +
           (list.length ? list.map(function (x) {
             var k = String(x.t.email || '').trim().toLowerCase();
-            return '<div class="fa2-row"><div class="fa2-l"><div class="fa2-t">' + esc(x.t.name) + '</div><div class="fa2-s">' + esc(x.t.email) + (x.t.active ? '' : ' \u00b7 inactive') + (seen[k] > 1 ? ' \u00b7 <b>listed ' + seen[k] + '\u00d7 \u2014 gets every share email ' + seen[k] + '\u00d7</b>' : '') + '</div></div>' +
+            return '<div class="fa2-row"><div class="fa2-l"><div class="fa2-t">' + esc(x.t.name) + '</div><div class="fa2-s">' + esc(x.t.email) + (x.t.active ? '' : ' \u00b7 inactive') + (seen[k] > 1 ? ' \u00b7 <b>listed ' + seen[k] + '\u00d7 \u2014 gets every share email ' + seen[k] + '\u00d7</b>' : '') +
+              ' \u00b7 <button type="button" class="cc-link a-wel" data-em="' + esc(x.t.email) + '">send welcome</button></div></div>' +
               '<div class="fa2-r"><button type="button" class="fa2-x a-del" data-i="' + x.i + '">\u00d7</button></div></div>';
           }).join('') : '<div class="cc-sub2">Nobody yet.</div>') +
           '<div class="fa2-2col"><input class="cc-in a-nm" data-r="' + role + '" placeholder="Name"><input class="cc-in a-em" data-r="' + role + '" placeholder="Email"></div>' +
@@ -4649,11 +4650,24 @@ var GLOSS = {
         '<div id="a-out" class="cc-sub2"></div>';
       function saveTeams() {
         fa2Call('admin', { adminPw: FA2.adminPw, op: 'teams_set', rows: FA2.teams }).then(function (j) {
-          if (j && j.ok) { FA2.teams = j.teams; fa2TeamsSave(j.teams); fa2CacheKill(); fa2AdminLoad(); var o = document.getElementById('a-out'); if (o) { var msg = []; if (j.sharing) msg.push('Sheet access synced' + (j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : '')); if (j.welcomed && j.welcomed.length) msg.push('Welcome email sent to ' + j.welcomed.join(', ')); if (j.welcomeErrors && j.welcomeErrors.length) msg.push('Email issues: ' + j.welcomeErrors.join('; ')); if (j.sharing && j.sharing.errors.length) msg.push('Access issues: ' + j.sharing.errors.join('; ')); o.textContent = msg.join(' \u00b7 ') + '.'; } }
+          if (j && j.ok) { FA2.teams = j.teams; fa2TeamsSave(j.teams); fa2CacheKill(); fa2AdminLoad(); var o = document.getElementById('a-out'); if (o) { var msg = []; if (j.sharing) msg.push('Sheet access synced' + (j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : '')); if (j.welcomed && j.welcomed.length) msg.push('Welcome email sent to ' + j.welcomed.join(', ')); if (j.welcomeSkipped && j.welcomeSkipped.length) msg.push('No welcome needed for ' + j.welcomeSkipped.map(function (x) { return x.email + ' (' + x.reason.replace(/-/g, ' ') + ')'; }).join(', ') + ' \u2014 use \u201csend welcome\u201d to force one'); if (j.welcomeErrors && j.welcomeErrors.length) msg.push('Email issues: ' + j.welcomeErrors.join('; ')); if (j.sharing && j.sharing.errors.length) msg.push('Access issues: ' + j.sharing.errors.join('; ')); o.textContent = msg.join(' \u00b7 ') + '.'; } }
           else fa2Err('fa2-err', 'Save failed.');
         }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
       }
       body.onclick = function (e) {
+        var w = e.target.closest ? e.target.closest('.a-wel') : null;
+        if (w) {
+          if (w.disabled) return;
+          var em2 = w.dataset.em;
+          w.disabled = true; w.textContent = 'sending\u2026';
+          fa2Call('admin', { adminPw: FA2.adminPw, op: 'welcome_send', email: em2 }).then(function (j) {
+            w.textContent = (j && j.ok) ? 'sent \u2713' : 'failed';
+            var o = document.getElementById('a-out');
+            if (o) o.textContent = (j && j.ok) ? ('Welcome email sent to ' + em2 + '.') : ('Couldn\u2019t send to ' + em2 + ((j && j.err) ? ' (' + j.err + ')' : '') + '.');
+            setTimeout(function () { w.disabled = false; w.textContent = 'send welcome'; }, 4000);
+          }).catch(function () { w.disabled = false; w.textContent = 'send welcome'; fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
+          return;
+        }
         var d = e.target.closest ? e.target.closest('.a-del') : null;
         if (d) { if (confirm('Remove this person? Their sheet access is revoked too.')) { FA2.teams.splice(+d.dataset.i, 1); saveTeams(); } return; }
         var a = e.target.closest ? e.target.closest('.a-add') : null;
