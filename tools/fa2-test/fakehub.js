@@ -142,8 +142,12 @@ class FakeHub {
             return { ok: true, teams: this.teams, sharing: { added: [], errors: [] }, welcomed: sent, welcomeSkipped: skipped, welcomeErrors: [] };
           }
           case 'welcome_send': {
-            const who = this.teams.find(t => String(t.email || '').trim().toLowerCase() === String(body.email || '').trim().toLowerCase());
-            if (!who) return { ok: false, err: 'notonteam' };
+            let who = this.teams.find(t => String(t.email || '').trim().toLowerCase() === String(body.email || '').trim().toLowerCase());
+            if (!who) {
+              // not on a team: the hub sends anyway using the role that was asked for
+              if (String(body.email || '').indexOf('@') < 1) return { ok: false, err: 'bademail' };
+              who = { name: body.name || '', email: body.email, role: body.role === 'fa' ? 'fa' : 'sports' };
+            }
             this.welcomeSends = (this.welcomeSends || []).concat([who.email]);
             return { ok: true, sent: { ok: true, to: who.email, role: who.role, lots: this.master().length } };
           }

@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.94';
+  var APPVER = '4.95';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -4597,7 +4597,7 @@ var GLOSS = {
       return;
     }
     fa2Shell('Admin', 'Teams control sheet access and email recipients. Changes save instantly.',
-      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rep" class="cc-mini">Send Report</button><button type="button" id="a-sync" class="cc-mini">Sync sheet &amp; folder access</button></div>' +
+      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rep" class="cc-mini">Send Report</button><button type="button" id="a-welb" class="cc-mini">Send welcome email</button><button type="button" id="a-sync" class="cc-mini">Sync sheet &amp; folder access</button></div>' +
       '<div id="a-body"><div class="cc-empty">Loading\u2026</div></div>',
       function () { fa2CacheKill(); return fa2AdminLoad(); });
     // Sharing sync is deliberate, never a side effect of refresh: every sync re-shares the PDF folder and Google emails each person.
@@ -4611,6 +4611,7 @@ var GLOSS = {
       }).catch(function () { fa2AdminLoad(); fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
     });
     document.getElementById('a-rep').addEventListener('click', function () { fa2SendReport(); });
+    document.getElementById('a-welb').addEventListener('click', function () { fa2SendWelcome(); });
     fa2AdminLoad();
   }
   function fa2AdminLoad() {
@@ -4703,6 +4704,57 @@ var GLOSS = {
     });
   }
 
+  // Pick anyone on either team, or type an address that isn't on a team at all.
+  function fa2SendWelcome() {
+    var teams = FA2.teams || [];
+    var wrap = document.createElement('div');
+    wrap.className = 'fa2-modal';
+    function group(role, label) {
+      var list = teams.filter(function (t) { return t.role === role && t.email; });
+      if (!list.length) return '<div class="fa2-lab">' + label + '</div><div class="cc-sub2">Nobody yet.</div>';
+      return '<div class="fa2-lab">' + label + '</div>' + list.map(function (t) {
+        return '<label class="fa2-chk"><input type="checkbox" class="sw-em" value="' + esc(t.email) + '"> ' + esc(t.name) + ' <span class="fa2-s">' + esc(t.email) + '</span></label>';
+      }).join('');
+    }
+    wrap.innerHTML =
+      '<div class="fa2-mcard" style="max-height:80vh;overflow:auto">' +
+        '<div class="fa2-t">Send welcome email</div>' +
+        '<div class="fa2-s" style="margin:6px 0 4px">App link, the password for their side, the live sheet, the on-hand list and your contact details.</div>' +
+        group('sports', 'Sports team') + group('fa', 'F&amp;A team') +
+        '<div class="fa2-lab">Or send to someone not on a team</div>' +
+        '<input id="sw-man" class="cc-in" placeholder="name@example.com">' +
+        '<input id="sw-name" class="cc-in" placeholder="Their name (optional)">' +
+        '<div class="fa2-lab">Which password should that person get?</div>' + fa2Chips('sw-role', ['Sports', 'F&amp;A'], 'Sports') +
+        '<div id="sw-err" class="cc-err" hidden></div>' +
+        '<div class="fa2-mrow"><button type="button" id="sw-cancel" class="cc-mini">Cancel</button><button type="button" id="sw-go" class="cc-btn">Send</button></div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    var role = 'sports';
+    fa2ChipWire('sw-role', function (v) { role = /F&A|F&amp;A/.test(v) ? 'fa' : 'sports'; });
+    document.getElementById('sw-cancel').addEventListener('click', function () { wrap.remove(); });
+    document.getElementById('sw-go').addEventListener('click', function () {
+      var to = [].slice.call(wrap.querySelectorAll('.sw-em:checked')).map(function (c) { return { email: c.value }; });
+      var man = document.getElementById('sw-man').value.trim();
+      if (man) {
+        if (man.indexOf('@') < 1) return fa2Err('sw-err', 'That email doesn\u2019t look right.');
+        to.push({ email: man, name: document.getElementById('sw-name').value.trim(), role: role });
+      }
+      if (!to.length) return fa2Err('sw-err', 'Pick someone, or type an email.');
+      var b = document.getElementById('sw-go'); b.disabled = true; b.textContent = 'Sending\u2026';
+      var done = 0, bad = [];
+      to.reduce(function (chain, p) {
+        return chain.then(function () {
+          return fa2Call('admin', { adminPw: FA2.adminPw, op: 'welcome_send', email: p.email, name: p.name || '', role: p.role || '' })
+            .then(function (j) { if (j && j.ok) done++; else bad.push(p.email); }, function () { bad.push(p.email); });
+        });
+      }, Promise.resolve()).then(function () {
+        wrap.remove();
+        kitBanner(document.querySelector('.cc-card'), done + ' welcome email' + (done === 1 ? '' : 's') + ' sent' + (bad.length ? ' \u00b7 ' + bad.length + ' failed' : ''));
+        var o = document.getElementById('a-out');
+        if (o) o.textContent = 'Welcome sent to ' + done + ' recipient' + (done === 1 ? '' : 's') + (bad.length ? ' \u2014 failed: ' + bad.join(', ') : '') + '.';
+      });
+    });
+  }
   function fa2SendReport() {
     var teams = FA2.teams || [];
     var wrap = document.createElement('div');

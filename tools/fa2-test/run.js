@@ -545,6 +545,23 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await page.locator('.a-wel[data-em="katie@example.com"]').click();
       await page.waitForFunction(() => /Welcome email sent to katie/.test((document.getElementById('a-out') || {}).textContent || ''), null, { timeout: 8000 });
       check('R16b Tapping it forces a welcome and reports back', (hub.welcomeSends || []).length === sendsBefore + 1, JSON.stringify(hub.welcomeSends));
+      // the Admin picker: several members at once plus a non-member address
+      await page.click('#a-welb'); await page.waitForSelector('#sw-go', { timeout: 5000 });
+      const boxes = await page.locator('.sw-em').count();
+      check('R17a Send-welcome picker lists everyone on both teams', boxes === hub.teams.length, 'boxes=' + boxes + ' team=' + hub.teams.length);
+      await page.click('#sw-go');
+      check('R17b Nothing selected is refused', /Pick someone, or type an email/.test(await text(page, '#sw-err')));
+      await page.locator('.sw-em[value="katie@example.com"]').check();
+      await page.locator('.sw-em[value="jordan@example.com"]').check();
+      await page.fill('#sw-man', 'outsider@example.com');
+      await page.fill('#sw-name', 'Outside Person');
+      await page.locator('#sw-role .fa2-chip', { hasText: 'F&A' }).click();
+      const before2 = (hub.welcomeSends || []).length;
+      await page.click('#sw-go');
+      await page.waitForSelector('.k-ban', { timeout: 10000 });
+      const sends = hub.log.filter(b => b.action === 'admin' && b.op === 'welcome_send').slice(-3);
+      check('R17c Sends to both members and the typed address, with the chosen role', (hub.welcomeSends || []).length === before2 + 3 && sends.some(x => x.email === 'outsider@example.com' && x.role === 'fa' && x.name === 'Outside Person'), JSON.stringify(sends.map(x => x.email + (x.role ? '/' + x.role : ''))));
+      check('R17d Banner reports how many went out', /3 welcome emails sent/.test(await text(page, '.k-ban')), await text(page, '.k-ban'));
     }
     const setCalls1 = hub.log.filter(b => b.action === 'admin' && b.op === 'teams_set').length;
     check('S9b Add member → one teams_set', setCalls1 === 1 && hub.teams.length === 4, 'teams_set calls=' + setCalls1);
