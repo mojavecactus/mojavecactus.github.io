@@ -28,6 +28,7 @@ async function newPage(browser, hub, opts) {
     if (body && body.action && body.token) {
       if (hub.abortNext) { hub.abortNext = false; return r.abort('failed'); }
       if (hub.abortReads && body.action === 'read') { hub.abortReads--; return r.abort('failed'); }
+      if (hub.hangOnce && body.action === 'read') { hub.hangOnce = false; await sleep(14000); try { return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(hub.handle(body)) }); } catch (e) { return; } }
       const out = hub.handle(body);
       if (out === '__ABORT__') return r.abort('failed');
       if (hub.delayMs) await sleep(hub.delayMs);
@@ -120,6 +121,13 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await page.waitForFunction(() => !/didn|reach the server/.test((document.getElementById('fa2-err') || {}).textContent || '') , null, { timeout: 12000 }).catch(() => {});
       await sleep(2500);
       check('R18 A dropped read retries once instead of surfacing an error', hub.abortReads === 0 && hub.log.length > gone && !(await page.locator('#fa2-err:visible').count()), 'abortReads left=' + hub.abortReads);
+      // a request that never answers (dead socket) is abandoned at 12 s and retried, not left spinning
+      hub.hangOnce = true; const t0 = Date.now();
+      await page.evaluate(() => document.getElementById('fa2-rf').click());
+      await page.waitForFunction(() => { const b = document.getElementById('fa2-rf'); return b && !b.disabled; }, null, { timeout: 30000 }).catch(() => {});
+      await sleep(1500);
+      const took = Date.now() - t0;
+      check('R18b A hung read is abandoned at ~12 s and the retry completes', !hub.hangOnce && took > 11000 && took < 26000 && !(await page.locator('#fa2-err:visible').count()), 'took ' + took + 'ms');
       const box = () => page.evaluate(() => { const e = document.getElementById('fa2-fromo'); const r = e.getBoundingClientRect(); return { vis: r.height > 0, ph: e.placeholder }; });
       check('R7a From detail box is hidden until a chip needs it', !(await box()).vis, JSON.stringify(await box()));
       await pickChip(page, 'fa2-from', 'Territory Transfer');

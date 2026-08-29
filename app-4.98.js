@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.97';
+  var APPVER = '4.98';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3026,6 +3026,17 @@ var GLOSS = {
   function fa2IsFA() { var c = fa2Creds(); return !!(c && c.scope === 'fa'); }
   // Reads are safe to repeat; anything that writes is not (a blind retry could
   // double-send a welcome or re-approve an import).
+  // iOS hands a resumed home-screen app a stale socket now and then; the first
+  // request on it hangs. A throwaway ping on resume takes that hit instead of the user.
+  FA2.lastWarm = 0;
+  function fa2Warm() {
+    if (!fa2Creds()) return;
+    if (Date.now() - FA2.lastWarm < 45000) return;
+    FA2.lastWarm = Date.now();
+    fa2Call('ping').then(function () {}, function () {});
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') fa2Warm(); });
+  window.addEventListener('pageshow', function () { fa2Warm(); });
   function fa2Retryable(action, extra) {
     if (action === 'read' || action === 'ping' || action === 'import_list') return true;
     if (action === 'admin' && extra && /^(toggles_get|teams_get|report_preview)$/.test(String(extra.op))) return true;
@@ -3035,14 +3046,17 @@ var GLOSS = {
     var c = fa2Creds(); if (!c) return Promise.reject(new Error('locked'));
     var b = { action: action, token: c.token };
     if (extra) { for (var k in extra) b[k] = extra[k]; }
-    var body = JSON.stringify(b), tries = fa2Retryable(action, extra) ? 2 : 1;
+    var safe = fa2Retryable(action, extra), body = JSON.stringify(b), tries = safe ? 2 : 1;
+    // Reads give up quickly and retry; writes get longer because a batch may be
+    // rebuilding the Master tab on the far end.
+    var limit = safe ? 12000 : 25000;
     function once(left) {
       var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
       var opts = { method: 'POST', body: body };
       if (ctl) opts.signal = ctl.signal;
       // Apps Script can sit on a request for minutes when it is busy; don't leave
       // the phone spinning on "Checking..." with no way to tell what happened.
-      var to = setTimeout(function () { if (ctl) ctl.abort(); }, 25000);
+      var to = setTimeout(function () { if (ctl) ctl.abort(); }, limit);
       return fetch(c.url, opts).then(function (r) {
         clearTimeout(to);
         return r.text().then(function (t) {
