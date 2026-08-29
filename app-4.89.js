@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.88';
+  var APPVER = '4.89';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -4039,6 +4039,12 @@ var GLOSS = {
     'Written Off': [['reason', 'Reason', true]],
     'Returned to CT SM': [['recv', 'Received by who', true], ['note', 'Notes', false]]
   };
+  // The bottom-bar scanner glyph, reused so the button reads as "scan" everywhere.
+  function fa2ScanIcon(sz) {
+    return '<svg width="' + sz + '" height="' + sz + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">' +
+      '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>' +
+      '<path d="M7 8v8M10.5 8v8M13.5 8v5M13.5 16v0M16.5 8v8"/></svg>';
+  }
   function fa2Return() {
     setTitle('Remove / Return', ''); backBtn.hidden = false;
     ccStop();
@@ -4047,12 +4053,12 @@ var GLOSS = {
     fa2KitCss();
     var tray = { items: {}, order: [] };
     var sel = { type: '', v: {} };
-    var OH = null, subKey = 'ret-' + fa2Uuid(), openKey = '';
+    var OH = null, subKey = 'ret-' + fa2Uuid(), openKey = '', pickN = 1;
     fa2Shell('Remove / Return', 'Take product out of F&amp;A stock \u2014 pick where it went.',
       '<div class="fa2-lab">Removal type</div>' + fa2Chips('fa2-rty', FA2_REMOVE_TYPES, '') +
       '<div id="fa2-rfields"></div>' +
       '<div class="fa2-lab">Selected</div><div id="fa2-tray"></div>' +
-      '<button id="fa2-scanb" type="button" class="cc-mini">\ud83d\udcf7 Scan a barcode</button>' +
+      '<button id="fa2-scanb" type="button">' + fa2ScanIcon(24) + '<span>Scan a barcode</span></button>' +
       '<div id="fa2-scanwrap" class="a2top" hidden>' +
         '<video id="ccvid" playsinline muted autoplay></video>' +
         '<div id="cc-flash" aria-hidden="true"></div>' +
@@ -4087,7 +4093,7 @@ var GLOSS = {
       if (have + n > oh) { var c = cardFor(k); kitShake(c, c && c.querySelector('.f2bub')); return false; }
       if (tray.items[k]) tray.items[k].qty = have + n;
       else { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, max: oh, qty: n }; tray.order.push(k); }
-      openKey = '';
+      openKey = ''; pickN = 1;
       trayApi.redraw();
       return true;
     }
@@ -4100,14 +4106,17 @@ var GLOSS = {
       el.innerHTML = rows.map(function (r) {
         var key = r[0] + '\u0001' + r[2];
         var oh = fa2Num(r[4]), have = tray.items[key] ? tray.items[key].qty : 0;
-        var open = openKey === key, opts = '';
-        for (var i = 1; i <= oh; i++) opts += '<option value="' + i + '">' + i + '</option>';
+        var open = openKey === key, pend = Math.min(pickN, Math.max(1, oh - have));
         return '<div class="f2c fa2-pk' + (open ? ' pk-open' : '') + '" data-k="' + esc(key) + '">' +
           '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + (have ? have + ' of ' + oh + ' selected' : oh + ' on hand') + '</span></div>' +
           (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
           '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + '</div>' +
           (open ? '<div class="pk-qty">' +
-              '<label class="a2f"><span class="a2fl">QTY</span><select class="cc-in cc-sel pk-n">' + opts + '</select></label>' +
+              '<span class="pk-step">' +
+                '<button type="button" class="pk-m" aria-label="Less"' + (pend <= 1 ? ' disabled' : '') + '>\u2212</button>' +
+                '<b class="pk-n">' + pend + '</b>' +
+                '<button type="button" class="pk-p" aria-label="More">+</button>' +
+              '</span>' +
               '<button type="button" class="cc-btn pk-add">Add</button>' +
             '</div>' : '') +
         '</div>';
@@ -4117,13 +4126,20 @@ var GLOSS = {
       if (!OH || !e.target.closest) return;
       var card = e.target.closest('.fa2-pk'); if (!card) return;
       var k = card.getAttribute('data-k');
-      if (e.target.closest('.pk-add')) {
-        var s = card.querySelector('.pk-n');
-        addToTray(k, Math.max(1, +(s && s.value) || 1));
+      if (e.target.closest('.pk-add')) { addToTray(k, pickN); return; }
+      var step = e.target.closest('.pk-m') ? -1 : e.target.closest('.pk-p') ? 1 : 0;
+      if (step) {
+        var m = rowFor(k), oh2 = m ? fa2Num(m[4]) : 1, have2 = tray.items[k] ? tray.items[k].qty : 0;
+        var next = pickN + step;
+        // never let the stepper offer more than is left; asking anyway shakes the card
+        if (next > Math.max(1, oh2 - have2)) { kitShake(card, card.querySelector('.f2bub')); return; }
+        pickN = Math.max(1, next);
+        drawPick();
         return;
       }
-      if (e.target.closest('.pk-qty')) return; // let the picker do its thing
+      if (e.target.closest('.pk-qty')) return;
       openKey = (openKey === k) ? '' : k;
+      pickN = 1;
       drawPick();
       // the sticky Submit bar sits over the bottom of the list — bring the picker up to it
       if (openKey) {
@@ -4151,7 +4167,8 @@ var GLOSS = {
     document.getElementById('fa2-scanb').addEventListener('click', function () {
       var w = document.getElementById('fa2-scanwrap'), on = w.hidden;
       w.hidden = !on;
-      this.textContent = on ? '\u25a0 Stop scanning' : '\ud83d\udcf7 Scan a barcode';
+      this.classList.toggle('on', on);
+      this.querySelector('span').textContent = on ? 'Stop scanning' : 'Scan a barcode';
       if (on) { ccBeepInit(); CC.camOff = false; ccStartCam(); } else { ccStop(); }
     });
     fa2Load(false).then(function (d) { if (CC.view !== 'fa2ret') return; OH = d; drawPick(); })

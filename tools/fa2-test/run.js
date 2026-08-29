@@ -287,26 +287,32 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       // per-card quantity picker
       const card = page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace C' });
       await card.locator('.f2sub').click(); await sleep(250);
-      check('R11h Tapping a card opens a quantity picker on that card', (await card.locator('.pk-n').count()) === 1 && (await card.locator('.pk-add').count()) === 1);
+      check('R11h Tapping a card opens a quantity stepper on that card', (await card.locator('.pk-m').count()) === 1 && (await card.locator('.pk-p').count()) === 1 && (await card.locator('.pk-add').count()) === 1 && (await card.locator('select').count()) === 0);
       const vis = await page.evaluate(() => { const q = document.querySelector('.pk-qty'); const r = q.getBoundingClientRect(); const bar = document.querySelector('.k-bar').getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), barTop: Math.round(bar.top), vh: window.innerHeight }; });
       check('R11h2 The picker scrolls clear of the sticky Submit bar', vis.top > 0 && vis.bottom <= vis.barTop, JSON.stringify(vis));
-      const geo = await page.evaluate(() => { const s = document.querySelector('.pk-n').getBoundingClientRect(); const a = document.querySelector('.pk-add').getBoundingClientRect(); return { sel: Math.round(s.width), add: Math.round(a.width), overlap: Math.round(s.right) > Math.round(a.left) }; });
-      check('R11h3 Select and Add share the row (neither is crushed)', geo.sel >= 100 && geo.add >= 60 && geo.add <= 160 && !geo.overlap, JSON.stringify(geo));
-      const opts = await card.locator('.pk-n option').allInnerTexts();
-      check('R11i Picker offers 1..on-hand only', JSON.stringify(opts) === '["1","2","3","4","5"]', JSON.stringify(opts));
-      await card.locator('.pk-n').selectOption('3');
+      const geo = await page.evaluate(() => { const m = document.querySelector('.pk-m').getBoundingClientRect(); const a = document.querySelector('.pk-add').getBoundingClientRect(); return { minus: Math.round(m.width), add: Math.round(a.width), overlap: Math.round(m.right) > Math.round(a.left) }; });
+      check('R11h3 Stepper and Add share the row (neither is crushed)', geo.minus >= 34 && geo.add >= 60 && !geo.overlap, JSON.stringify(geo));
+      check('R11i Stepper starts at 1 with minus disabled', (await card.locator('.pk-n').innerText()) === '1' && (await card.locator('.pk-m').isDisabled()), await card.locator('.pk-n').innerText());
+      await card.locator('.pk-p').click(); await sleep(150); await card.locator('.pk-p').click(); await sleep(150);
+      check('R11i2 Plus steps the count up', (await card.locator('.pk-n').innerText()) === '3');
+      await card.locator('.pk-m').click(); await sleep(150);
+      check('R11i3 Minus steps it back down', (await card.locator('.pk-n').innerText()) === '2');
+      await card.locator('.pk-p').click(); await sleep(150);
       await card.locator('.pk-add').click(); await sleep(300);
       check('R11j Chosen quantity lands in the Selected tray', (await text(page, '#fa2-tray .k-trow .k-step b')) === '3' && /3 of 5 selected/.test(await card.innerText()), await text(page, '#fa2-tray'));
-      // over-selecting shakes the card and reddens the count
+      // stepping past what is left shakes the card and reddens the count
       await card.locator('.f2sub').click(); await sleep(250);
-      await card.locator('.pk-n').selectOption('4');
-      await card.locator('.pk-add').click(); await sleep(150);
+      for (let i = 0; i < 3; i++) { await card.locator('.pk-p').click(); await sleep(120); }
+      check('R11k1 Stepper stops at what is left (2 of 5 remaining)', (await card.locator('.pk-n').innerText()) === '2', await card.locator('.pk-n').innerText());
       const over = await page.evaluate(() => { const c = [].filter.call(document.querySelectorAll('#fa2-pick .fa2-pk'), x => /InSpace C/.test(x.innerText))[0]; const b = c.querySelector('.f2bub'); return { shake: c.classList.contains('k-shake'), red: b.classList.contains('k-red'), qty: document.querySelector('#fa2-tray .k-step b').innerText }; });
-      check('R11k Over-selecting shakes the card, reddens the count, and adds nothing', over.shake && over.red && over.qty === '3', JSON.stringify(over));
+      check('R11k Over-stepping shakes the card, reddens the count, and adds nothing', over.shake && over.red && over.qty === '3', JSON.stringify(over));
       await sleep(900);
+      await card.locator('.f2sub').click(); await sleep(200); // collapse
+      const sb = await page.evaluate(() => { const b = document.getElementById('fa2-scanb'); const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), svg: b.querySelectorAll('svg').length, paths: b.querySelectorAll('svg path').length, txt: b.innerText.trim() }; });
+      check('R11o Scan button is full width with the app scan glyph (no emoji)', sb.w > 300 && sb.h >= 44 && sb.svg === 1 && sb.paths === 2 && sb.txt === 'Scan a barcode', JSON.stringify(sb));
       // scanner adds from stock
       await page.click('#fa2-scanb'); await sleep(400);
-      check('R11l Scan button reveals the camera panel', !(await page.evaluate(() => document.getElementById('fa2-scanwrap').hidden)));
+      check('R11l Scan button reveals the camera panel and flips to Stop scanning', !(await page.evaluate(() => document.getElementById('fa2-scanwrap').hidden)) && (await text(page, '#fa2-scanb')) === 'Stop scanning' && (await page.evaluate(() => document.getElementById('fa2-scanb').classList.contains('on'))), await text(page, '#fa2-scanb'));
       await page.evaluate(() => window.__TBX_ONCODE('(01)07290013396041(10)LOTC'));
       await sleep(400);
       const scanned = await page.evaluate(() => ({ qty: document.querySelector('#fa2-tray .k-step b').innerText, stat: (document.getElementById('cc-stat') || {}).textContent }));
@@ -324,7 +330,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     async function pick(name, n) {
       const c = page.locator('#fa2-pick .fa2-pk', { hasText: name });
       await c.locator('.f2sub').click(); await sleep(200);
-      await c.locator('.pk-n').selectOption(String(n));
+      for (let i = 1; i < n; i++) { await c.locator('.pk-p').click(); await sleep(120); }
       await c.locator('.pk-add').click(); await sleep(250);
     }
     await pick('InSpace C', 2);
