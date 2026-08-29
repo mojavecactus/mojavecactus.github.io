@@ -296,6 +296,20 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     const setCalls2 = hub.log.filter(b => b.action === 'admin' && b.op === 'teams_set').length - setCalls1;
     bug('S9c deleting one member after a prior save → stacked listeners (2 confirms, 2 teams_set)', dialogs === 2 && setCalls2 === 2, dialogs === 1 && setCalls2 === 1 && hub.teams.length === 3, 'confirms=' + dialogs + ' teams_set=' + setCalls2 + ' teams now=' + hub.teams.map(t => t.name).join(','));
 
+    if (FIXED) {
+      const syncBefore = hub.log.filter(b => b.action === 'admin' && b.op === 'sync_sharing').length;
+      hub.teams.push({ name: 'Nate (F&A too)', email: 'nate@example.com', role: 'fa', active: true });
+      await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(800);
+      const syncAfterRf = hub.log.filter(b => b.action === 'admin' && b.op === 'sync_sharing').length - syncBefore;
+      const dupTag = await page.evaluate(() => (document.getElementById('a-body') || {}).innerText || '');
+      check('R6a Admin ↻ only re-reads — no sharing sync (no share emails)', syncAfterRf === 0, 'sync_sharing calls on refresh=' + syncAfterRf);
+      check('R6b Email listed on both teams is flagged as getting every share email twice', /listed 2× — gets every share email 2×/.test(dupTag), dupTag.replace(/\s+/g, ' ').slice(0, 160));
+      await page.click('#a-sync'); await sleep(800);
+      const syncAfterBtn = hub.log.filter(b => b.action === 'admin' && b.op === 'sync_sharing').length - syncBefore;
+      check('R6c Explicit "Sync sheet & folder access" (confirmed) runs exactly one sync', syncAfterBtn === 1 && dialogs === 2, 'sync=' + syncAfterBtn + ' confirms=' + dialogs);
+      hub.teams = hub.teams.filter(t => t.name !== 'Nate (F&A too)');
+    }
+
     // ---------------- S8: Transactions ----------------
     hub.imports.push({ importId: 'imp1', ts: '2026-08-28T10:00:00Z', source: 'email', bo: 'C777', outcome: 'pending', pdf: '', detail: { hdr: { facility: 'WCOSC', dos: '2026-08-27', surgeon: 'Dr. Modest', po: 'PO-88' }, lines: [{ refRaw: '0130', desc: 'InSpace C', lot: '', qty: 1, issue: 'no-lot', unitPrice: 1250, lineTotal: 1250 }, { refRaw: '9999', desc: 'Not ours', lot: '', qty: 1, issue: 'unknown-ref', unitPrice: 75.5, lineTotal: 75.5 }] } });
     hub.imports.push({ importId: 'imp0', ts: '2026-08-27T10:00:00Z', source: 'email', bo: 'C700', outcome: 'auto', pdf: '', detail: { hdr: {}, lines: [] } });

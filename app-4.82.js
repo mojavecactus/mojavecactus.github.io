@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.81';
+  var APPVER = '4.82';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -4328,14 +4328,24 @@ var GLOSS = {
       return;
     }
     fa2Shell('Admin', 'Teams control sheet access and email recipients. Changes save instantly.',
-      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rep" class="cc-mini">Send Report</button></div>' +
+      '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rep" class="cc-mini">Send Report</button><button type="button" id="a-sync" class="cc-mini">Sync sheet &amp; folder access</button></div>' +
       '<div id="a-body"><div class="cc-empty">Loading\u2026</div></div>',
-      function () { var o = document.getElementById('a-out'); if (o) o.textContent = 'Syncing\u2026'; fa2CacheKill(); return fa2Call('admin', { adminPw: FA2.adminPw, op: 'sync_sharing' }).then(function () { fa2AdminLoad(); }, function () { fa2AdminLoad(); }); });
+      function () { fa2CacheKill(); return fa2AdminLoad(); });
+    // Sharing sync is deliberate, never a side effect of refresh: every sync re-shares the PDF folder and Google emails each person.
+    document.getElementById('a-sync').addEventListener('click', function () {
+      if (!confirm('Re-share the inventory sheet and the Bill Only PDF folder with everyone on both teams?\n\nGoogle emails a "shared with you" notice to each person every time this runs.')) return;
+      var o = document.getElementById('a-out'); if (o) o.textContent = 'Syncing\u2026';
+      fa2CacheKill();
+      fa2Call('admin', { adminPw: FA2.adminPw, op: 'sync_sharing' }).then(function (j) {
+        fa2AdminLoad();
+        var o2 = document.getElementById('a-out'); if (o2) o2.textContent = (j && j.ok) ? ('Access synced' + (j.sharing && j.sharing.added && j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : ' \u2014 nothing new') + '.') : 'Sync failed.';
+      }).catch(function () { fa2AdminLoad(); fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
+    });
     document.getElementById('a-rep').addEventListener('click', function () { fa2SendReport(); });
     fa2AdminLoad();
   }
   function fa2AdminLoad() {
-    Promise.all([
+    return Promise.all([
       fa2Call('admin', { adminPw: FA2.adminPw, op: 'teams_get' }),
       fa2Call('admin', { adminPw: FA2.adminPw, op: 'toggles_get' })
     ]).then(function (rs) {
@@ -4344,11 +4354,13 @@ var GLOSS = {
       var tg = (rs[1] && rs[1].toggles) || {};
       FA2.teams = teams;
       var body = document.getElementById('a-body'); if (!body) return;
+      var seen = {}; teams.forEach(function (t) { var k = String(t.email || '').trim().toLowerCase(); if (k) seen[k] = (seen[k] || 0) + 1; });
       function section(role, label) {
         var list = teams.map(function (t, i) { return { t: t, i: i }; }).filter(function (x) { return x.t.role === role; });
         return '<div class="fa2-lab">' + label + '</div>' +
           (list.length ? list.map(function (x) {
-            return '<div class="fa2-row"><div class="fa2-l"><div class="fa2-t">' + esc(x.t.name) + '</div><div class="fa2-s">' + esc(x.t.email) + (x.t.active ? '' : ' \u00b7 inactive') + '</div></div>' +
+            var k = String(x.t.email || '').trim().toLowerCase();
+            return '<div class="fa2-row"><div class="fa2-l"><div class="fa2-t">' + esc(x.t.name) + '</div><div class="fa2-s">' + esc(x.t.email) + (x.t.active ? '' : ' \u00b7 inactive') + (seen[k] > 1 ? ' \u00b7 <b>listed ' + seen[k] + '\u00d7 \u2014 gets every share email ' + seen[k] + '\u00d7</b>' : '') + '</div></div>' +
               '<div class="fa2-r"><button type="button" class="fa2-x a-del" data-i="' + x.i + '">\u00d7</button></div></div>';
           }).join('') : '<div class="cc-sub2">Nobody yet.</div>') +
           '<div class="fa2-2col"><input class="cc-in a-nm" data-r="' + role + '" placeholder="Name"><input class="cc-in a-em" data-r="' + role + '" placeholder="Email"></div>' +
