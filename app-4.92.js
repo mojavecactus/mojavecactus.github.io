@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.91';
+  var APPVER = '4.92';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3335,16 +3335,28 @@ var GLOSS = {
       '.a-busy{background:rgba(90,200,120,.25) !important;border-color:rgba(90,200,120,.6) !important;color:#bfe9cc !important}';
     document.head.appendChild(st);
   }
-  function expNorm(e) {
-    e = String(e == null ? '' : e).trim();
-    var y, mo, d, m;
-    if ((m = e.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/))) { y = +m[1]; mo = +m[2]; d = m[3] ? +m[3] : 0; }
-    else if ((m = e.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))) { y = +m[3]; mo = +m[1]; d = +m[2]; }
-    else if ((m = e.match(/^(\d{1,2})\/(\d{4})$/))) { y = +m[2]; mo = +m[1]; d = 0; }
-    else return e;
-    if (!d) d = new Date(y, mo, 0).getDate(); // month-only = good through the end of that month
+  var FA2_MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  // Accepts what people and labels actually write; always answers YYYY-MM-DD (or ''
+  // when it can't be read). Month-only means good through the end of that month.
+  function fa2ExpParse(v) {
+    var t = String(v == null ? '' : v).trim().replace(/\s+/g, ' ');
+    if (!t) return '';
+    var y, mo, d = 0, m;
+    if ((m = t.match(/^(\d{4})[-\/.](\d{1,2})(?:[-\/.](\d{1,2}))?$/))) { y = +m[1]; mo = +m[2]; d = m[3] ? +m[3] : 0; }
+    else if ((m = t.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/))) { mo = +m[1]; d = +m[2]; y = +m[3]; }
+    else if ((m = t.match(/^(\d{1,2})[-\/.](\d{4})$/))) { mo = +m[1]; y = +m[2]; }
+    else if ((m = t.match(/^(\d{4})(\d{2})(\d{2})$/))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+    else if ((m = t.match(/^(\d{2})(\d{2})(\d{2})$/))) { y = 2000 + +m[1]; mo = +m[2]; d = +m[3]; } // GS1 YYMMDD, 00 day = end of month
+    else if ((m = t.match(/^(?:(\d{1,2})[ -])?([A-Za-z]{3,9})[ -](\d{4})$/))) { d = m[1] ? +m[1] : 0; mo = FA2_MON[m[2].slice(0, 3).toLowerCase()]; y = +m[3]; }
+    else if ((m = t.match(/^([A-Za-z]{3,9}) (\d{1,2}),? (\d{4})$/))) { mo = FA2_MON[m[1].slice(0, 3).toLowerCase()]; d = +m[2]; y = +m[3]; }
+    else return '';
+    if (!y || !mo || mo < 1 || mo > 12) return '';
+    var last = new Date(y, mo, 0).getDate();
+    if (!d) d = last;
+    if (d < 1 || d > last) return '';
     return y + '-' + ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2);
   }
+  function expNorm(e) { return fa2ExpParse(e) || String(e == null ? '' : e).trim(); }
   function expBand(e) { var n = expNorm(e); if (!/^\d{4}-\d{2}-\d{2}$/.test(n)) return 2; var d = new Date(n + 'T12:00:00'); var now = new Date(); now.setHours(0, 0, 0, 0); if (d < now) return 0; var soon = new Date(now); soon.setMonth(soon.getMonth() + 3); return d <= soon ? 1 : 2; }
   function expChip(e) { var b = expBand(e); return '<span class="f2chip ' + (b === 0 ? 'exp">Expired' : b === 1 ? 'soon">\u22643 mo' : 'ok">OK') + '</span>'; }
   function fa2BandSort(rows) {
@@ -3629,10 +3641,12 @@ var GLOSS = {
         '<div class="fa2-s" style="margin:6px 0 10px">' + esc(row.ty) + ' \u00b7 ' + esc(row.ref) + ' \u00b7 Lot ' + esc(row.lot) + ' \u00b7 qty ' + Math.abs(row.qty) + '</div>' +
         '<div class="fa2-lab">What to do</div>' + fa2Chips('fc-mode', ['Correct details', 'Void entirely'], 'Correct details') +
         '<div id="fc-fields">' +
-          '<input id="fc-ref" class="cc-in" placeholder="REF" value="' + esc(row.ref) + '">' +
-          '<input id="fc-lot" class="cc-in" placeholder="LOT" value="' + esc(row.lot) + '">' +
-          '<input id="fc-exp" class="cc-in" placeholder="Exp (YYYY-MM-DD)" value="' + esc(row.exp) + '">' +
-          '<input id="fc-qty" class="cc-in" type="number" min="1" placeholder="Qty" value="' + Math.abs(row.qty) + '">' +
+          '<label class="a2f" for="fc-ref"><span class="a2fl">REF</span><input id="fc-ref" class="cc-in" value="' + esc(row.ref) + '"></label>' +
+          '<label class="a2f" for="fc-lot"><span class="a2fl">LOT</span><input id="fc-lot" class="cc-in" value="' + esc(row.lot) + '"></label>' +
+          '<div class="fa2-2col">' +
+            '<label class="a2f" for="fc-exp"><span class="a2fl">Expiration</span><input id="fc-exp" class="cc-in" inputmode="numeric" value="' + esc(fa2ExpParse(row.exp) || row.exp || '') + '"></label>' +
+            '<label class="a2f" for="fc-qty"><span class="a2fl">QTY</span><input id="fc-qty" class="cc-in" type="number" min="1" inputmode="numeric" value="' + Math.abs(row.qty) + '"></label>' +
+          '</div>' +
           '<div id="fc-warn" class="cc-sub2" hidden></div>' +
         '</div>' +
         '<input id="fc-why" class="cc-in" placeholder="Explanation (required)">' +
@@ -3661,6 +3675,10 @@ var GLOSS = {
       else w.hidden = true;
     }
     ['fc-ref', 'fc-lot', 'fc-qty'].forEach(function (id) { document.getElementById(id).addEventListener('input', fcWarn); });
+    // whatever they type, it settles into the standard as soon as they leave the field
+    document.getElementById('fc-exp').addEventListener('change', function (e) {
+      var p = fa2ExpParse(e.target.value); if (p) e.target.value = p;
+    });
     fcWarn();
     document.getElementById('fc-cancel').addEventListener('click', function () { wrap.remove(); });
     document.getElementById('fc-go').addEventListener('click', function () {
@@ -3671,12 +3689,14 @@ var GLOSS = {
         var ref = document.getElementById('fc-ref').value.trim();
         var lot = document.getElementById('fc-lot').value.trim();
         var qty = +document.getElementById('fc-qty').value || 0;
-        var exp = document.getElementById('fc-exp').value.trim();
+        var expRaw = document.getElementById('fc-exp').value.trim();
+        var exp = fa2ExpParse(expRaw);
         if (!ref) return fa2Err('fc-err', 'REF is required.');
         if (!lot) return fa2Err('fc-err', 'LOT is required.');
         if (qty < 1) return fa2Err('fc-err', 'Qty must be at least 1.');
-        if (row.ty === 'Received' && !exp) return fa2Err('fc-err', 'Expiration is required.');
-        if (exp && !/^\d{4}-\d{2}(-\d{2})?$/.test(exp)) return fa2Err('fc-err', 'Expiration must be YYYY-MM-DD (or YYYY-MM).');
+        if (row.ty === 'Received' && !expRaw) return fa2Err('fc-err', 'Expiration is required.');
+        if (expRaw && !exp) return fa2Err('fc-err', 'Couldn\u2019t read that expiration \u2014 try 2030-01-01, 1/1/2030, 01/2030 or JAN 2030.');
+        if (exp) document.getElementById('fc-exp').value = exp;
         var rep = { type: row.ty, ref: ref, desc: row.desc, lot: lot, exp: exp || row.exp, qty: qty,
           reason: 'Correction: ' + why, linkedTo: eid, flags: 'Corrected', entryMethod: 'manual', enteredBy: fa2Who() };
         if (grp) {

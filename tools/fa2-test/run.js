@@ -6,6 +6,7 @@ const { FakeHub } = require('./fakehub');
 const PORT = 8099, BASE = 'http://localhost:' + PORT + '/';
 const APP_PW = process.env.APP_PW, CT_PW = process.env.CT_PW, FA_PW = process.env.FA_PW;
 const results = [];
+let fa2CacheBust = false;
 function check(name, ok, detail) { results.push({ name, ok: !!ok, detail: detail || '' }); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail ? '  — ' + detail : '')); }
 const FIXED = !!process.env.FIXED;
 // bug(): in baseline mode passes when the buggy behaviour is observed; in FIXED mode passes when the fixed behaviour is observed
@@ -474,7 +475,32 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     note('S6 master after usage', JSON.stringify(hub.master().map(r => r[0] + ':' + r[4])));
 
     // ---------------- S7: History + File Correction ----------------
+    // a row whose expiration was stored US-style, the way the sheet hands it back
+    hub.seed([{ type: 'Received', ref: '0130', desc: 'InSpace C', lot: 'USFMT', exp: '1/1/2030', qty: 1, dropName: 'US format drop', from: 'Nate', receivedBy: 'Katie F', eventDate: '2026-08-28' }]);
+    fa2CacheBust = true;
     await go(page, '#/fa2/history', '#fa2-list .h-ev');
+    await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(700);
+    if (FIXED) {
+      const usCard = page.locator('#fa2-list .h-ev', { hasText: 'US format drop' }).first();
+      await usCard.click(); await usCard.locator('.h-fix').first().click();
+      await page.waitForSelector('#fc-go', { timeout: 5000 });
+      const labs = await page.evaluate(() => [].map.call(document.querySelectorAll('#fc-fields .a2fl'), n => n.innerText.trim().toLowerCase()));
+      check('R14a Correction fields are labelled', JSON.stringify(labs) === '["ref","lot","expiration","qty"]', JSON.stringify(labs));
+      check('R14b A US-format ledger date opens already normalised', (await page.inputValue('#fc-exp')) === '2030-01-01', await page.inputValue('#fc-exp'));
+      for (const [typed, want] of [['1/1/2030', '2030-01-01'], ['3/2029', '2029-03-31'], ['JAN 2030', '2030-01-31'], ['2030.06.15', '2030-06-15'], ['300100', '2030-01-31']]) {
+        await page.fill('#fc-exp', typed);
+        await page.locator('#fc-lot').click(); await sleep(150);
+        const got = await page.inputValue('#fc-exp');
+        check('R14c "' + typed + '" snaps to ' + want, got === want, 'got ' + got);
+      }
+      await page.fill('#fc-exp', 'not a date'); await page.fill('#fc-why', 'x'); await page.click('#fc-go'); await sleep(200);
+      check('R14d Unreadable dates are refused with examples', /Couldn.t read that expiration/.test(await text(page, '#fc-err')) && /1\/1\/2030/.test(await text(page, '#fc-err')), await text(page, '#fc-err'));
+      await page.fill('#fc-exp', '2/1/2031'); await page.fill('#fc-why', 'date format test');
+      await page.click('#fc-go'); await page.waitForSelector('.k-ban', { timeout: 10000 });
+      const usEv = hub.batches().slice(-1)[0].events.filter(e => e.type === 'Received')[0];
+      check('R14e A US-format correction reaches the hub as YYYY-MM-DD', usEv && usEv.exp === '2031-02-01', JSON.stringify({ exp: usEv && usEv.exp }));
+      await page.waitForSelector('#fa2-list .h-ev', { timeout: 10000 });
+    }
     const cards = await page.locator('#fa2-list .h-ev').count();
     note('S7 history cards', String(cards));
     const firstCard = page.locator('#fa2-list .h-ev').first();
