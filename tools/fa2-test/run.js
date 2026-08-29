@@ -220,8 +220,23 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     const late = last.events.find(e => e.flags === 'Late entry'), used = last.events.find(e => e.type === 'Used in case');
     check('S6d Overdraft = late-entry Received(short) + Used(5) linked', late && late.qty === 5 - dOnHand && used && used.qty === 5 && late.linkedTo === used.eventId && late.exp === '2026-10-05', JSON.stringify({ lateQty: late && late.qty, lateExp: late && late.exp, usedQty: used && used.qty, receivedBy: late && late.receivedBy }));
     check('S6e Used event carries case fields', used.caseBO === 'C123456' && used.facility === 'WCOSC' && used.surgeon === 'Dr. Test' && used.dos === dosDef);
-    const manualBtn = await page.locator('#a2-man, #u-man').count();
-    check('S6f GAP: no way to record usage of a ref/lot never entered (no manual add on Usage)', manualBtn === 0, 'pick list only shows master rows');
+    const manualBtn = await page.locator('#u-man').count();
+    bug('S6f usage of a ref/lot never entered: baseline has no manual add / fixed has + Manual', manualBtn === 0, manualBtn === 1, 'u-man=' + manualBtn);
+    if (FIXED) {
+      await page.click('#u-man');
+      await page.fill('#u-mref', '0132'); await page.fill('#u-mlot', 'NEWLOT'); await page.fill('#u-mexp', '2027-09-30'); await page.fill('#u-mqty', '2');
+      const mdesc = await page.inputValue('#u-mdesc');
+      await page.click('#u-addman');
+      check('S6g Manual usage item lands in tray with 0 on hand + catalog description', (await page.locator('#u-tray .k-trow', { hasText: '0132' }).count()) === 1 && /0 on hand/.test(await text(page, '#u-tray')) && mdesc.length > 0, 'desc=' + mdesc);
+      await page.click('#fa2-go');
+      await page.waitForSelector('#od-chk', { timeout: 5000 });
+      check('S6h Save asks to resolve the never-entered item (0 recorded, 2 short)', /only 0 recorded \(2 short\)/.test(await text(page, '.fa2-mcard .fa2-s')), await text(page, '.fa2-mcard .fa2-s'));
+      await page.check('#od-chk'); await page.fill('#od-src', 'Megan trunk'); await page.click('#od-go');
+      await page.waitForSelector('.k-ban', { timeout: 10000 });
+      const lb = hub.batches().slice(-1)[0];
+      const lateM = lb.events.find(e => e.flags === 'Late entry' && e.ref === '0132'), usedM = lb.events.find(e => e.type === 'Used in case' && e.ref === '0132');
+      check('S6i Never-entered usage = late-entry Received(2, exp from form, source) + Used(2), net zero on hand', lateM && lateM.qty === 2 && lateM.exp === '2027-09-30' && lateM.receivedBy === 'Megan trunk' && usedM && usedM.qty === 2 && !(hub.master().find(r => r[0] === '0132')), JSON.stringify({ late: lateM && [lateM.qty, lateM.exp, lateM.receivedBy], used: usedM && usedM.qty }));
+    }
     note('S6 master after usage', JSON.stringify(hub.master().map(r => r[0] + ':' + r[4])));
 
     // ---------------- S7: History + File Correction ----------------
@@ -247,7 +262,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     check('S7c Correction = Void + replacement Received (qty 2, linkedTo, flag)', vd && rp && rp.qty === 2 && rp.linkedTo === vd.reverses && rp.flags === 'Corrected');
     bug('S7d replacement Received: receivedBy = drop name & note dropped', rp.receivedBy === 'Bridgeport drop', rp.receivedBy === 'Katie F' && rp.note === 'note here' && rp.dropName === 'Bridgeport drop' && rp.from === 'Matt', 'receivedBy=' + JSON.stringify(rp.receivedBy) + ' note=' + JSON.stringify(rp.note) + ' from=' + JSON.stringify(rp.from));
     check('S7e Corrected qty reflected on hand (3105000740 LOTA = 2 seed + 2 = 4)', (hub.master().find(r => r[0] === '3105000740') || [])[4] === 4, String((hub.master().find(r => r[0] === '3105000740') || [])[4]));
-    await page.waitForSelector('#fa2-list .h-ev', { timeout: 10000 });
+    await page.waitForSelector('#fa2-list .h-ln.h-dim', { timeout: 10000 }).catch(() => {});
     const voidedDim = await page.locator('#fa2-list .h-ln.h-dim').count();
     check('S7f Voided line rendered dimmed', voidedDim >= 1, 'dim lines=' + voidedDim);
 
@@ -288,6 +303,10 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     const appr = hub.log.filter(b => b.action === 'import_approve');
     check('S8b Approve sends edited lot + skip flag', appr.length === 1 && appr[0].lines[0].lot === 'LOTC' && appr[0].lines[1].skipped === true, JSON.stringify(appr.map(a => a.lines.map(l => [l.lot, l.skipped]))));
     check('S8c Approved import applied as Used in case', hub.events('Used in case').filter(e => e.importId === 'imp1').length === 1);
+
+    // ---------------- S13: legacy #/fa route ----------------
+    await go(page, '#/fa', null); await sleep(600);
+    bug('S13 #/fa: baseline opens the retired v1 tool / fixed redirects to v2', (await page.evaluate(() => location.hash)) === '#/fa', (await page.evaluate(() => location.hash)) === '#/fa2' && (await page.locator('#fa2-pills').count()) === 1, 'hash=' + (await page.evaluate(() => location.hash)));
 
     // ---------------- S14: re-gate when fa2 creds missing ----------------
     await page.evaluate(() => localStorage.removeItem('tbx_fa2'));

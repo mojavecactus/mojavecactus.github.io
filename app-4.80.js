@@ -2489,7 +2489,7 @@ var GLOSS = {
         .catch(function () {});
     }
     if (!CC.dev) { CC.ret = then; ccDevice(); return false; }
-    if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad(terrTgt()); if (TERR[CC.terr].fa) ccSyncLoad('fa'); }
+    if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad(terrTgt()); }
     return true;
   }
   function ccRowsSrc() { return CC.tgt === 'fa' ? FA.rows : CC.rows; }
@@ -3970,6 +3970,15 @@ var GLOSS = {
       '<input id="u-sur" class="cc-in" placeholder="Surgeon" value="' + esc(f.sur) + '">' +
       '<input id="u-dos" class="cc-in" type="date" value="' + esc(f.dos) + '">' +
       '<div class="fa2-lab">Items used \u2014 drag \u2261 to match the bill only</div><div id="u-tray"></div>' +
+      '<button id="u-man" type="button" class="cc-mini">+ Manual \u2014 not on the list</button>' +
+      '<div id="u-manwrap" class="a2man" hidden>' +
+        '<input id="u-mref" class="cc-in" placeholder="REF (part number)">' +
+        '<input id="u-mdesc" class="cc-in" placeholder="Description">' +
+        '<input id="u-mlot" class="cc-in" placeholder="LOT">' +
+        '<div class="fa2-2col"><input id="u-mexp" class="cc-in" type="date"><input id="u-mqty" class="cc-in" type="number" min="1" value="1" placeholder="Qty"></div>' +
+        '<div class="cc-sub2">For product that was never entered \u2014 on save you\u2019ll confirm where it came from and it\u2019s recorded as a late entry.</div>' +
+        '<button id="u-addman" type="button" class="cc-mini">Add to list</button>' +
+      '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
       '<div class="fa2-lab">On hand \u2014 tap to add</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
       '<div class="k-bar"><button id="fa2-go" class="cc-btn">Save usage</button></div>');
@@ -3982,6 +3991,35 @@ var GLOSS = {
       allowOver: function () { return true; }
     });
     document.getElementById('fa2-q').addEventListener('input', function () { drawPick(); });
+    document.getElementById('u-man').addEventListener('click', function () {
+      var w = document.getElementById('u-manwrap'); w.hidden = !w.hidden;
+      if (!w.hidden) document.getElementById('u-mref').focus();
+    });
+    document.getElementById('u-mref').addEventListener('input', function (e) {
+      var d = document.getElementById('u-mdesc');
+      if (d && !d.value) { var dv = fa2DescOf(e.target.value); if (dv) d.value = dv; }
+    });
+    document.getElementById('u-addman').addEventListener('click', function () {
+      var ref = document.getElementById('u-mref').value.trim();
+      var lot = document.getElementById('u-mlot').value.trim();
+      var exp = document.getElementById('u-mexp').value;
+      var qty = +document.getElementById('u-mqty').value || 0;
+      if (!ref) return fa2Err('fa2-err', 'REF is required.');
+      if (!lot) return fa2Err('fa2-err', 'LOT is required.');
+      if (qty < 1) return fa2Err('fa2-err', 'Qty must be at least 1.');
+      var er = document.getElementById('fa2-err'); if (er) er.hidden = true;
+      // If this ref+lot is actually on hand, use that row so the overdraft math stays right.
+      var m = null;
+      ((D2 && D2.master) || []).forEach(function (r) { if (String(r[0]).toUpperCase() === ref.toUpperCase() && String(r[2]).toUpperCase() === lot.toUpperCase()) m = r; });
+      var k = m ? (m[0] + '\u0001' + m[2]) : (ref + '\u0001' + lot);
+      if (tray.items[k]) tray.items[k].qty += qty;
+      else if (m) { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: fa2Num(m[4]), qty: qty }; tray.order.push(k); }
+      else { tray.items[k] = { ref: ref, desc: document.getElementById('u-mdesc').value.trim(), lot: lot, exp: exp, onhand: 0, qty: qty }; tray.order.push(k); }
+      trayApi.redraw();
+      ['u-mref', 'u-mdesc', 'u-mlot', 'u-mexp'].forEach(function (id) { document.getElementById(id).value = ''; });
+      document.getElementById('u-mqty').value = '1';
+      document.getElementById('u-mref').focus();
+    });
     function drawPick() {
       var el = document.getElementById('fa2-pick'); if (!el || !D2) return;
       var q = (document.getElementById('fa2-q') || {}).value || '';
@@ -4387,7 +4425,7 @@ var GLOSS = {
     if (h === '#/fa2') { terrSet('ct'); return fa2Home(); }
     if (h === '#/fa2/onhand') { terrSet('ct'); return fa2OnHand(); }
     if (h === '#/fa2/history') { terrSet('ct'); return fa2History(); }
-    if (h === '#/fa') { terrSet('ct'); return faScreen(); }
+    if (h === '#/fa') { location.replace('#/fa2'); return; } // v1 F&A tool retired — v2 is the only entry
     if (h === '#/teams/help/view') return helpViewScreen();
     if (h === '#/teams/help') return helpScreen();
     if (h === '#/teams') return teamsScreen();
