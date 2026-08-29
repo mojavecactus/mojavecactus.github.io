@@ -161,17 +161,19 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
         const e = document.getElementById('a2-exp'), q = document.getElementById('a2-qty');
         const er = e.getBoundingClientRect(), qr = q.getBoundingClientRect();
         const d = new Date(); const today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-        return { labels: lab, exp: e.value, today: today, qty: q.value, sameRow: Math.abs(er.top - qr.top) < 2, expW: Math.round(er.width), qtyW: Math.round(qr.width), warn: document.getElementById('a2-expwarn').hidden === false, warnTxt: document.getElementById('a2-expwarn').innerText };
+        return { labels: lab, exp: e.value, today: today, qty: q.value, sameRow: Math.abs(er.top - qr.top) < 2, expW: Math.round(er.width), qtyW: Math.round(qr.width), cls: e.className, border: getComputedStyle(e).borderColor };
       });
       check('R9a Manual add: both fields labelled Expiration + QTY, side by side', JSON.stringify(row.labels.map(x => x.toLowerCase())) === '["expiration","qty"]' && row.sameRow && row.expW > 100 && row.qtyW > 100, JSON.stringify(row));
       check('R9b Date pre-fills to today (never blank) and qty defaults to 1', row.exp === row.today && row.qty === '1', 'exp=' + row.exp + ' today=' + row.today + ' qty=' + row.qty);
-      check('R9c Default (today) is flagged as expiring at the end of the day', row.warn && /expires at the end of the day/.test(row.warnTxt), row.warnTxt);
+      const st = async () => page.evaluate(() => { const e = document.getElementById('a2-exp'); return { cls: e.className.replace('cc-in', '').trim(), border: getComputedStyle(e).borderColor }; });
+      check('R9c Today = red field', /x-bad/.test(row.cls) && /242, 139, 139/.test(row.border), JSON.stringify({ cls: row.cls, border: row.border }));
       await page.fill('#a2-exp', '2020-01-01');
-      const past = await page.evaluate(() => ({ hidden: document.getElementById('a2-expwarn').hidden, txt: document.getElementById('a2-expwarn').innerText }));
-      check('R9g A past expiration warns that it will land as EXPIRED', !past.hidden && /already passed/.test(past.txt), JSON.stringify(past));
+      check('R9g Past date = red too', /x-bad/.test((await st()).cls), JSON.stringify(await st()));
+      const soon = new Date(Date.now() + 45 * 864e5).toISOString().slice(0, 10);
+      await page.fill('#a2-exp', soon);
+      check('R9h Inside 3 months = amber field', /x-warn/.test((await st()).cls) && /240, 192, 96/.test((await st()).border), soon + ' -> ' + JSON.stringify(await st()));
       await page.fill('#a2-exp', '2027-03-31');
-      const cleared = await page.evaluate(() => document.getElementById('a2-expwarn').hidden);
-      check('R9d Warning clears once a future date is picked', cleared);
+      check('R9d Beyond 3 months = green field', /x-ok/.test((await st()).cls) && /126, 217, 155/.test((await st()).border), JSON.stringify(await st()));
       await page.fill('#a2-exp', '');
     }
     await page.click('#a2-addman');
@@ -229,8 +231,8 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await page.waitForFunction(() => /didn/.test((document.getElementById('fa2-flash') || {}).innerText || ''), null, { timeout: 15000 });
       const bad = await page.evaluate(() => ({ hash: location.hash, cls: document.getElementById('fa2-flash').className, txt: document.getElementById('fa2-flash').innerText.replace(/\s+/g, ' '), retry: !!document.getElementById('fa2-flgo') }));
       check('R8c A failed add shows a red pill on Home with a Retry action', bad.hash === '#/fa2' && /bad/.test(bad.cls) && /didn/.test(bad.txt) && bad.retry, JSON.stringify(bad));
-      const hit = await page.evaluate(() => { const b = document.getElementById('fa2-flgo'); const r = b.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { onTop: top === b || b.contains(top), over: top && (top.id || top.className) }; });
-      check('R8g Retry is tappable — not buried under the ↻ refresh button', hit.onTop, JSON.stringify(hit));
+      const hit = await page.evaluate(() => { const b = document.getElementById('fa2-flgo'); const r = b.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); const fr = document.getElementById('fa2-flash').getBoundingClientRect(); const rb = document.getElementById('fa2-rf').getBoundingClientRect(); return { onTop: top === b || b.contains(top), over: top && (top.id || top.className), flashRight: Math.round(fr.right), rfLeft: Math.round(rb.left), gap: Math.round(rb.left - fr.right) }; });
+      check('R8g Retry is tappable and the pill box stops short of the ↻ button', hit.onTop && hit.flashRight <= hit.rfLeft, JSON.stringify(hit));
       const failBefore = hub.events('Received').filter(e => e.lot === 'FAILLOT').length;
       await page.click('#fa2-flgo');
       await page.waitForFunction(() => /Inventory add saved/.test((document.getElementById('fa2-flash') || {}).innerText || ''), null, { timeout: 15000 });

@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.85';
+  var APPVER = '4.86';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3689,25 +3689,24 @@ var GLOSS = {
   // A bare type=date renders empty until it is tapped, and a number input never shows
   // its placeholder once it has a value — so both fields get a visible label, and the
   // date is pre-filled with today (editable) rather than looking broken.
-  function fa2ExpQtyRow(expId, qtyId, warnId) {
+  function fa2ExpQtyRow(expId, qtyId) {
     return '<div class="fa2-2col">' +
         '<label class="a2f" for="' + expId + '"><span class="a2fl">Expiration</span>' +
           '<input id="' + expId + '" class="cc-in" type="date" value="' + fa2Today() + '"></label>' +
         '<label class="a2f" for="' + qtyId + '"><span class="a2fl">QTY</span>' +
           '<input id="' + qtyId + '" class="cc-in" type="number" min="1" inputmode="numeric" value="1"></label>' +
-      '</div>' +
-      '<div id="' + warnId + '" class="a2warn" hidden></div>';
+      '</div>';
   }
-  function fa2ExpWire(expId, warnId) {
-    var el = document.getElementById(expId), w = document.getElementById(warnId);
-    if (!el || !w) return;
+  // The field itself carries the status: red = today or already past, amber = inside
+  // 3 months, green = good. Same bands the On hand list uses.
+  function fa2ExpWire(expId) {
+    var el = document.getElementById(expId);
+    if (!el) return;
     function chk() {
-      var v = el.value, t = fa2Today();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || v > t) { w.hidden = true; return; }
-      // A date of today is still good through the end of the day; earlier is already expired.
-      w.textContent = v < t ? 'That expiration has already passed \u2014 this will land as EXPIRED.'
-                            : 'That expiration is today \u2014 it expires at the end of the day.';
-      w.hidden = false;
+      var v = el.value;
+      el.classList.remove('x-bad', 'x-warn', 'x-ok');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+      el.classList.add(v <= fa2Today() ? 'x-bad' : expBand(v) === 1 ? 'x-warn' : 'x-ok');
     }
     el.addEventListener('input', chk); el.addEventListener('change', chk);
     chk();
@@ -3861,7 +3860,7 @@ var GLOSS = {
           '<input id="a2-ref" class="cc-in" placeholder="REF (part number)">' +
           '<input id="a2-desc" class="cc-in" placeholder="Description">' +
           '<input id="a2-lot" class="cc-in" placeholder="LOT">' +
-          fa2ExpQtyRow('a2-exp', 'a2-qty', 'a2-expwarn') +
+          fa2ExpQtyRow('a2-exp', 'a2-qty') +
           '<button id="a2-addman" type="button" class="cc-mini">Add to list</button>' +
         '</div>' +
         '<div class="fa2-lab">Items in this drop</div><div id="a2-tray"></div>' +
@@ -3874,7 +3873,7 @@ var GLOSS = {
       var w = document.getElementById('a2-manwrap'); w.hidden = !w.hidden;
       if (!w.hidden) document.getElementById('a2-ref').focus();
     });
-    fa2ExpWire('a2-exp', 'a2-expwarn');
+    fa2ExpWire('a2-exp');
     document.getElementById('a2-ref').addEventListener('input', function (e) {
       var d = document.getElementById('a2-desc');
       if (d && !d.value) { var dv = fa2DescOf(e.target.value); if (dv) d.value = dv; }
@@ -3893,7 +3892,7 @@ var GLOSS = {
       ['a2-ref', 'a2-desc', 'a2-lot'].forEach(function (id) { document.getElementById(id).value = ''; });
       document.getElementById('a2-exp').value = fa2Today();
       document.getElementById('a2-qty').value = '1';
-      fa2ExpWire('a2-exp', 'a2-expwarn');
+      fa2ExpWire('a2-exp');
       document.getElementById('a2-ref').focus();
     });
     ccBeepInit();
@@ -4116,7 +4115,7 @@ var GLOSS = {
         '<input id="u-mref" class="cc-in" placeholder="REF (part number)">' +
         '<input id="u-mdesc" class="cc-in" placeholder="Description">' +
         '<input id="u-mlot" class="cc-in" placeholder="LOT">' +
-        fa2ExpQtyRow('u-mexp', 'u-mqty', 'u-mexpwarn') +
+        fa2ExpQtyRow('u-mexp', 'u-mqty') +
         '<div class="cc-sub2">For product that was never entered \u2014 on save you\u2019ll confirm where it came from and it\u2019s recorded as a late entry.</div>' +
         '<button id="u-addman" type="button" class="cc-mini">Add to list</button>' +
       '</div>' +
@@ -4137,7 +4136,7 @@ var GLOSS = {
       var w = document.getElementById('u-manwrap'); w.hidden = !w.hidden;
       if (!w.hidden) document.getElementById('u-mref').focus();
     });
-    fa2ExpWire('u-mexp', 'u-mexpwarn');
+    fa2ExpWire('u-mexp');
     document.getElementById('u-mref').addEventListener('input', function (e) {
       var d = document.getElementById('u-mdesc');
       if (d && !d.value) { var dv = fa2DescOf(e.target.value); if (dv) d.value = dv; }
@@ -4162,7 +4161,7 @@ var GLOSS = {
       ['u-mref', 'u-mdesc', 'u-mlot'].forEach(function (id) { document.getElementById(id).value = ''; });
       document.getElementById('u-mexp').value = fa2Today();
       document.getElementById('u-mqty').value = '1';
-      fa2ExpWire('u-mexp', 'u-mexpwarn');
+      fa2ExpWire('u-mexp');
       document.getElementById('u-mref').focus();
     });
     function drawPick() {
