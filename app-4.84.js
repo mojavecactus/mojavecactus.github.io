@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.83';
+  var APPVER = '4.84';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3005,7 +3005,7 @@ var GLOSS = {
     location.replace('#/');
   }
   // ---- F&A Inventory v2 (fa2) — live event-sourced stock via the TBX FA Hub ----
-  var FA2 = { creds: null, cache: null, form: null, adminPw: '', pend: 0 };
+  var FA2 = { creds: null, cache: null, form: null, adminPw: '', pend: 0, gen: 0 };
   function fa2Save(c) { FA2.creds = c; try { localStorage.setItem('tbx_fa2', JSON.stringify(c)); } catch (e) {} }
   function fa2Creds() {
     if (FA2.creds) return FA2.creds;
@@ -3044,7 +3044,7 @@ var GLOSS = {
     try { FA2.cache = JSON.parse(localStorage.getItem('tbx_fa2_cache') || 'null'); } catch (e) { FA2.cache = null; }
     return FA2.cache;
   }
-  function fa2CacheSet(d) { if (!fa2Sane(d)) return; FA2.cache = { t: Date.now(), d: d }; try { localStorage.setItem('tbx_fa2_cache', JSON.stringify(FA2.cache)); } catch (e) {} }
+  function fa2CacheSet(d) { if (!fa2Sane(d)) return; if (d.teams) fa2TeamsSave(d.teams); FA2.cache = { t: Date.now(), d: d }; try { localStorage.setItem('tbx_fa2_cache', JSON.stringify(FA2.cache)); } catch (e) {} }
   // A read that comes back ok:true but without a master array (seen when the
   // server is mid-rebuild) must never be cached or rendered — one bad payload
   // would otherwise blank every screen until the cache expired.
@@ -3083,9 +3083,17 @@ var GLOSS = {
     return 'ok';
   }
   function fa2Who() { return fa2IsFA() ? (FA2.faName || '') : (CC.dev || ''); }
+  // Kept out of the read cache on purpose: that cache is wiped after every save,
+  // and the roster must still fill the chip lists on the very next screen.
+  function fa2TeamsSave(list) {
+    if (!list || !list.length) return;
+    FA2.teamList = list;
+    try { localStorage.setItem('tbx_fa2_teams', JSON.stringify(list)); } catch (e) {}
+  }
   function fa2Teams(role) {
-    var d = fa2CacheGet();
-    var t = (d && d.d && d.d.teams) || [];
+    var t = FA2.teamList;
+    if (!t) { try { t = JSON.parse(localStorage.getItem('tbx_fa2_teams') || 'null'); } catch (e) { t = null; } FA2.teamList = t; }
+    if (!t || !t.length) { var d = fa2CacheGet(); t = (d && d.d && d.d.teams) || []; }
     return t.filter(function (x) { return x.role === role; }).map(function (x) { return x.name; });
   }
   // pending (idempotent retry) queue: one batch at a time
@@ -3172,6 +3180,38 @@ var GLOSS = {
     });
   }
 
+  /* ---------- status pill (survives navigation; drawn wherever a host exists) ---------- */
+  function fa2Flash(state, msg, retry) {
+    FA2.flash = { state: state, msg: msg, retry: retry || null };
+    fa2FlashDraw();
+  }
+  function fa2FlashClear() { FA2.flash = null; clearTimeout(FA2.flashTO); fa2FlashDraw(); }
+  function fa2FlashDraw() {
+    var host = document.getElementById('fa2-flash'); if (!host) return;
+    var fl = FA2.flash;
+    clearTimeout(FA2.flashTO);
+    if (!fl) { host.hidden = true; host.innerHTML = ''; return; }
+    host.className = 'fa2-flash ' + fl.state;
+    host.innerHTML = '<span class="fa2-fl-dot"></span><span>' + esc(fl.msg) + '</span>' +
+      (fl.retry ? '<button type="button" id="fa2-flgo" class="cc-link fa2-fl-act">Retry</button>' : '');
+    host.hidden = false;
+    if (fl.retry) document.getElementById('fa2-flgo').addEventListener('click', function () { var r = fl.retry; fa2FlashClear(); r(); });
+    // Success clears itself once it has actually been on screen for a few seconds.
+    if (fl.state === 'ok') FA2.flashTO = setTimeout(function () { if (FA2.flash && FA2.flash.state === 'ok') fa2FlashClear(); }, 6000);
+  }
+  // The drop is sent in the background so the phone can leave the scanner screen
+  // immediately; the pill on Home reports processing / saved / failed-with-retry.
+  function fa2AddRun(evs, label, lines, units) {
+    fa2Flash('busy', 'Inventory add processing\u2026');
+    fa2Submit(evs, label, null).then(function () {
+      fa2Flash('ok', 'Inventory add saved \u2014 ' + lines + ' item' + (lines === 1 ? '' : 's') + ' \u00b7 ' + units + ' unit' + (units === 1 ? '' : 's'));
+      if (CC.view === 'fa2home') fa2HomeLoad(true);
+      else if (CC.view === 'fa2onhand') fa2OnHandLoad(true);
+    }, function (e) {
+      fa2Flash('bad', fa2FailMsg(e, 'Inventory add didn\u2019t save.'), function () { fa2AddRun(evs, label, lines, units); });
+    });
+  }
+
   /* ---------- Home ---------- */
   function fa2Home() {
     var fa = fa2IsFA();
@@ -3198,6 +3238,7 @@ var GLOSS = {
     render(
       '<div class="card cc-card">' +
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
+        '<div id="fa2-flash" class="fa2-flash" hidden></div>' +
         '<h2 class="cc-h">F&amp;A Inventory <em class="fa2-em">v2</em></h2>' +
         '<div class="cc-sub">' + (fa ? 'F&amp;A view \u2014 send-backs only. Everything else is read-only.' : 'Live field stock \u2014 everything handed to the Foot &amp; Ankle team.') + '</div>' +
         '<div id="fa2-pills" class="fa2-pills"></div>' +
@@ -3208,13 +3249,15 @@ var GLOSS = {
     go('fa2-onhand', '#/fa2/onhand'); go('fa2-hist', '#/fa2/history'); go('fa2-send', '#/fa2/send');
     go('fa2-trans', '#/fa2/trans'); go('fa2-add', '#/fa2/add'); go('fa2-ret', '#/fa2/return'); go('fa2-use', '#/fa2/use'); go('fa2-adm', '#/fa2/admin');
     document.getElementById('fa2-rf').addEventListener('click', function () { fa2HomeLoad(true); });
+    fa2FlashDraw();
     fa2HomeLoad(false);
   }
   function fa2HomeLoad(force) {
     var p = document.getElementById('fa2-pills'), m = document.getElementById('fa2-msg');
     if (p && !p.innerHTML) p.innerHTML = '<span class="cc-pill">Loading\u2026</span>';
-    fa2Load(force).then(function (d) {
-      if (CC.view !== 'fa2home') return;
+    var g = ++FA2.gen;
+    return fa2Load(force).then(function (d) {
+      if (CC.view !== 'fa2home' || g !== FA2.gen) return;
       var units = 0, soon = 0, exp = 0;
       (d.master || []).forEach(function (r) {
         var q = fa2Num(r[4]); units += q;
@@ -3233,7 +3276,7 @@ var GLOSS = {
         if (ts && n) ts.innerHTML = '<b class="fa2-badge">' + n + ' pending</b> \u2014 tap to review';
       }).catch(function () {});
     }).catch(function () {
-      if (CC.view !== 'fa2home') return;
+      if (CC.view !== 'fa2home' || g !== FA2.gen) return;
       if (p) p.innerHTML = '';
       if (m) m.textContent = 'Couldn\u2019t reach the server \u2014 check signal and try again.';
     });
@@ -3397,12 +3440,13 @@ var GLOSS = {
     fa2OnHandLoad(false);
   }
   function fa2OnHandLoad(force) {
-    fa2Load(force).then(function (d) {
-      if (CC.view !== 'fa2onhand') return;
+    var g = ++FA2.gen;
+    return fa2Load(force).then(function (d) {
+      if (CC.view !== 'fa2onhand' || g !== FA2.gen) return;
       FA2.ohD = d;
       fa2OnHandDraw();
     }).catch(function () {
-      if (CC.view !== 'fa2onhand') return;
+      if (CC.view !== 'fa2onhand' || g !== FA2.gen) return;
       var el = document.getElementById('fa2-list');
       if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
     });
@@ -3838,13 +3882,13 @@ var GLOSS = {
           accountName: f.rb === 'Account' ? f.accName.trim() : '', accountLocation: f.rb === 'Account' ? f.accLoc.trim() : '',
           eventDate: f.date, note: (f.note || '').trim(), entryMethod: p.src === 'scan' ? 'scan' : 'manual', enteredBy: fa2Who() };
       });
-      fa2Submit(evs, 'add-' + f.drop.trim() + '-' + f.date, document.getElementById('a2-go'))
-        .then(function () {
-          ccStop();
-          FA2.form = null; FA2.a2 = { items: {}, order: [] };
-          location.hash = '#/fa2';
-        })
-        .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); var b = document.getElementById('a2-go'); if (b) { b.disabled = false; b.textContent = 'Save drop'; } });
+      var lines = t.order.length, units = 0;
+      t.order.forEach(function (k) { units += t.items[k].qty; });
+      var gb = document.getElementById('a2-go'); if (gb) { gb.disabled = true; gb.textContent = 'Saving\u2026'; }
+      ccStop();
+      FA2.form = null; FA2.a2 = { items: {}, order: [] }; FA2.a2api = null;
+      fa2AddRun(evs, 'add-' + f.drop.trim() + '-' + f.date, lines, units);
+      location.hash = '#/fa2';
     });
   }
 
@@ -4393,7 +4437,7 @@ var GLOSS = {
         '<div id="a-out" class="cc-sub2"></div>';
       function saveTeams() {
         fa2Call('admin', { adminPw: FA2.adminPw, op: 'teams_set', rows: FA2.teams }).then(function (j) {
-          if (j && j.ok) { FA2.teams = j.teams; fa2CacheKill(); fa2AdminLoad(); var o = document.getElementById('a-out'); if (o) { var msg = []; if (j.sharing) msg.push('Sheet access synced' + (j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : '')); if (j.welcomed && j.welcomed.length) msg.push('Welcome email sent to ' + j.welcomed.join(', ')); if (j.welcomeErrors && j.welcomeErrors.length) msg.push('Email issues: ' + j.welcomeErrors.join('; ')); if (j.sharing && j.sharing.errors.length) msg.push('Access issues: ' + j.sharing.errors.join('; ')); o.textContent = msg.join(' \u00b7 ') + '.'; } }
+          if (j && j.ok) { FA2.teams = j.teams; fa2TeamsSave(j.teams); fa2CacheKill(); fa2AdminLoad(); var o = document.getElementById('a-out'); if (o) { var msg = []; if (j.sharing) msg.push('Sheet access synced' + (j.sharing.added.length ? ' \u2014 added ' + j.sharing.added.join(', ') : '')); if (j.welcomed && j.welcomed.length) msg.push('Welcome email sent to ' + j.welcomed.join(', ')); if (j.welcomeErrors && j.welcomeErrors.length) msg.push('Email issues: ' + j.welcomeErrors.join('; ')); if (j.sharing && j.sharing.errors.length) msg.push('Access issues: ' + j.sharing.errors.join('; ')); o.textContent = msg.join(' \u00b7 ') + '.'; } }
           else fa2Err('fa2-err', 'Save failed.');
         }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
       }

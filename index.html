@@ -440,6 +440,15 @@ body.cc-fixed #cclist{flex:1; min-height:0; overflow-y:auto; -webkit-overflow-sc
 /* F&A v2 — full-width like the catalog (no outer panel), highlighted section bands, visible refresh */
 .cc-card{position:relative;}
 .cc-in[hidden], .cc-in[hidden=""]{display:none;}
+.fa2-flash{display:flex; align-items:center; gap:9px; margin:0 0 12px; padding:11px 52px 11px 12px; border-radius:12px; font-size:13.5px; font-weight:700; border:1px solid transparent;}
+.fa2-flash[hidden]{display:none;}
+.fa2-flash.busy{background:rgba(90,150,220,.16); border-color:rgba(90,150,220,.45); color:#9db8ff;}
+.fa2-flash.ok{background:rgba(90,200,120,.18); border-color:rgba(90,200,120,.5); color:#7ed99b;}
+.fa2-flash.bad{background:rgba(240,90,90,.18); border-color:rgba(240,90,90,.5); color:#f28b8b;}
+.fa2-fl-dot{width:10px; height:10px; border-radius:50%; background:currentColor; flex:0 0 auto;}
+.fa2-flash.busy .fa2-fl-dot{animation:fa2pulse 1s ease-in-out infinite;}
+@keyframes fa2pulse{0%,100%{opacity:.2} 50%{opacity:1}}
+.fa2-flash .fa2-fl-act{margin-left:auto; color:inherit; font-weight:800;}
 body.fa2-wide #content > .card.cc-card{max-width:none; margin:0; padding:0; background:transparent; border:0; text-align:left;}
 body.fa2-wide .cc-h{text-align:left; margin:2px 0 4px; padding-right:46px;}
 body.fa2-wide .cc-sub{text-align:left;}
@@ -846,6 +855,6 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 })();
 </script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.83.js"></script>
+<script src="app-4.84.js"></script>
 </body>
 </html>

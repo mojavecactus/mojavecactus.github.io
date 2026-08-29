@@ -170,17 +170,58 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     // failure injection: hub applies then connection dies
     hub.failNext = { action: 'batch', mode: 'abort-after-apply' };
     const recBefore = hub.events('Received').length;
-    await page.click('#a2-go');
-    await page.waitForFunction(() => location.hash === '#/fa2' || /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
-    const recovered = await page.evaluate(() => location.hash === '#/fa2');
-    bug('S2l lost reply after apply: baseline asks for a retry / fixed probes the ledger and completes', !recovered, recovered, 'recovered=' + recovered);
-    if (!recovered) { await page.click('#a2-go'); await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 10000 }); }
+    if (FIXED) {
+      hub.delayMs = 1200;
+      await page.click('#a2-go');
+      await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 3000 });
+      const early = await page.evaluate(() => ({ hash: location.hash, flash: (document.getElementById('fa2-flash') || {}).innerText, cls: (document.getElementById('fa2-flash') || {}).className, hidden: (document.getElementById('fa2-flash') || {}).hidden }));
+      check('R8a Save leaves the scanner for Home immediately, pill says processing', early.hash === '#/fa2' && !early.hidden && /Inventory add processing/.test(early.flash) && /busy/.test(early.cls), JSON.stringify(early));
+      await page.waitForFunction(() => /Inventory add saved/.test((document.getElementById('fa2-flash') || {}).innerText || ''), null, { timeout: 15000 });
+      await page.waitForFunction(() => /17 on hand/.test((document.getElementById('fa2-pills') || {}).innerText || ''), null, { timeout: 15000 }).catch(() => {});
+      const done = await page.evaluate(() => ({ flash: document.getElementById('fa2-flash').innerText.replace(/\s+/g, ' '), cls: document.getElementById('fa2-flash').className, pills: document.getElementById('fa2-pills').innerText.replace(/\s+/g, ' ') }));
+      check('R8b Pill turns to saved (with the line/unit count) and the counts refresh', /Inventory add saved — 1 item · 3 units/.test(done.flash) && /ok/.test(done.cls) && /17 on hand/.test(done.pills), JSON.stringify(done));
+      hub.delayMs = 0;
+    } else {
+      await page.click('#a2-go');
+      await page.waitForFunction(() => location.hash === '#/fa2' || /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
+      if (!(await page.evaluate(() => location.hash === '#/fa2'))) { await page.click('#a2-go'); await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 10000 }); }
+    }
+    bug('S2l lost reply after apply: baseline blocks on the scanner screen / fixed reports on Home', !FIXED, FIXED, 'save is now a background hand-off');
     const addB = hub.batches().filter(x => x.events.some(e => e.dropName === 'Bridgeport drop'));
     check('S2m Add never double-applies (one drop, single opId)', hub.events('Received').length === recBefore + 1 && new Set(addB.map(x => x.opId)).size === 1, 'batches=' + addB.length + ' received=' + (hub.events('Received').length - recBefore));
     const rec = hub.events('Received').slice(-1)[0];
     check('S2n Received event carries drop fields', rec.dropName === 'Bridgeport drop' && rec.from === 'Matt' && rec.receivedBy === 'Katie F' && rec.note === 'note here' && rec.qty === 3 && rec.entryMethod === 'manual' && rec.enteredBy === 'Nate', JSON.stringify({ dropName: rec.dropName, from: rec.from, receivedBy: rec.receivedBy, note: rec.note, qty: rec.qty, exp: rec.exp, entryMethod: rec.entryMethod, enteredBy: rec.enteredBy }));
     await page.waitForSelector('#fa2-pills .cc-pill.ok', { timeout: 10000 });
     check('S2o Home pills refresh after add (cache killed): 17 on hand', /17 on hand/.test(await text(page, '#fa2-pills')), await text(page, '#fa2-pills'));
+    if (FIXED) {
+      // Hard failure: reply lost AND the landed-probe can't reach the hub → pill offers Retry.
+      await go(page, '#/fa2/add', '#fa2-drop');
+      const chipsAfterSave = await page.locator('#fa2-rb .fa2-chip').allInnerTexts();
+      check('R8f Roster chips survive the post-save cache wipe (team list persisted separately)', chipsAfterSave.indexOf('Katie F') > -1, chipsAfterSave.join(','));
+      await page.fill('#fa2-drop', 'Failed drop'); await pickChip(page, 'fa2-from', 'Mia'); await pickChip(page, 'fa2-rb', 'Katie F');
+      await page.click('#fa2-go'); await page.waitForSelector('#a2-go', { timeout: 10000 });
+      await page.click('#a2-man'); await page.fill('#a2-ref', '0130'); await page.fill('#a2-lot', 'FAILLOT'); await page.fill('#a2-exp', '2028-01-31'); await page.click('#a2-addman');
+      hub.abortNext = true; hub.abortReads = 1;
+      await page.click('#a2-go');
+      await page.waitForFunction(() => /didn/.test((document.getElementById('fa2-flash') || {}).innerText || ''), null, { timeout: 15000 });
+      const bad = await page.evaluate(() => ({ hash: location.hash, cls: document.getElementById('fa2-flash').className, txt: document.getElementById('fa2-flash').innerText.replace(/\s+/g, ' '), retry: !!document.getElementById('fa2-flgo') }));
+      check('R8c A failed add shows a red pill on Home with a Retry action', bad.hash === '#/fa2' && /bad/.test(bad.cls) && /didn/.test(bad.txt) && bad.retry, JSON.stringify(bad));
+      const hit = await page.evaluate(() => { const b = document.getElementById('fa2-flgo'); const r = b.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { onTop: top === b || b.contains(top), over: top && (top.id || top.className) }; });
+      check('R8g Retry is tappable — not buried under the ↻ refresh button', hit.onTop, JSON.stringify(hit));
+      const failBefore = hub.events('Received').filter(e => e.lot === 'FAILLOT').length;
+      await page.click('#fa2-flgo');
+      await page.waitForFunction(() => /Inventory add saved/.test((document.getElementById('fa2-flash') || {}).innerText || ''), null, { timeout: 15000 });
+      const failB = hub.batches().filter(x => x.events.some(e => e.lot === 'FAILLOT'));
+      check('R8d Retry from the pill saves once (same opId, no duplicate)', hub.events('Received').filter(e => e.lot === 'FAILLOT').length === failBefore + 1 && new Set(failB.map(x => x.opId)).size === 1, 'attempts=' + failB.length + ' events=' + hub.events('Received').filter(e => e.lot === 'FAILLOT').length);
+      await page.waitForFunction(() => !document.getElementById('fa2-flash') || document.getElementById('fa2-flash').hidden, null, { timeout: 12000 });
+      check('R8e Saved pill clears itself after a few seconds', true);
+      // clean up so later on-hand counts stay predictable
+      await go(page, '#/fa2/return', '#fa2-pick .fa2-pk');
+      await pickChip(page, 'fa2-rty', 'Written Off');
+      await page.locator('#fa2-pick .fa2-pk', { hasText: 'FAILLOT' }).click();
+      await page.click('#fa2-go'); await page.waitForSelector('.k-ban', { timeout: 10000 });
+      await go(page, '#/fa2', '#fa2-pills .cc-pill.ok');
+    }
 
     // ---------------- S4: Remove/Return idempotency ----------------
     await go(page, '#/fa2/return', '#fa2-pick .fa2-pk');
@@ -201,8 +242,9 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.click('#fa2-go');
     await page.waitForFunction(() => !!document.querySelector('.k-ban') || /tap again to retry/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
     if (!(await page.locator('.k-ban').count())) { await page.click('#fa2-go'); await page.waitForSelector('.k-ban', { timeout: 10000 }); }
-    const rb = hub.batches().filter(x => x.events.some(e => e.type === 'Written Off'));
-    bug('S4b Remove/Return lost reply → double-applied (new opId per tap)', rb.length === 2 && rb[0].opId !== rb[1].opId && hub.events('Written Off').length === 2, hub.events('Written Off').length === 1 && new Set(rb.map(x => x.opId)).size === 1, 'opIds ' + rb.map(x => x.opId.slice(0, 8)).join('/') + ' writtenOff events=' + hub.events('Written Off').length + ' (correct=1)');
+    const rb = hub.batches().filter(x => x.events.some(e => e.type === 'Written Off' && e.lot === 'LOTC'));
+    const woC = hub.events('Written Off').filter(e => e.lot === 'LOTC').length;
+    bug('S4b Remove/Return lost reply → double-applied (new opId per tap)', rb.length === 2 && rb[0].opId !== rb[1].opId && woC === 2, woC === 1 && new Set(rb.map(x => x.opId)).size === 1, 'opIds ' + rb.map(x => x.opId.slice(0, 8)).join('/') + ' writtenOff(LOTC)=' + woC + ' (correct=1)');
     if (FIXED) {
       await pickChip(page, 'fa2-rty', 'Written Off');
       await page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace D' }).click();
@@ -443,7 +485,9 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     }
     await page.click('#a2-go');
     await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 10000 });
-    const scanEv = hub.events('Received').slice(-1)[0];
+    if (FIXED) await page.waitForFunction(() => /Inventory add saved/.test((document.getElementById('fa2-flash') || {}).innerText || ''), null, { timeout: 15000 });
+    else await sleep(500);
+    const scanEv = hub.events('Received').filter(e => e.lot === 'ZLOT1').slice(-1)[0] || {};
     check('S10g Scanned exp with DD=00 is sent as month-only "2027-06" (manual path enforces full date)', scanEv.exp === '2027-06' && scanEv.entryMethod === 'scan' && scanEv.lot === 'ZLOT1', JSON.stringify({ exp: scanEv.exp, lot: scanEv.lot, entryMethod: scanEv.entryMethod }));
 
     check('S-errors no uncaught page errors during sports flows', !(hub.pageErrors && hub.pageErrors.length), (hub.pageErrors || []).join(' || ').slice(0, 300));
