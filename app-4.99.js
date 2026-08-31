@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.98';
+  var APPVER = '4.99';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2515,7 +2515,7 @@ var GLOSS = {
         (TR.hub ? '<div class="cc-sub"><button id="ct-mg" class="cc-link" type="button">Manage this team</button></div>' : '') +
         (ccLearnCount() ? '<div class="cc-sub">' + ccLearnCount() + ' new barcode' + (ccLearnCount() > 1 ? 's' : '') + ' learned on this phone <button id="ct-learn" class="cc-link" type="button">copy</button></div>' : '') +
         '<button id="ct-cc" class="ct-big">Cycle Count<span>Trunk &amp; closet counts by location</span></button>' +
-        (TR.fa ? '<button id="ct-fa2" class="ct-big">F&amp;A Inventory <em class="fa2-em">v2</em><span>Live drops, usage, send-backs &amp; history</span></button>' : '') +
+        (TR.fa ? '<button id="ct-fa2" class="ct-big">F&amp;A Inventory <em class="fa2-em">beta</em><span>Live drops, usage, send-backs &amp; history</span></button>' : '') +
       '</div>');
     document.getElementById('ct-cc').addEventListener('click', function () { location.hash = TR.id === 'ct' ? '#/cc' : '#/team/' + TR.id + '/cc'; });
     var mg = document.getElementById('ct-mg');
@@ -3078,7 +3078,7 @@ var GLOSS = {
     if (!ctEnsure(then)) return false;
     if (!fa2Creds()) {
       CC.creds = null; CC.ret = then;
-      CC.gateMsg = 'One-time unlock \u2014 enter the CT password again to turn on F&A v2 on this phone.';
+      CC.gateMsg = 'One-time unlock \u2014 enter the CT password again to turn on F&A Inventory on this phone.';
       ccGate(); return false;
     }
     return true;
@@ -3262,7 +3262,7 @@ var GLOSS = {
   /* ---------- Home ---------- */
   function fa2Home() {
     var fa = fa2IsFA();
-    setTitle('F&A Inventory', 'v2'); backBtn.hidden = false;
+    setTitle('F&A Inventory', 'beta'); backBtn.hidden = false;
     ccStop();
     if (!fa2Ensure(fa2Home)) return; fa2Wide(true);
     CC.view = 'fa2home';
@@ -3286,7 +3286,7 @@ var GLOSS = {
       '<div class="card cc-card">' +
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<div id="fa2-flash" class="fa2-flash" hidden></div>' +
-        '<h2 class="cc-h">F&amp;A Inventory <em class="fa2-em">v2</em></h2>' +
+        '<h2 class="cc-h">F&amp;A Inventory <em class="fa2-em">beta</em></h2>' +
         '<div class="cc-sub">' + (fa ? 'F&amp;A view \u2014 send-backs only. Everything else is read-only.' : 'Live field stock \u2014 everything handed to the Foot &amp; Ankle team.') + '</div>' +
         '<div id="fa2-pills" class="fa2-pills"></div>' +
         tiles +
