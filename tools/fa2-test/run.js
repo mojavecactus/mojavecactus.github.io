@@ -84,7 +84,11 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.waitForSelector('#fa2-pills .cc-pill.ok', { timeout: 10000 });
     const pills = await text(page, '#fa2-pills');
     check('S0 Home pills render from master', /14 on hand/.test(pills), pills.replace(/\n/g, ' | '));
-    if (FIXED) check('R19 Home and hub tile say beta, not v2', /beta/.test(await text(page, '.cc-h')) && !/v2/.test(await text(page, '.cc-h')), await text(page, '.cc-h'));
+    if (FIXED) check('R19 Home and hub tile say beta, not v2', /beta/i.test(await text(page, '.cc-h')) && !/v2/.test(await text(page, '.cc-h')), await text(page, '.cc-h'));
+    if (FIXED) {
+      const sup = await page.evaluate(() => { const em = document.querySelector('.cc-h .fa2-em'), h = document.querySelector('.cc-h'); const ce = getComputedStyle(em), ch = getComputedStyle(h); return { ratio: parseFloat(ce.fontSize) / parseFloat(ch.fontSize), va: ce.verticalAlign, tt: ce.textTransform, hdr: (document.querySelector('#title em') || {}).className }; });
+      check('R19b beta reads as a small superscript tag on the heading and the header', sup.ratio < 0.6 && sup.va === 'super' && sup.tt === 'uppercase' && sup.hdr === 'sup', JSON.stringify(sup));
+    }
     // Server statuses: A(2026-08 → Aug 31) = SEND BACK ≤2 MO, B = EXPIRED, D(2026-10-05) = SEND BACK ≤2 MO, C = OK
     note('S0 server statuses', JSON.stringify(hub.master().map(r => r[0] + ':' + r[5])));
     check('S1a Home "expired" pill counts only server-EXPIRED (B=3)', /3 expired/.test(pills), pills.replace(/\n/g, ' | '));

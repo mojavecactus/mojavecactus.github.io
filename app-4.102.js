@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.101';
+  var APPVER = '4.102';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -84,7 +84,7 @@ var GLOSS = {
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function setTitle(a, b) { title.innerHTML = b ? esc(a) + '<em>' + esc(b) + '</em>' : esc(a); }
+  function setTitle(a, b, cls) { title.innerHTML = b ? esc(a) + '<em' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(b) + '</em>' : esc(a); }
   function nrm(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
   function qparam(qs, key) {
     if (!qs) return '';
@@ -3272,7 +3272,7 @@ var GLOSS = {
   /* ---------- Home ---------- */
   function fa2Home() {
     var fa = fa2IsFA();
-    setTitle('F&A Inventory', 'beta'); backBtn.hidden = false;
+    setTitle('F&A Inventory', 'beta', 'sup'); backBtn.hidden = false;
     ccStop();
     if (!fa2Ensure(fa2Home)) return; fa2Wide(true);
     CC.view = 'fa2home';

@@ -65,6 +65,7 @@ html,body{margin:0; background:var(--ink); color:var(--bone);
 #bar .t{flex:1; text-align:center; font-size:19px; font-weight:700; letter-spacing:.2px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 #bar .t em{font-style:normal; color:var(--amber);}
+.t em.sup{font-size:.5em; font-weight:700; letter-spacing:.06em; text-transform:uppercase; vertical-align:super; line-height:0; margin-left:.15em;}
 #bar::after{content:""; display:block; height:3px; background:var(--amber);
   margin:8px -14px 0; border-radius:0;}
 .navbtn{width:52px; height:52px; border:1px solid var(--line); background:var(--panel);
@@ -429,7 +430,7 @@ body.cc-fixed #cclist{flex:1; min-height:0; overflow-y:auto; -webkit-overflow-sc
 .ct-big span{display:block; margin-top:3px; font-weight:400; font-size:12.5px; color:var(--muted);}
 .ct-soon{opacity:.5; pointer-events:none;}
 .cc-pill.bad{background:rgba(208,106,104,.18); color:#FFB3AE;}
-.fa2-em{color:var(--amber); font-style:normal;}
+.fa2-em{color:var(--amber); font-style:normal; font-size:.5em; font-weight:700; letter-spacing:.06em; text-transform:uppercase; vertical-align:super; line-height:0; margin-left:.15em;}
 .fa2-pills{display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:4px 0 6px; min-height:24px;}
 .fa2-row{display:flex; justify-content:space-between; align-items:center; gap:10px; text-align:left; border:1px solid var(--line); background:#242424; border-radius:12px; padding:10px 12px; margin-top:8px;}
 .fa2-t{font-weight:700; font-size:14.5px;}
@@ -856,6 +857,6 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 })();
 </script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.101.js"></script>
+<script src="app-4.102.js"></script>
 </body>
 </html>
