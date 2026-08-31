@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.99';
+  var APPVER = '4.100';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -4757,6 +4757,7 @@ var GLOSS = {
       '<div class="fa2-mcard" style="max-height:80vh;overflow:auto">' +
         '<div class="fa2-t">Send welcome email</div>' +
         '<div class="fa2-s" style="margin:6px 0 4px">App link, the password for their side, the live sheet, the on-hand list and your contact details.</div>' +
+        '<div class="fa2-s" style="margin:0 0 6px;color:#f0c060">Stryker addresses: the email is sent, but Stryker\u2019s mail filter can quarantine it before it reaches their inbox. If someone doesn\u2019t see it, have them check quarantine or ask IT to allow syksmtoolbox@gmail.com.</div>' +
         group('sports', 'Sports team') + group('fa', 'F&amp;A team') +
         '<div class="fa2-lab">Or send to someone not on a team</div>' +
         '<input id="sw-man" class="cc-in" placeholder="name@example.com">' +
@@ -4788,7 +4789,8 @@ var GLOSS = {
         wrap.remove();
         kitBanner(document.querySelector('.cc-card'), done + ' welcome email' + (done === 1 ? '' : 's') + ' sent' + (bad.length ? ' \u00b7 ' + bad.length + ' failed' : ''));
         var o = document.getElementById('a-out');
-        if (o) o.textContent = 'Welcome sent to ' + done + ' recipient' + (done === 1 ? '' : 's') + (bad.length ? ' \u2014 failed: ' + bad.join(', ') : '') + '.';
+        var corp = to.filter(function (p) { return /@stryker\.com$/i.test(p.email); }).length;
+        if (o) o.textContent = 'Welcome sent to ' + done + ' recipient' + (done === 1 ? '' : 's') + (bad.length ? ' \u2014 failed: ' + bad.join(', ') : '') + '.' + (corp ? ' Stryker addresses may land in quarantine \u2014 confirm they received it.' : '');
       });
     });
   }
