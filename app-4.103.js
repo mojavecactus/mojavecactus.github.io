@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.102';
+  var APPVER = '4.103';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3560,6 +3560,7 @@ var GLOSS = {
     ccStop();
     if (!fa2Ensure(fa2History)) return; fa2Wide(true);
     CC.view = 'fa2hist';
+    fa2KitCss();
     render(
       '<div class="card cc-card">' +
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
