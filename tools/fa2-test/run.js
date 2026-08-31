@@ -305,7 +305,18 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await card.locator('.f2sub').click(); await sleep(250);
       check('R11h Tapping a card opens a quantity stepper on that card', (await card.locator('.pk-m').count()) === 1 && (await card.locator('.pk-p').count()) === 1 && (await card.locator('.pk-add').count()) === 1 && (await card.locator('select').count()) === 0);
       const vis = await page.evaluate(() => { const q = document.querySelector('.pk-qty'); const r = q.getBoundingClientRect(); const bar = document.querySelector('.k-bar').getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), barTop: Math.round(bar.top), vh: window.innerHeight }; });
-      check('R11h2 The picker scrolls clear of the sticky Submit bar', vis.top > 0 && vis.bottom <= vis.barTop, JSON.stringify(vis));
+      check('R11h2 The picker is fully visible above the sticky Submit bar', vis.top > 0 && vis.bottom <= vis.barTop, JSON.stringify(vis));
+      // tapping the TOP card must open the stepper under it without moving the card
+      await card.locator('.f2sub').click(); await sleep(250); // collapse
+      const topBefore = await page.evaluate(() => Math.round(document.querySelector('#fa2-pick .fa2-pk').getBoundingClientRect().top));
+      await page.locator('#fa2-pick .fa2-pk').first().locator('.f2sub').click(); await sleep(300);
+      const topAfter = await page.evaluate(() => Math.round(document.querySelector('#fa2-pick .fa2-pk').getBoundingClientRect().top));
+      check('R20a Opening the top card keeps it in place (no recentre jump)', Math.abs(topAfter - topBefore) <= 2 && (await page.locator('#fa2-pick .fa2-pk').first().locator('.pk-qty').count()) === 1, 'top ' + topBefore + ' -> ' + topAfter);
+      await page.locator('#fa2-pick .fa2-pk').nth(1).locator('.f2sub').click(); await sleep(250);
+      const openCount = await page.locator('#fa2-pick .pk-qty').count();
+      check('R20b Opening another card closes the first (one picker at a time)', openCount === 1 && (await page.locator('#fa2-pick .fa2-pk').nth(1).locator('.pk-qty').count()) === 1, 'open=' + openCount);
+      await page.locator('#fa2-pick .fa2-pk').nth(1).locator('.f2sub').click(); await sleep(200); // collapse again
+      await card.locator('.f2sub').click(); await sleep(250); // reopen InSpace C for the checks below
       const geo = await page.evaluate(() => { const m = document.querySelector('.pk-m').getBoundingClientRect(); const a = document.querySelector('.pk-add').getBoundingClientRect(); return { minus: Math.round(m.width), add: Math.round(a.width), overlap: Math.round(m.right) > Math.round(a.left) }; });
       check('R11h3 Stepper and Add share the row (neither is crushed)', geo.minus >= 34 && geo.add >= 60 && !geo.overlap, JSON.stringify(geo));
       check('R11i Stepper starts at 1 with minus disabled', (await card.locator('.pk-n').innerText()) === '1' && (await card.locator('.pk-m').isDisabled()), await card.locator('.pk-n').innerText());
@@ -496,6 +507,32 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await go(page, '#/fa2/history', '#fa2-list .h-ev');
     await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(700);
     if (FIXED) {
+      // whole-drop correction on a dedicated two-line drop that was received by the wrong person
+      hub.seed([
+        { type: 'Received', ref: '0130', desc: 'InSpace C', lot: 'WRONGLOC1', exp: '2027-08-31', qty: 2, dropName: 'Rescan drop', from: 'Matt', receivedBy: 'Katie F', eventDate: '2026-08-28', opId: 'seed-rescan' },
+        { type: 'Received', ref: '0131', desc: 'InSpace D', lot: 'WRONGLOC2', exp: '2027-08-31', qty: 3, dropName: 'Rescan drop', from: 'Matt', receivedBy: 'Katie F', eventDate: '2026-08-28', opId: 'seed-rescan' }]); // one save = one History card
+      await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(900);
+      const totalBefore = hub.master().reduce((a, r) => a + Number(r[4]), 0);
+      const bCard = page.locator('#fa2-list .h-ev', { hasText: 'Rescan drop' }).first();
+      const linesBefore = hub.events('Received').filter(e => e.dropName === 'Rescan drop' && !e.flags).length;
+      await bCard.locator('.h-gfix').click();
+      await page.waitForSelector('#gf-go', { timeout: 5000 });
+      const pre = await page.evaluate(() => ({ drop: document.getElementById('gf-drop').value, rb: [].map.call(document.querySelectorAll('#gf-rb .fa2-chip.on, #gf-rb .fa2-chip[aria-pressed=true], #gf-rb .fa2-chip.sel'), c => c.textContent.trim()), why: document.getElementById('gf-why').value }));
+      check('R21a "Edit drop details" opens prefilled with the drop name', pre.drop === 'Rescan drop', JSON.stringify(pre));
+      await page.click('#gf-go');
+      check('R21b Requires an explanation', /explanation/i.test(await text(page, '#gf-err')), await text(page, '#gf-err'));
+      await pickChip(page, 'gf-rb', 'Account');
+      await page.fill('#gf-accn', 'Norwalk Hospital'); await page.fill('#gf-accl', 'OR core');
+      await page.fill('#gf-drop', 'Norwalk drop');
+      await page.fill('#gf-why', 'wrong location picked while scanning');
+      await page.click('#gf-go');
+      await page.waitForSelector('.k-ban', { timeout: 10000 });
+      const last = hub.batches().slice(-1)[0].events;
+      const voids = last.filter(e => e.type === 'Void').length, reps = last.filter(e => e.type === 'Received');
+      check('R21c Re-files every live line as Void + corrected Received (same count)', voids === linesBefore && reps.length === linesBefore && reps.every(e => e.dropName === 'Norwalk drop' && e.receivedBy === 'Norwalk Hospital' && e.accountLocation === 'OR core' && e.flags === 'Corrected' && e.linkedTo), JSON.stringify({ lines: linesBefore, voids, reps: reps.length, sample: reps[0] && [reps[0].dropName, reps[0].receivedBy, reps[0].from] }));
+      const onhandAfter = hub.master().reduce((a, r) => a + Number(r[4]), 0);
+      check('R21d On-hand total unchanged by the re-file (void + replacement net to zero)', onhandAfter === totalBefore && linesBefore === 2, 'before=' + totalBefore + ' after=' + onhandAfter + ' lines=' + linesBefore);
+      await page.waitForSelector('#fa2-list .h-ev', { timeout: 10000 });
       const usCard = page.locator('#fa2-list .h-ev', { hasText: 'US format drop' }).first();
       await usCard.click(); await usCard.locator('.h-fix').first().click();
       await page.waitForSelector('#fc-go', { timeout: 5000 });
@@ -649,6 +686,20 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       }
       const allOk = Object.keys(rf).every(k => rf[k] && rf[k][0] > 60 && rf[k][0] < 140 && rf[k][1] >= 370 && rf[k][2]);
       check('R5 ↻ present, visible and tappable at the top-right on all 9 sheet-backed screens', allOk, JSON.stringify(rf));
+      // every ↻ must visibly react: spins while loading, ticks when done
+      const fb = {};
+      for (const [n, h, sel] of [['home', '#/fa2', '#fa2-pills'], ['onhand', '#/fa2/onhand', '#fa2-list'], ['history', '#/fa2/history', '#fa2-list'], ['trans', '#/fa2/trans', '#fa2-list']]) {
+        await go(page, h, sel); await sleep(300);
+        hub.delayMs = 700;
+        await page.evaluate(() => document.getElementById('fa2-rf').click());
+        await sleep(200);
+        const spinning = await page.evaluate(() => document.getElementById('fa2-rf').classList.contains('spin'));
+        await page.waitForFunction(() => document.getElementById('fa2-rf').classList.contains('ok'), null, { timeout: 8000 }).catch(() => {});
+        const ticked = await page.evaluate(() => document.getElementById('fa2-rf').classList.contains('ok'));
+        hub.delayMs = 0;
+        fb[n] = spinning && ticked;
+      }
+      check('R5c ↻ spins while loading and ticks on completion (Home, On hand, History, Transactions)', Object.values(fb).every(Boolean), JSON.stringify(fb));
       // the refresh on Send must not stack pick handlers (qty must step by 1 after a refresh)
       await go(page, '#/fa2/send', '#fa2-pick .fa2-row');
       await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(600);
