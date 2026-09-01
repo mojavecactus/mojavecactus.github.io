@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.110';
+  var APPVER = '4.111';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -96,6 +96,25 @@ var GLOSS = {
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function skel(n, cls) { var o = ''; for (var i = 0; i < (n || 3); i++) o += '<div class="skel ' + (cls || 'row') + '"></div>'; return o; }
+  function emptyHTML(icon, title, sub, action) {
+    return '<div class="emp">' + (icon ? '<div class="ei">' + icon + '</div>' : '') + '<b>' + esc(title) + '</b>' +
+      (sub ? '<span>' + esc(sub) + '</span>' : '') + (action ? '<div class="ea">' + action + '</div>' : '') + '</div>';
+  }
+  // "2m ago" style; elements with data-since tick every 30s
+  function sinceText(ts) {
+    var t = typeof ts === 'number' ? ts : Date.parse(ts); if (!t) return '';
+    var d = Math.max(0, Date.now() - t), m = Math.round(d / 60000);
+    if (d < 45000) return 'just now';
+    if (m < 60) return m + 'm ago';
+    var hh = Math.round(m / 60); if (hh < 24) return hh + 'h ago';
+    return Math.round(hh / 24) + 'd ago';
+  }
+  function sinceHTML(ts, label) { var n = typeof ts === 'number' ? ts : Date.parse(ts); return n ? '<span class="since" data-since="' + n + '" data-label="' + esc(label || 'Synced') + '">' + esc(label || 'Synced') + ' ' + sinceText(n) + '</span>' : ''; }
+  setInterval(function () {
+    var els = document.querySelectorAll('[data-since]');
+    for (var i = 0; i < els.length; i++) els[i].textContent = els[i].getAttribute('data-label') + ' ' + sinceText(+els[i].getAttribute('data-since'));
+  }, 30000);
   function setTitle(a, b, cls) { title.innerHTML = b ? esc(a) + '<em' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(b) + '</em>' : esc(a); }
   function nrm(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
   function qparam(qs, key) {
@@ -195,6 +214,7 @@ var GLOSS = {
     var uf = e.target.closest('[data-unfav-route]');
     if (uf) {
       var rt = uf.getAttribute('data-unfav-route');
+      var wasFav = favs().filter(function (x) { return x.route === rt; })[0];
       try { localStorage.setItem('tbx_favs', JSON.stringify(favs().filter(function (x) { return x.route !== rt; }))); } catch (e2) {}
       uf.innerHTML = '&#9734;'; uf.classList.add('off');
       var uw = uf.closest('.rowwrap');
@@ -202,13 +222,16 @@ var GLOSS = {
         if (uw) uw.classList.add('bye');
         setTimeout(function () { if (content.classList.contains('homeview')) home(); }, 280);
       }, 240);
+      if (wasFav) toastMsg('Removed from Favorites', 3000, { action: { label: 'Undo', fn: function () { toggleFav(wasFav); if (content.classList.contains('homeview')) home(); } } });
       return;
     }
     var fso = e.target.closest('[data-fsort]');
     if (fso) { try { localStorage.setItem('tbx_fsort', fso.getAttribute('data-fsort')); } catch (e8) {} home(); return; }
     var cr = e.target.closest('[data-clearrec]');
     if (cr) {
+      var hadRec = recents();
       try { localStorage.removeItem('tbx_recents'); } catch (e6) {}
+      if (hadRec.length) toastMsg('Recents cleared', 3000, { action: { label: 'Undo', fn: function () { try { localStorage.setItem('tbx_recents', JSON.stringify(hadRec)); } catch (e9) {} if (content.classList.contains('homeview')) home(); } } });
       var rws = content.querySelectorAll('[data-unrec]');
       for (var ri = 0; ri < rws.length; ri++) { var rw = rws[ri].closest('.rowwrap'); if (rw) rw.classList.add('bye'); }
       setTimeout(function () { if (content.classList.contains('homeview')) home(); }, 300);
@@ -217,9 +240,11 @@ var GLOSS = {
     var ur = e.target.closest('[data-unrec]');
     if (ur) {
       var sk = ur.getAttribute('data-unrec');
+      var hadRec2 = recents();
       try {
         localStorage.setItem('tbx_recents', JSON.stringify(recents().filter(function (x) { return x.sku !== sk; })));
       } catch (e3) {}
+      toastMsg('Removed from Recents', 3000, { action: { label: 'Undo', fn: function () { try { localStorage.setItem('tbx_recents', JSON.stringify(hadRec2)); } catch (e9) {} if (content.classList.contains('homeview')) home(); } } });
       var uw2 = ur.closest('.rowwrap');
       if (uw2) uw2.classList.add('bye');
       setTimeout(function () { if (content.classList.contains('homeview')) home(); }, 300);
@@ -239,6 +264,8 @@ var GLOSS = {
     if (nav) {
       var go = nav.getAttribute('data-go');
       // variant chips ('chip link') swap the card in place, so Back exits to the list, not the prior variant
+      var ti = nav.classList.contains('rowitem') && /^#\/pn\//.test(go) ? nav.querySelector('.ti') : null;
+      VT_FROM = ti || null;
       if (nav.classList.contains('link')) { history.replaceState(null, '', go); route(); }
       else location.hash = go;
     }
@@ -371,7 +398,7 @@ var GLOSS = {
     var hits = searchAll(CURQ);
     if (!hits.length) {
       SFILT = null;
-      return '<div class="empty">No matches for &ldquo;' + esc(CURQ) + '&rdquo;. Try fewer letters or a part-number fragment.</div>';
+      return emptyHTML('&#x1F50D;', 'No matches for \u201c' + CURQ + '\u201d', 'Try fewer letters or a part-number fragment \u2014 dashes are optional.', '<button class="footlink" data-act="scan">Scan the barcode instead &#x203A;</button>');
     }
     var counts = {};
     hits.forEach(function (h) { (h.buckets || []).forEach(function (b) { counts[b] = (counts[b] || 0) + 1; }); });
@@ -392,11 +419,33 @@ var GLOSS = {
       (shown.length > CAP ? '<button class="showall" data-sall="1">Show all ' + shown.length + ' &#x203A;</button>' : '');
   }
   try { SSORT = localStorage.getItem('tbx_ssort') === 'sku' ? 'sku' : 'rel'; } catch (e0) {}
+  var VT_FROM = null;
+  function vtOK() {
+    return !!document.startViewTransition && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
   function render(browseHTML) {
     LAST_BROWSE = browseHTML;
-    content.classList.remove('homeview');
-    if (CURQ) { if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML; title.innerHTML = 'Search'; }
-    content.innerHTML = CURQ ? resultsHTML() : browseHTML;
+    var paint = function () {
+      content.classList.remove('homeview');
+      if (CURQ) { if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML; title.innerHTML = 'Search'; }
+      content.innerHTML = CURQ ? resultsHTML() : browseHTML;
+    };
+    var from = VT_FROM; VT_FROM = null;
+    if (from && from.isConnected && vtOK()) {
+      // Row -> card: the tapped title and the new h1 share a transition name for the morph.
+      from.style.viewTransitionName = 'tbx-title';
+      document.documentElement.classList.add('vt-on');
+      var t = document.startViewTransition(function () {
+        paint();
+        var h = content.querySelector('.card h1'); if (h) h.style.viewTransitionName = 'tbx-title';
+      });
+      t.finished.then(function () {
+        var h2 = content.querySelector('.card h1'); if (h2) h2.style.viewTransitionName = '';
+        document.documentElement.classList.remove('vt-on');
+      }, function () { document.documentElement.classList.remove('vt-on'); });
+      return;
+    }
+    paint();
     content.classList.remove('vt'); void content.offsetWidth; content.classList.add('vt');
   }
   function mark(s) {
@@ -596,7 +645,7 @@ var GLOSS = {
   var TILE_ICONS = {
     'Arthroscopy': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l6-6"/><path d="M8 13l3 3 9-9-3-3-9 9z"/><path d="M14 4l6 6"/><circle cx="18.5" cy="5.5" r="1" fill="#FDB515" stroke="none"/></svg>',
     'Allografts & Biologics': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c0-5 1.5-8 4.5-10.5"/><path d="M20 4.5c0 5.2-3.2 8.5-8 8.5 0-5.2 3.2-8.5 8-8.5z"/><path d="M4.5 8c3.4 0 5.5 2.3 5.5 6-3.4 0-5.5-2.3-5.5-6z"/></svg>',
-    'Disposables': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l9-4.5L21 8l-9 4.5L3 8z"/><path d="M3 8v8l9 4.5 9-4.5V8"/><path d="M12 12.5V20"/></svg>',
+    'Disposables': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12a1.5 1.5 0 0 1 1.5 1.5v15a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20V5A1.5 1.5 0 0 1 6 3.5z"/><path d="M4.5 8h15" stroke-dasharray="2 1.6"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>',
     'Implants': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3h5"/><path d="M12 3v2.5"/><path d="M9 5.5h6v10l-3 5.5-3-5.5v-10z"/><path d="M9 8.5h6M9 11.5h6M9 14.5h6"/></svg>',
     'Instruments': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.7 6.3a5 5 0 0 1-6.6 6.6L7 20a2.1 2.1 0 0 1-3-3l7.1-7.1a5 5 0 0 1 6.6-6.6L14.5 6.5l3 3 3.2-3.2z"/></svg>',
     'Suture': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3.5" width="9" height="12" rx="1.5"/><path d="M7.5 7h9M7.5 10h9M7.5 13h9"/><path d="M12 15.5c0 3 6.5 2 6.5 5.5"/></svg>',
@@ -1102,7 +1151,8 @@ var GLOSS = {
       return '<div class="rowwrap">' + rowHTML(pnRoute(r.sku), { t: r.label, sku: r.sku }, '') +
         '<button class="rwact rwx" data-unrec="' + esc(r.sku) + '" aria-label="Remove from recents">&#x2715;</button></div>';
     }).join('') + '</div>' : '';
-    render(favHTML + recHTML + '<div class="eyebrow">Browse</div><div class="tiles">' + tiles + '</div>' +
+    var hint = (!fv.length && !rc.length) ? '<div class="emp" style="padding:6px 12px 2px"><span>Cards you open show up here as Recents \u2014 tap &#9734; on any card to pin it to Favorites.</span></div>' : '';
+    render(hint + favHTML + recHTML + '<div class="eyebrow">Browse</div><div class="tiles">' + tiles + '</div>' +
       a2hsHTML() +
       '<div class="foot">Works offline once loaded &middot; v' + APPVER + ' &middot; ' + esc(D.built) +
       '<br><button class="footlink" data-go="#/about">About &amp; tips &#x203A;</button>' +
@@ -1759,9 +1809,11 @@ var GLOSS = {
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (j && j.ok && j.rows) {
+          if (j.sheetUrl && t !== 'cc') { try { ccLS('tbx_' + t + '_sheet', String(j.sheetUrl)); } catch (eS) {} var sl = document.querySelector('.sheetlink'); if (!sl && CC.view === 'cchome' && t === CC.tgt) { var sy0 = document.getElementById('cc-sync'); if (sy0) sy0.insertAdjacentHTML('afterend', sheetLinkHTML(j.sheetUrl)); } }
           // A flush that landed (or is in flight) while this GET ran has fresher
           // rows than this snapshot — keep the flush's base in that case.
           if (y.lastOk === startOk && !y.inflight) { ccSyncSt(t).base = j.rows; ccSyncSave(t, true); }
+          y.lastPull = Date.now();
           ccDerive(t); ccPill();
           return j;
         }
@@ -1813,6 +1865,11 @@ var GLOSS = {
       });
     } catch (eBoot) {}
   }, 0);
+  function sheetLinkHTML(url) { return url ? '<a class="sheetlink" href="' + esc(url) + '" target="_blank" rel="noopener">Open in Google Sheets &#x2197;</a>' : ''; }
+  function ccSheetUrl() {
+    if (CC.terr === 'ct') return (D.sheets || {}).cc || '';
+    return ccLS(terrKey('_sheet')) || '';
+  }
   function ccScreen() {
     setTitle('Cycle Count', ''); backBtn.hidden = false;
     ccStop();
@@ -1825,10 +1882,12 @@ var GLOSS = {
         '<div class="cc-sub">Counts by location \u2014 open one to keep adding, or start fresh.</div>' +
         '<button id="cc-new" class="cc-btn">Start new count</button>' +
         '<div id="cc-sync" class="cc-sync"></div>' +
-        '<div id="cc-cards" class="ctc-wrap"><div class="cc-empty">Loading counts\u2026</div></div>' +
+        sheetLinkHTML(ccSheetUrl()) +
+        '<div id="cc-cards" class="ctc-wrap">' + skel(3) + '</div>' +
       '</div>');
     document.getElementById('cc-new').addEventListener('click', function () { ccSession(); });
     document.getElementById('cc-rf').addEventListener('click', function () { ccHomeLoad(terrTgt(), true); });
+    CURREFRESH = function () { return ccHomeLoad(terrTgt(), true); };
     document.getElementById('cc-cards').addEventListener('click', function (e) {
       var c = e.target.closest ? e.target.closest('.ctc') : null; if (!c) return;
       var loc = c.dataset.loc; if (!loc) return;
@@ -1964,7 +2023,7 @@ var GLOSS = {
       '<div id="ccwrap">' +
         ccCamPanelHtml({ manualId: 'cc-manual', endId: 'cc-end' }) +
         '<div id="cchead"><span id="cc-locname">' + esc(CC.loc) + '</span><span id="cc-pill" class="cc-pill"></span><span id="cc-tot"></span></div>' +
-        '<div id="cclist"><div class="cc-empty">Loading list\u2026</div></div>' +
+        '<div id="cclist">' + skel(4) + '</div>' +
       '</div>');
     CC.mode = 'single';
     document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccFlushSoon(CC.tgt, 100); ccScreen(); });
@@ -2984,7 +3043,7 @@ var GLOSS = {
     });
     var arr = Object.keys(by).map(function (k) { return by[k]; });
     arr.sort(function (a, b) { return String(b.last).localeCompare(String(a.last)); });
-    if (!arr.length) { el.innerHTML = '<div class="cc-empty">No counts yet \u2014 start the first one above.</div>'; return; }
+    if (!arr.length) { el.innerHTML = emptyHTML('&#x1F4E6;', 'No counts yet', 'Start one above \u2014 scans save on this phone instantly and sync to the team sheet.'); return; }
     el.innerHTML = arr.map(function (s) {
       return '<div class="ctc" data-loc="' + esc(s.loc) + '">' +
         '<div class="ctc-main"><div class="ctc-t">' + esc(s.loc) + '</div>' +
@@ -3014,7 +3073,7 @@ var GLOSS = {
     function syncLine() {
       var st = ccSyncSt(t);
       var s2 = document.getElementById('cc-sync');
-      if (s2) s2.textContent = st.ops.length ? (st.ops.length + ' scan' + (st.ops.length > 1 ? 's' : '') + ' still syncing \u2014 sends automatically.') : '';
+      if (s2) s2.innerHTML = st.ops.length ? esc(st.ops.length + ' scan' + (st.ops.length > 1 ? 's' : '') + ' still syncing \u2014 sends automatically.') : sinceHTML(Math.max(ccSY(t).lastOk || 0, ccSY(t).lastPull || 0), 'Synced');
     }
     ccFlushSoon(t, 250);
     return ccPull(t).then(function () {
@@ -3023,10 +3082,39 @@ var GLOSS = {
       var e2 = document.getElementById('cc-cards');
       var s2 = document.getElementById('cc-sync');
       if (!CC.rows.length && e2) { e2.innerHTML = '<div class="cc-empty">Sheet unreachable \u2014 working offline. Scans still save on this phone and sync later.</div>'; }
-      else if (s2) { s2.textContent = 'Offline \u2014 showing this phone\u2019s saved counts.'; }
+      else if (s2) { s2.innerHTML = 'Offline \u2014 showing this phone\u2019s saved counts. ' + sinceHTML(Math.max(ccSY(t).lastOk || 0, ccSY(t).lastPull || 0), 'Last synced'); }
       done();
     });
   }
+
+  // ---- pull-to-refresh: screens register CURREFRESH (a function returning a promise) ----
+  var CURREFRESH = null;
+  (function () {
+    var ind = document.createElement('div'); ind.id = 'ptr'; ind.innerHTML = '&#x21bb;'; document.body.appendChild(ind);
+    var y0 = null, pulling = false, busy = false;
+    function top() { return (window.scrollY || document.documentElement.scrollTop || 0) <= 0; }
+    document.addEventListener('touchstart', function (e) {
+      if (!CURREFRESH || busy || !top() || document.body.classList.contains('cc-fixed')) { y0 = null; return; }
+      var t = e.target; if (t.closest && t.closest('#cc-sheet, #ask-sheet, .k-scroll, .fa2-modal, input, textarea')) { y0 = null; return; }
+      y0 = e.touches[0].clientY; pulling = false;
+    }, { passive: true });
+    document.addEventListener('touchmove', function (e) {
+      if (y0 === null) return;
+      var dy = e.touches[0].clientY - y0;
+      if (dy > 12 && top()) { pulling = true; var p = Math.min(1, dy / 80); ind.style.opacity = String(p); ind.style.transform = 'translate(-50%,' + Math.round(-40 + 40 * p) + 'px) rotate(' + Math.round(p * 270) + 'deg)'; }
+      else if (pulling) { ind.style.opacity = '0'; }
+    }, { passive: true });
+    document.addEventListener('touchend', function (e) {
+      if (y0 === null) return;
+      var dy = (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : y0) - y0;
+      y0 = null;
+      if (!pulling || dy < 80 || !CURREFRESH) { ind.style.opacity = '0'; return; }
+      busy = true; ind.style.opacity = '1'; ind.style.transform = 'translate(-50%,0)'; ind.classList.add('spin');
+      try { navigator.vibrate && navigator.vibrate(12); } catch (ev) {}
+      var done = function () { busy = false; ind.classList.remove('spin'); ind.style.opacity = '0'; ind.style.transform = 'translate(-50%,-40px)'; };
+      Promise.resolve().then(function () { return CURREFRESH(); }).then(function () { setTimeout(done, 250); }, function () { setTimeout(done, 250); });
+    }, { passive: true });
+  })();
 
   // ---- router ----
   function legacyRedirect(kind, n) {
@@ -3279,6 +3367,7 @@ var GLOSS = {
   function fa2Spin(on) { var b = document.getElementById('fa2-rf'); if (b) { b.classList.toggle('spin', !!on); b.disabled = !!on; } }
   // Every refresh button spins while it works and ticks when it's done, so a tap never looks ignored.
   function fa2RefreshWire(fn) {
+    CURREFRESH = fn;
     var b = document.getElementById('fa2-rf'); if (!b) return;
     b.addEventListener('click', function () {
       fa2Spin(true);
@@ -3522,6 +3611,7 @@ var GLOSS = {
         '<div id="fa2-trkpend"></div>' +
         tiles +
         '<div id="fa2-msg" class="cc-sub2"></div>' +
+        sheetLinkHTML((D.sheets || {}).fa2) +
       '</div>');
     function go(id, h) { var b = document.getElementById(id); if (b) b.addEventListener('click', function () { location.hash = h; }); }
     go('fa2-onhand', '#/fa2/onhand'); go('fa2-hist', '#/fa2/history'); go('fa2-send', '#/fa2/send');
@@ -3534,7 +3624,7 @@ var GLOSS = {
   }
   function fa2HomeLoad(force) {
     var p = document.getElementById('fa2-pills'), m = document.getElementById('fa2-msg');
-    if (p && !p.innerHTML) p.innerHTML = '<span class="cc-pill">Loading\u2026</span>';
+    if (p && !p.innerHTML) p.innerHTML = skel(1, 'sm');
     var g = ++FA2.gen;
     return fa2Load(force).then(function (d) {
       if (CC.view !== 'fa2home' || g !== FA2.gen) return;
@@ -3552,7 +3642,7 @@ var GLOSS = {
         (soon ? '<span class="cc-pill busy">' + soon + ' \u22643 mo</span>' : '');
       if (p) p.querySelectorAll('.fa2-pillgo').forEach(function (b) { b.addEventListener('click', function () { location.hash = b.getAttribute('data-h'); }); });
       fa2TrkDraw(fa2TrkPending(d));
-      if (m) m.textContent = '';
+      if (m) { var cc0 = fa2CacheGet(); m.innerHTML = sinceHTML(cc0 && cc0.t, 'Synced'); }
       if (!fa2IsFA()) fa2Call('import_list').then(function (j) {
         if (!j || !j.ok || CC.view !== 'fa2home') return;
         var n = (j.imports || []).filter(function (x) { return x.outcome === 'pending' || x.outcome === 'revised-pending'; }).length;
@@ -3709,7 +3799,7 @@ var GLOSS = {
         '<h2 class="cc-h">On hand</h2>' +
         '<div class="cc-sub">First to expire on top. Usage and send-backs come off automatically.</div>' +
         '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
-        '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
+        '<div id="fa2-list">' + skel(4) + '</div>' +
       '</div>');
     fa2RefreshWire(function () { return fa2OnHandLoad(true); });
     document.getElementById('fa2-q').addEventListener('input', fa2OnHandDraw);
@@ -3731,7 +3821,7 @@ var GLOSS = {
     var el = document.getElementById('fa2-list'); if (!el || !FA2.ohD) return;
     var q = (document.getElementById('fa2-q') || {}).value || '';
     var rows = (FA2.ohD.master || []).filter(function (r) { return fa2Num(r[MC.qty]) > 0 && kitMatch(q, [r[MC.ref], r[MC.desc], r[MC.lot]]); });
-    if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand \u2014 all clear.') + '</div>'; return; }
+    if (!rows.length) { el.innerHTML = q ? emptyHTML('', 'No matches', 'Try a shorter ref or lot fragment.') : emptyHTML('&#x2705;', 'Nothing on hand', 'Every lot handed to the F&A team has been used, returned or sent back.'); return; }
     rows = fa2BandSort(rows);
     var html = '', last = -1;
     rows.forEach(function (r) {
@@ -3760,7 +3850,8 @@ var GLOSS = {
         '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<h2 class="cc-h">History</h2>' +
         '<div class="cc-sub">Grouped by event \u2014 tap any card for line detail. Corrections are new events, never edits.</div>' +
-        '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
+        '<div id="fa2-hf" class="hf"></div>' +
+        '<div id="fa2-list">' + skel(4) + '</div>' +
       '</div>');
     fa2RefreshWire(function () { return fa2HistLoad(true); });
     fa2HistLoad(false);
@@ -3778,6 +3869,13 @@ var GLOSS = {
       if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t reach the server \u2014 check signal and try again.</div>';
     });
   }
+  function faDay(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); if (!m) return String(iso || '');
+    var d = new Date(+m[1], +m[2] - 1, +m[3]), t = new Date(); t.setHours(0, 0, 0, 0);
+    var diff = Math.round((t - d) / 86400000);
+    if (diff === 0) return 'Today'; if (diff === 1) return 'Yesterday';
+    return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() !== t.getFullYear() ? ', ' + d.getFullYear() : '');
+  }
   function fa2HistNeg(ty) {
     return ty === 'Used in case' || ty === 'Returned to rep' || ty === 'Sent back to Stryker' ||
            ty === 'Returned to Stryker' || ty === 'External Transfer' || ty === 'Written Off' || ty === 'Returned to CT SM';
@@ -3785,7 +3883,7 @@ var GLOSS = {
   function fa2HistDraw() {
     var el = document.getElementById('fa2-list'); if (!el || !FA2.histD) return;
     var d = FA2.histD, L = d.ledger || [], C = d.ledgerCols || [];
-    if (!L.length) { el.innerHTML = '<div class="cc-empty">No events yet.</div>'; return; }
+    if (!L.length) { el.innerHTML = emptyHTML('&#x1F4D2;', 'No events yet', 'Drops, usage, returns and send-backs will show up here as they happen.'); return; }
     var ix = {}; C.forEach(function (n, i) { ix[n] = i; });
     function g(r, n) { return ix[n] !== undefined && r[ix[n]] !== undefined && r[ix[n]] !== null ? String(r[ix[n]]) : ''; }
     var voided = {};
@@ -3804,7 +3902,7 @@ var GLOSS = {
           to: g(r, 'DropName') || g(r, 'ReceivedBy') || g(r, 'Facility') || '',
           drop: g(r, 'DropName'), fromRaw: g(r, 'From'), rb: g(r, 'ReceivedBy'), acc: g(r, 'AccountName'), accl: g(r, 'AccountLocation'), note: g(r, 'Note'),
           po: g(r, 'CasePO'), fac: g(r, 'Facility'), sur: g(r, 'Surgeon'), dos: g(r, 'DOS'), pid: g(r, 'PatientId'),
-          bo: g(r, 'CaseBO'), reason: g(r, 'Reason'), track: g(r, 'Tracking'),
+          bo: g(r, 'CaseBO'), reason: g(r, 'Reason'), track: g(r, 'Tracking'), by: g(r, 'EnteredBy'),
           rows: [], units: 0
         };
         groups.push(grp);
@@ -3830,7 +3928,38 @@ var GLOSS = {
     });
     groups.sort(function (x, y) { return x.ts < y.ts ? 1 : x.ts > y.ts ? -1 : 0; });
     var canFix = !fa2IsFA();
-    el.innerHTML = groups.map(function (grp, gi) {
+    // filters: type chips, who chips, free text over ref/desc/lot/BO/tracking; day separators
+    var HF = FA2.hf = FA2.hf || { ty: '', who: '', q: '' };
+    var tys = [], whos = [];
+    groups.forEach(function (g2) { var tn = g2.imp ? 'Bill only' : g2.ty; if (tys.indexOf(tn) < 0) tys.push(tn); if (g2.by && whos.indexOf(g2.by) < 0) whos.push(g2.by); });
+    var hf = document.getElementById('fa2-hf');
+    if (hf && !hf.dataset.wired) {
+      hf.dataset.wired = '1';
+      hf.innerHTML = '<input id="hf-q" class="cc-in" placeholder="Search ref, lot, description, BO or tracking" value="' + esc(HF.q) + '">' +
+        fa2Chips('hf-ty', ['All'].concat(tys), HF.ty || 'All') + (whos.length > 1 ? fa2Chips('hf-who', ['Anyone'].concat(whos), HF.who || 'Anyone') : '');
+      document.getElementById('hf-q').addEventListener('input', function () { HF.q = this.value; fa2HistDraw(); });
+      fa2ChipWire('hf-ty', function (v) { HF.ty = v === 'All' ? '' : v; fa2HistDraw(); });
+      fa2ChipWire('hf-who', function (v) { HF.who = v === 'Anyone' ? '' : v; fa2HistDraw(); });
+    }
+    var qn = nrm(HF.q);
+    var shown = groups.filter(function (g2) {
+      var tn = g2.imp ? 'Bill only' : g2.ty;
+      if (HF.ty && tn !== HF.ty) return false;
+      if (HF.who && g2.by !== HF.who) return false;
+      if (!qn) return true;
+      var hay = nrm([g2.bo, g2.track, g2.to, g2.from, g2.reason].concat(g2.rows.map(function (x) { return [x.ref, x.desc, x.lot].join(' '); })).join(' '));
+      return hay.indexOf(qn) > -1;
+    });
+    FA2.histGroups = groups;
+    if (!shown.length) { el.innerHTML = emptyHTML('', 'Nothing matches', 'Clear a filter or shorten the search.'); return; }
+    var lastDay = '';
+    el.innerHTML = shown.map(function (grp) {
+      var gi = groups.indexOf(grp);
+      var dayH = grp.date && grp.date !== lastDay ? '<div class="h-day">' + esc(faDay(grp.date)) + '</div>' : '';
+      lastDay = grp.date || lastDay;
+      return dayH + histCard(grp, gi);
+    }).join('');
+    function histCard(grp, gi) {
       if (grp.imp) {
         var applied = grp.outcome === 'approved' || grp.outcome === 'auto';
         var ipc = grp.outcome === 'denied' ? 'bad' : applied ? 'ok' : 'wait';
@@ -3871,7 +4000,7 @@ var GLOSS = {
           (canFix && !allVoid && grp.ty === 'Received' ? ' \u00b7 <button type="button" class="cc-link h-gfix" data-g="' + gi + '">Edit drop details</button>' : '') + '</div>' +
         '<div class="h-lines" hidden>' + lines + '</div>' +
       '</div>';
-    }).join('');
+    }
     // The read is capped; once the ledger is longer than the window, offer the rest.
     var lim = FA2.readLimit || 300;
     if (L.length >= lim) el.innerHTML += '<button type="button" id="fa2-more" class="cc-mini">Show older events</button>';
@@ -4577,7 +4706,7 @@ var GLOSS = {
       '<button id="fa2-scanb" type="button">' + fa2ScanIcon(24) + '<span>Scan a barcode</span></button>' +
       '<div id="fa2-scanwrap" hidden>' + ccCamPanelHtml() + '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
-      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll">' + skel(3) + '</div>' +
       '<div class="k-bar"><button id="fa2-go" class="cc-btn">Submit</button></div>',
       function () { return fa2Load(true).then(function (d) { if (CC.view !== 'fa2ret') return; OH = d; drawPick(); }); });
     var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 tap an item below.', onChange: drawPick });
@@ -4674,14 +4803,14 @@ var GLOSS = {
     var tray = { items: {}, order: [] };
     var trk = { v: '' };
     var OH = null, subKey = 'send-' + fa2Uuid(), st = { openKey: '', pickN: 1 };
-    var namePick = fa ? '<div class="fa2-lab">Your name</div><div id="fa2-nmwrap"><div class="cc-empty">Loading team\u2026</div></div>' : '';
+    var namePick = fa ? '<div class="fa2-lab">Your name</div><div id="fa2-nmwrap">' + skel(1, 'sm') + '</div>' : '';
     fa2Shell('Send back to Stryker', 'Works before or after expiration. Save the send-back now; add the tracking # when the label is printed.',
       namePick +
       '<div class="fa2-lab">Going back</div><div id="fa2-tray"></div>' +
       '<button id="fa2-scanb" type="button">' + fa2ScanIcon(24) + '<span>Scan a barcode</span></button>' +
       '<div id="fa2-scanwrap" hidden>' + ccCamPanelHtml() + '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
-      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll">' + skel(3) + '</div>' +
       '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (optional \u2014 add it later from Home)">' +
       '<div class="k-bar"><button id="fa2-go" class="cc-btn" disabled>Complete send-back</button></div>',
       function () { return loadSend(true); });
@@ -4795,7 +4924,7 @@ var GLOSS = {
         '<button id="u-addman" type="button" class="cc-mini">Add to list</button>' +
       '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
-      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll">' + skel(3) + '</div>' +
       '<div class="k-bar"><button id="fa2-go" class="cc-btn">Save usage</button></div>',
       function () { return fa2Load(true).then(function (d) { if (CC.view !== 'fa2use') return; D2 = d; drawPick(); }); });
     ['bo', 'po', 'fac', 'sur', 'dos'].forEach(function (k) {
@@ -4957,7 +5086,7 @@ var GLOSS = {
         '<div class="cc-sub">Bill-only imports \u2014 clean ones auto-apply, the rest wait here.</div>' +
         '<button id="fa2-poll" type="button" class="cc-mini">Check for new Bill Onlys</button>' +
         '<div id="fa2-pollmsg" class="cc-sub2"></div>' +
-        '<div id="fa2-list"><div class="cc-empty">Loading\u2026</div></div>' +
+        '<div id="fa2-list">' + skel(4) + '</div>' +
         '<div id="fa2-err" class="cc-err" hidden></div>' +
       '</div>');
     fa2RefreshWire(function () { return fa2TransLoad(); });
@@ -5112,7 +5241,7 @@ var GLOSS = {
     }
     fa2Shell('Admin', 'Teams control sheet access and email recipients. Changes save instantly.',
       '<div class="fa2-mrow" style="justify-content:flex-start"><button type="button" id="a-rep" class="cc-mini">Send full report</button><button type="button" id="a-welb" class="cc-mini">Send welcome email</button></div>' +
-      '<div id="a-body"><div class="cc-empty">Loading\u2026</div></div>',
+      '<div id="a-body">' + skel(3) + '</div>',
       function () { fa2CacheKill(); return fa2AdminLoad(); });
     document.getElementById('a-rep').addEventListener('click', function () { fa2SendReport(); });
     document.getElementById('a-welb').addEventListener('click', function () { fa2SendWelcome(); });
@@ -5324,6 +5453,7 @@ var GLOSS = {
     var xb = document.getElementById('expban');
     if (xb && Date.now() - (+xb.dataset.born || 0) > 1500) xb.remove();
     hideWN(false);
+    CURREFRESH = null;
     homeBtn.classList.add('away');
     FILT = {}; CURVIEW = null;
     var fpFilt = qparam(query, 'fp'); if (fpFilt) FILT.fp = fpFilt;
@@ -5412,11 +5542,26 @@ var GLOSS = {
   else { window.addEventListener('tbx-unlock', tbxStart, { once: true }); }
 
   // ---- toast helper ----
-  function toastMsg(text, ms) {
-    var old = toast.textContent;
-    toast.textContent = text;
+  // One toast at a time; later ones queue. opts.action = {label, fn} adds a button (Undo etc.).
+  var TQ = [], TBUSY = false, TTIMER = null;
+  function toastMsg(text, ms, opts) {
+    TQ.push({ text: text, ms: ms || 2200, opts: opts || null });
+    if (!TBUSY) toastNext();
+  }
+  function toastNext() {
+    var t = TQ.shift();
+    if (!t) { TBUSY = false; return; }
+    TBUSY = true;
+    var act = t.opts && t.opts.action;
+    toast.innerHTML = esc(t.text) + (act ? '<button type="button">' + esc(act.label) + '</button>' : '');
+    toast.classList.toggle('act', !!act);
+    if (act) toast.querySelector('button').onclick = function () { clearTimeout(TTIMER); try { act.fn(); } catch (e) {} hideToast(); };
     toast.classList.add('on');
-    setTimeout(function () { toast.classList.remove('on'); setTimeout(function () { toast.textContent = old; }, 250); }, ms || 2200);
+    TTIMER = setTimeout(hideToast, act ? Math.max(t.ms, 4000) : t.ms);
+  }
+  function hideToast() {
+    toast.classList.remove('on');
+    setTimeout(function () { toast.textContent = 'Copied'; toast.classList.remove('act'); toastNext(); }, 250);
   }
 
   // ---- image lightbox (tap to zoom) ----
