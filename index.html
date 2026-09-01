@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>SportsMed Toolbox</title>
 <meta name="description" content="SM ToolBox — the SportsMed team's quick-reference companion. Password required.">
 <meta property="og:title" content="SM ToolBox">
@@ -124,11 +124,17 @@ button.tile, .rowitem{cursor:pointer; width:100%;}
 .favbtn.on{border-color:var(--amber); color:var(--amber);}
 .favrow{margin:0 0 14px; display:flex; gap:8px; flex-wrap:wrap;}
 /* share sheet */
-#share-sheet, #ug-sheet{position:fixed; inset:0; z-index:92; background:rgba(0,0,0,.62); display:flex; align-items:flex-end;}
-#share-sheet[hidden], #ug-sheet[hidden]{display:none;}
-#share-sheet .as-card, #ug-sheet .as-card{width:100%; background:var(--panel); border-radius:20px 20px 0 0;
+#share-sheet, #ug-sheet, #ask-sheet{position:fixed; inset:0; z-index:92; background:rgba(0,0,0,.62); display:flex; align-items:flex-end;}
+#share-sheet[hidden], #ug-sheet[hidden], #ask-sheet[hidden]{display:none;}
+#share-sheet .as-card, #ug-sheet .as-card, #ask-sheet .as-card{width:100%; background:var(--panel); border-radius:20px 20px 0 0;
   padding:20px 20px calc(env(safe-area-inset-bottom) + 20px); border-top:1px solid var(--line);}
-#share-sheet h3, #ug-sheet h3{margin:0 0 4px; font-size:17px;}
+#share-sheet h3, #ug-sheet h3, #ask-sheet h3{margin:0 0 4px; font-size:17px;}
+#ask-sheet .ask-b{color:var(--muted); font-size:14px; line-height:1.45; margin:6px 0 14px; white-space:pre-line;}
+#ask-sheet .ask-row{display:flex; gap:10px;}
+#ask-sheet .ask-row button{flex:1; min-height:46px; border-radius:12px; font-weight:700; font-size:15px; cursor:pointer; border:1px solid var(--line); background:var(--panel2); color:var(--bone);}
+#ask-sheet .ask-row button.ok{background:var(--amber); border-color:var(--amber); color:#141414;}
+#ask-sheet .ask-row button.danger{background:#5a2a29; border-color:#D06A68; color:#ffd9d8;}
+#ask-sheet textarea{width:100%; min-height:120px; margin:0 0 12px; background:var(--panel2); color:var(--bone); border:1px solid var(--line); border-radius:12px; padding:10px; font:13px/1.4 ui-monospace, Menlo, monospace;}
 #share-sheet .sh-sub{color:var(--muted); font-size:12.5px; margin-bottom:10px; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap;}
 .shopt{display:flex; align-items:center; gap:14px; width:100%; background:none; border:0;
@@ -215,6 +221,9 @@ main{padding-bottom:calc(env(safe-area-inset-bottom) + 96px);}
   font-weight:700; font-size:12.5px; border-radius:999px; padding:8px 13px; cursor:pointer;
   white-space:nowrap; transition:transform .08s ease;}
 .schip:active{transform:scale(.94);}
+.schip.sort{margin-left:auto; border-style:dashed;}
+.schip.sort.on{border-style:solid;}
+.showall{display:block; width:100%; margin:8px 0 14px; min-height:44px; border:1px solid var(--line); background:var(--panel); color:var(--amber); font-weight:700; font-size:14px; border-radius:12px; cursor:pointer;}
 .schip.on{border-color:var(--amber); color:#1E1E1E; background:var(--amber);}
 .fchip{border:1.5px solid #A8A29A; background:#3E3E3E; color:#FFFFFF;
   font-weight:700; font-size:12.5px; border-radius:999px; padding:8px 13px;}
@@ -920,7 +929,7 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 })();
 </script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.108.js"></script>
+<script src="app-4.109.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
 </body>
 </html>

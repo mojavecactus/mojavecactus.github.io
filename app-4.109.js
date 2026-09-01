@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.108';
+  var APPVER = '4.109';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -204,6 +204,8 @@ var GLOSS = {
       }, 240);
       return;
     }
+    var fso = e.target.closest('[data-fsort]');
+    if (fso) { try { localStorage.setItem('tbx_fsort', fso.getAttribute('data-fsort')); } catch (e8) {} home(); return; }
     var cr = e.target.closest('[data-clearrec]');
     if (cr) {
       try { localStorage.removeItem('tbx_recents'); } catch (e6) {}
@@ -244,7 +246,7 @@ var GLOSS = {
 
   // ---- search index ----
   var IMPLANT_CATS = ['Iconix', 'Artelon', 'Corkscrew Anchors', 'NanoTack',
-    'Knee/Meniscus Anchors', 'Knotless Hard Body Anchors', 'Other', 'Screws'];
+    'Knee/Meniscus Anchors', 'Knotless Anchors', 'Other', 'Screws'];
   var INDEX = [];
   function wordsOf(s) {
     var seen = {}, out = [];
@@ -363,7 +365,7 @@ var GLOSS = {
       '<div class="rl"><b class="ti">' + esc(t) + (sz ? ' <span class="sz">' + esc(sz) + '</span>' : '') + '</b>' +
       line2 + '</div>' + (tags ? '<div class="subtags">' + tags + '</div>' : '') + '</button>';
   }
-  var SFILT = null;
+  var SFILT = null, SSORT = 'rel', SALL = false;
   var SBUCKETS = ['Arthroscopy', 'Biologics', 'Capital', 'Disposables', 'Implants', 'Instruments', 'Suture'];
   function resultsHTML() {
     var hits = searchAll(CURQ);
@@ -376,16 +378,20 @@ var GLOSS = {
     var avail = SBUCKETS.filter(function (b) { return counts[b]; });
     if (SFILT && !counts[SFILT]) SFILT = null;
     var shown = SFILT ? hits.filter(function (h) { return (h.buckets || []).indexOf(SFILT) !== -1; }) : hits;
-    var chips = avail.length > 1
-      ? '<div class="schips"><button class="schip' + (!SFILT ? ' on' : '') + '" data-sf="">All &middot; ' + hits.length + '</button>' +
+    if (SSORT === 'sku') shown = shown.slice().sort(function (a, b) { return a.skun < b.skun ? -1 : a.skun > b.skun ? 1 : 0; });
+    var chips = '<div class="schips">' +
+      (avail.length > 1 ? '<button class="schip' + (!SFILT ? ' on' : '') + '" data-sf="">All &middot; ' + hits.length + '</button>' +
         avail.map(function (b) {
           return '<button class="schip' + (SFILT === b ? ' on' : '') + '" data-sf="' + esc(b) + '">' + esc(b) + ' &middot; ' + counts[b] + '</button>';
-        }).join('') + '</div>'
-      : '';
+        }).join('') : '<span class="schip on" style="pointer-events:none">' + hits.length + ' result' + (hits.length === 1 ? '' : 's') + '</span>') +
+      '<button class="schip sort' + (SSORT === 'sku' ? ' on' : '') + '" data-ssort="1" aria-pressed="' + (SSORT === 'sku') + '">' + (SSORT === 'sku' ? 'Part # A\u2013Z' : 'Best match') + ' &#x21C5;</button>' +
+      '</div>';
+    var CAP = SALL ? shown.length : 60;
     return chips + '<div class="list" style="margin-top:8px">' +
-      shown.slice(0, 60).map(function (h) { return rowHTML(h.route, h.it, h.sub); }).join('') + '</div>' +
-      (shown.length > 60 ? '<div class="empty">Showing top 60 of ' + shown.length + ' &mdash; add a word to narrow.</div>' : '');
+      shown.slice(0, CAP).map(function (h) { return rowHTML(h.route, h.it, h.sub); }).join('') + '</div>' +
+      (shown.length > CAP ? '<button class="showall" data-sall="1">Show all ' + shown.length + ' &#x203A;</button>' : '');
   }
+  try { SSORT = localStorage.getItem('tbx_ssort') === 'sku' ? 'sku' : 'rel'; } catch (e0) {}
   function render(browseHTML) {
     LAST_BROWSE = browseHTML;
     content.classList.remove('homeview');
@@ -886,6 +892,51 @@ var GLOSS = {
     sh.hidden = false;
   }
 
+  // In-app dialogs (native confirm/alert/prompt look foreign in standalone mode
+  // and cannot be styled). tbxAsk resolves true/false; tbxNotice resolves when
+  // dismissed; tbxShowText shows copyable text with a Copy button.
+  function askSheet() {
+    var sh = document.getElementById('ask-sheet');
+    if (!sh) { sh = document.createElement('div'); sh.id = 'ask-sheet'; sh.hidden = true; document.body.appendChild(sh); }
+    return sh;
+  }
+  function tbxAsk(o) {
+    return new Promise(function (res) {
+      var sh = askSheet();
+      sh.innerHTML = '<div class="as-card"><h3>' + esc(o.title || 'Are you sure?') + '</h3>' +
+        (o.body ? '<div class="ask-b">' + esc(o.body) + '</div>' : '') +
+        '<div class="ask-row"><button type="button" class="ask-no">' + esc(o.cancel || 'Cancel') + '</button>' +
+        '<button type="button" class="ask-ok ' + (o.danger ? 'danger' : 'ok') + '">' + esc(o.ok || 'OK') + '</button></div></div>';
+      function fin(v) { sh.hidden = true; sh.onclick = null; res(v); }
+      sh.onclick = function (e) {
+        if (e.target === sh || e.target.closest('.ask-no')) fin(false);
+        else if (e.target.closest('.ask-ok')) fin(true);
+      };
+      sh.hidden = false;
+    });
+  }
+  function tbxNotice(title, body, btn) {
+    return new Promise(function (res) {
+      var sh = askSheet();
+      sh.innerHTML = '<div class="as-card"><h3>' + esc(title) + '</h3>' + (body ? '<div class="ask-b">' + esc(body) + '</div>' : '') +
+        '<div class="ask-row"><button type="button" class="ask-ok ok">' + esc(btn || 'OK') + '</button></div></div>';
+      sh.onclick = function (e) { if (e.target === sh || e.target.closest('.ask-ok')) { sh.hidden = true; sh.onclick = null; res(); } };
+      sh.hidden = false;
+    });
+  }
+  function tbxShowText(title, body, text) {
+    var sh = askSheet();
+    sh.innerHTML = '<div class="as-card"><h3>' + esc(title) + '</h3>' + (body ? '<div class="ask-b">' + esc(body) + '</div>' : '') +
+      '<textarea readonly class="mono">' + esc(text) + '</textarea>' +
+      '<div class="ask-row"><button type="button" class="ask-no">Close</button><button type="button" class="ask-ok ok">Copy</button></div></div>';
+    sh.onclick = function (e) {
+      if (e.target === sh || e.target.closest('.ask-no')) { sh.hidden = true; sh.onclick = null; return; }
+      if (e.target.closest('.ask-ok')) { copyToClip(text).then(function () { toastMsg('Copied', 1600); }); return; }
+      var ta = sh.querySelector('textarea'); if (ta && e.target === ta) ta.select();
+    };
+    sh.hidden = false;
+  }
+
   function openLinkMenu(cfg) {
     var sh = document.getElementById('ug-sheet');
     if (!sh) {
@@ -992,6 +1043,10 @@ var GLOSS = {
     }
     var s = e.target.closest && e.target.closest('[data-act="scan"]');
     if (s) { var sb = document.getElementById('scanbtn'); if (sb) sb.click(); return; }
+    var ss = e.target.closest && e.target.closest('[data-ssort]');
+    if (ss) { SSORT = SSORT === 'sku' ? 'rel' : 'sku'; try { localStorage.setItem('tbx_ssort', SSORT); } catch (e7) {} content.innerHTML = resultsHTML(); return; }
+    var sa = e.target.closest && e.target.closest('[data-sall]');
+    if (sa) { SALL = true; content.innerHTML = resultsHTML(); return; }
     var sc = e.target.closest && e.target.closest('.schip');
     if (sc) {
       SFILT = sc.getAttribute('data-sf') || null;
@@ -1034,14 +1089,16 @@ var GLOSS = {
       '<span class="tico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#141414" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>' +
       '<span class="tl"><b>Inventory Management</b><span class="n">Territory Cycle Counts</span></span>' +
       '<span class="ct">&#x203A;</span></button>';
-    var fv = favs();
-    var favHTML = fv.length ? '<div class="eyebrow">Favorites</div><div class="list">' + fv.map(function (f) {
+    var fv = favs(), fsort = 'recent';
+    try { fsort = localStorage.getItem('tbx_fsort') === 'az' ? 'az' : 'recent'; } catch (e0) {}
+    if (fsort === 'az') fv = fv.slice().sort(function (a, b) { var x = ((a.it && a.it.t) || a.label || ''), y = ((b.it && b.it.t) || b.label || ''); return x.localeCompare(y); });
+    var favHTML = fv.length ? '<div class="eyebrow ebrow"><span>Favorites</span>' + (fv.length > 1 ? '<button class="clearrec" data-fsort="' + (fsort === 'az' ? 'recent' : 'az') + '">' + (fsort === 'az' ? 'A\u2013Z \u00b7 sort by recent' : 'Recent \u00b7 sort A\u2013Z') + '</button>' : '') + '</div><div class="list">' + fv.map(function (f) {
       var it = f.it || { t: f.label, sku: f.pn };
       return '<div class="rowwrap">' + rowHTML(f.route, it, '') +
         '<button class="rwact" data-unfav-route="' + esc(f.route) + '" aria-label="Remove favorite">&#9733;</button></div>';
     }).join('') + '</div>' : '';
     var rc = recents();
-    var recHTML = rc.length ? '<div class="eyebrow ebrow"><span>Recent</span><button class="clearrec" data-clearrec="1">Clear all</button></div><div class="list">' + rc.slice(0, 3).map(function (r) {
+    var recHTML = rc.length ? '<div class="eyebrow ebrow"><span>Recent</span><button class="clearrec" data-clearrec="1">Clear all</button></div><div class="list">' + rc.slice(0, 6).map(function (r) {
       return '<div class="rowwrap">' + rowHTML(pnRoute(r.sku), { t: r.label, sku: r.sku }, '') +
         '<button class="rwact rwx" data-unrec="' + esc(r.sku) + '" aria-label="Remove from recents">&#x2715;</button></div>';
     }).join('') + '</div>' : '';
@@ -2117,6 +2174,37 @@ var GLOSS = {
     document.getElementById('cc-hx').onclick = function () { ccModalClose(sheet); CC.running = true; ccSchedule(300); };
     document.getElementById('cc-hr').onclick = function () { location.reload(); };
   }
+  // Learned code->part pairs also go to the hub (action 'learn'), queued until it
+  // answers ok, so catalogue gaps show up without anyone copying text by hand.
+  function learnQueue(code, sku) {
+    try {
+      var q = JSON.parse(localStorage.getItem('tbx_learn_q') || '[]');
+      if (!q.some(function (x) { return x.code === code && x.sku === sku; })) q.push({ code: code, sku: sku, ts: new Date().toISOString() });
+      localStorage.setItem('tbx_learn_q', JSON.stringify(q.slice(-200)));
+    } catch (e) {}
+    learnFlushSoon(1500);
+  }
+  var LEARN_T = null;
+  function learnFlushSoon(ms) { if (LEARN_T) clearTimeout(LEARN_T); LEARN_T = setTimeout(learnFlush, ms || 1000); }
+  function learnFlush() {
+    LEARN_T = null;
+    if (!hubOn() || !navigator.onLine) return;
+    var q = [];
+    try { q = JSON.parse(localStorage.getItem('tbx_learn_q') || '[]'); } catch (e) {}
+    if (!q.length) return;
+    var dev = '';
+    try { dev = ccLS('tbx_cc_dev') || ''; } catch (e2) {}
+    hubCall('learn', { items: q, dev: dev, ver: APPVER }).then(function (j) {
+      if (!j || !j.ok) return; // unknown to this hub version: keep queued, try next session
+      try {
+        var now = JSON.parse(localStorage.getItem('tbx_learn_q') || '[]');
+        var sent = {}; q.forEach(function (x) { sent[x.code + '|' + x.sku] = 1; });
+        localStorage.setItem('tbx_learn_q', JSON.stringify(now.filter(function (x) { return !sent[x.code + '|' + x.sku]; })));
+      } catch (e3) {}
+    }).catch(function () {});
+  }
+  window.addEventListener('online', function () { learnFlushSoon(2500); });
+  setTimeout(learnFlush, 6000);
   function ccLearnMap() { try { return JSON.parse(localStorage.getItem('tbx_learned') || '{}'); } catch (e) { return {}; } }
   function ccLearnCount() { return Object.keys(ccLearnMap()).length; }
   function ccLearnText() {
@@ -2381,7 +2469,7 @@ var GLOSS = {
         if (r.p && r.p.gtin && r.p.gtin.length === 14) {
           try {
             var L = JSON.parse(localStorage.getItem('tbx_learned') || '{}');
-            if (!L[r.p.gtin]) { L[r.p.gtin] = ref; localStorage.setItem('tbx_learned', JSON.stringify(L)); }
+            if (!L[r.p.gtin]) { L[r.p.gtin] = ref; localStorage.setItem('tbx_learned', JSON.stringify(L)); learnQueue(r.p.gtin, ref); }
           } catch (eL) {}
         }
       }
@@ -2464,13 +2552,15 @@ var GLOSS = {
         ccEnqueue(t, op);
       };
       document.getElementById('cc-qdel').onclick = function () {
-        if (!confirm('Delete ' + r.ref + (r.lot ? ' lot ' + r.lot : '') + ' from the count?')) return;
-        closeModal(); CC.running = true; ccSchedule(300);
-        delete CC.hist[key]; ccHistSave();
-        var t = CC.tgt;
-        var op = { t: 'del', ref: r.ref, lot: r.lot || '' };
-        op.loc = r.loc;
-        ccEnqueue(t, op);
+        tbxAsk({ title: 'Delete this line?', body: r.ref + (r.lot ? ' \u00b7 Lot ' + r.lot : '') + '\nIt comes off the count on this phone and the sheet.', ok: 'Delete', danger: true }).then(function (yes) {
+          if (!yes) return;
+          closeModal(); CC.running = true; ccSchedule(300);
+          delete CC.hist[key]; ccHistSave();
+          var t = CC.tgt;
+          var op = { t: 'del', ref: r.ref, lot: r.lot || '' };
+          op.loc = r.loc;
+          ccEnqueue(t, op);
+        });
       };
     }
     draw(r.qty);
@@ -2551,16 +2641,11 @@ var GLOSS = {
     if (fb2) fb2.addEventListener('click', function () { location.hash = '#/fa2'; });
     var lb = document.getElementById('ct-learn');
     if (lb) lb.addEventListener('click', function () {
-      var t = ccLearnText();
-      function done() { lb.textContent = 'copied'; setTimeout(function () { lb.textContent = 'copy'; }, 1800); }
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, function () { prompt('Copy these and send them over:', t); }); return; }
-      } catch (e) {}
-      prompt('Copy these and send them over:', t);
+      tbxShowText('Learned barcodes', 'These pair a scanned code with the part it belongs to. They also upload to the hub on their own; copy them here if you want to send them by hand.', ccLearnText());
     });
     document.getElementById('ct-devchg').addEventListener('click', function () {
       var pend = (CC.ops || []).length;
-      if (pend) { alert('This phone still has ' + pend + ' unsent scan' + (pend > 1 ? 's' : '') + '. Get signal so they finish syncing, then change the device.'); ccFlushSoon(terrTgt(), 200); return; }
+      if (pend) { tbxNotice('Scans still syncing', 'This phone still has ' + pend + ' unsent scan' + (pend > 1 ? 's' : '') + '. Get signal so they finish syncing, then change the device.'); ccFlushSoon(terrTgt(), 200); return; }
       try { localStorage.removeItem(terrKey('_dev')); } catch (e) {}
       CC.dev = ''; CC.ret = ctScreen; ccDevice();
     });
@@ -2737,8 +2822,10 @@ var GLOSS = {
           return;
         }
         var b3 = e4.target.closest ? e4.target.closest('[data-rm]') : null; if (!b3) return;
-        if (!confirm('Remove ' + b3.dataset.rm + ' from ' + P.name + '? Their tab and scans stay on the sheet.')) return;
-        mcall({ op: 'removemember', email: b3.dataset.rm }, b3, function (e2, r) { if (e2) return msg(eMsg(e2), true); show(r); });
+        tbxAsk({ title: 'Remove ' + b3.dataset.rm + '?', body: 'They lose access to ' + P.name + '. Their tab and scans stay on the sheet.', ok: 'Remove', danger: true }).then(function (yes) {
+          if (!yes) return;
+          mcall({ op: 'removemember', email: b3.dataset.rm }, b3, function (e2, r) { if (e2) return msg(eMsg(e2), true); show(r); });
+        });
       });
     }
     (function ask() {
@@ -5111,9 +5198,12 @@ var GLOSS = {
     var raw = location.hash || '#/';
     var qi = raw.indexOf('?');
     var query = qi > -1 ? raw.slice(qi + 1) : '';
+    if (qparam(query, 'q') !== CURQ) SALL = false;
     CURQ = qparam(query, 'q');
     if (qInput && qInput.value !== CURQ) qInput.value = CURQ;
     var h = qi > -1 ? raw.slice(0, qi) : raw;
+    // Renamed categories: old links (favorites, shared cards, home-screen clips) still open.
+    h = h.replace(/Knotless(?:%20| )Hard(?:%20| )Body(?:%20| )Anchors/g, 'Knotless%20Anchors');
     var m;
     var dec = function (s) { try { return decodeURIComponent(s); } catch (e) { return s; } };
     var splitCatRest = function (s) {
@@ -5596,6 +5686,7 @@ var GLOSS = {
         var l = learned(); l[teachKey] = sku;
         localStorage.setItem('tbx_learned', JSON.stringify(l));
       } catch (e2) {}
+      learnQueue(teachKey, sku);
       stopScan();
       location.hash = pnRoute(sku);
       toastMsg('Barcode saved to this product', 2400);
@@ -5695,7 +5786,9 @@ var GLOSS = {
 
   try { window.TBX_FEEDBACK_INIT(D.fb); } catch (eFb) {}
   // dev/test hooks (harmless in production)
-  window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG };
+  window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
+    // sync engine, for tools/cc-test
+    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expIso: expIso, expDisp: expDisp, catCount: catCount } };
 };
 
 /* ---- Feedback: screenshot + silent send (mailto fallback) ----

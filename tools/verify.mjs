@@ -153,6 +153,35 @@ all.forEach(i => (i.specs || []).forEach(([k, v]) => {
   }
 }
 
+// ---- 8d guide pages: PDF page count == webp pages == pages the app renders ----
+{
+  try {
+    const pdf = readFileSync(R + '/guide/SMToolBox_Cycle_Count_Scanner_Guide.pdf', 'latin1');
+    const pdfPages = (pdf.match(/\/Type\s*\/Page[^s]/g) || []).length;
+    const webps = readdirSync(R + '/guide/pages').filter(f => /^p\d+\.webp$/.test(f)).length;
+    const loop = /for \(var i = 1; i <= (\d+); i\+\+\) pages \+= '<img src="guide\/pages\/p'/.exec(app);
+    const appPages = loop ? +loop[1] : -1;
+    if (pdfPages !== webps) FAIL('guide: PDF has ' + pdfPages + ' pages but guide/pages has ' + webps + ' webps');
+    if (appPages !== webps) FAIL('guide: app renders ' + appPages + ' pages but guide/pages has ' + webps);
+    for (let i = 1; i <= webps; i++) if (!sw.includes("'./guide/pages/p" + i + ".webp'")) FAIL('guide page not precached: p' + i + '.webp');
+  } catch (e) { WARN('guide check skipped: ' + e.message); }
+}
+
+// ---- 8e hidden items: never orphaned, never on a tile ----
+{
+  const linked = new Set();
+  D.items.forEach(i => { (i.links || []).forEach(l => { if (l.sku) linked.add(nrm(l.sku)); (l.menu || []).forEach(m => linked.add(nrm(m.sku))); }); (i.parts || []).forEach(p => linked.add(nrm(p))); });
+  D.items.filter(i => i.hidden).forEach(i => {
+    if (!linked.has(nrm(i.sku))) FAIL('hidden item unreachable (no visible card links to it): ' + i.sku);
+    if (D.counts[i.cat] === undefined) FAIL('hidden item in unknown cat: ' + i.sku);
+  });
+  // counts stay cat-only + visible, which is what catCount() in the app derives from
+  const hid = D.items.filter(i => i.hidden).length;
+  const total = D.items.length - hid;
+  const sum = D.catOrder.reduce((a, k) => a + (D.counts[k] || 0), 0);
+  if (sum !== total) FAIL('counts sum ' + sum + ' != visible items ' + total);
+}
+
 // ---- 9 gtin ----
 {
   const BY = {};

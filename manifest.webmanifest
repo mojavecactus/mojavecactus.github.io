@@ -7,15 +7,37 @@
   "background_color": "#1E1E1E",
   "theme_color": "#1E1E1E",
   "icons": [
-    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "shortcuts": [
     {
       "name": "Scan a barcode",
       "short_name": "Scan",
       "url": "./#/scan",
-      "icons": [{ "src": "icon-180.png", "sizes": "180x180" }]
+      "icons": [
+        {
+          "src": "icon-180.png",
+          "sizes": "180x180"
+        }
+      ]
     }
-  ]
+  ],
+  "id": "/",
+  "description": "The SportsMed team’s quick-reference companion — search, scan, cycle counts and F&A inventory. Works offline."
 }
