@@ -67,14 +67,20 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
   await sleep(800);
   const browser = await chromium.launch({ headless: true });
   const fixedNow = () => new Date();
+  // Seed expirations are relative to today so the band tests never drift with the calendar.
+  const dstr = days => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + days); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const EXP_A = dstr(0).slice(0, 7);   // month-only, this month -> SEND BACK <=2 MO (valid through month end)
+  const EXP_B = dstr(-40);             // EXPIRED
+  const EXP_C = dstr(300);             // OK
+  const EXP_D = dstr(75);              // <=3 MO (between 2 and 3 months out)
   try {
     // ---------------- S0: gate, tile, home ----------------
     let hub = new FakeHub({ now: fixedNow }); global.__hubs = [hub];
     hub.seed([
-      { type: 'Received', ref: '3105000740', desc: 'Test anchor A', lot: 'LOTA', exp: '2026-08', qty: 2, dropName: 'Hartford drop', from: 'Matt', receivedBy: 'Katie F', eventDate: '2026-08-20' },
-      { type: 'Received', ref: '0234102102', desc: 'Test screw B', lot: 'LOTB', exp: '2026-07-31', qty: 3, dropName: 'Hartford drop', from: 'Matt', receivedBy: 'Katie F', eventDate: '2026-08-20' },
-      { type: 'Received', ref: '0130', desc: 'InSpace C', lot: 'LOTC', exp: '2027-06-15', qty: 5, dropName: 'Norwalk drop', from: 'Nate', receivedBy: 'Jordan P', eventDate: '2026-08-21' },
-      { type: 'Received', ref: '0131', desc: 'InSpace D', lot: 'LOTD', exp: '2026-10-05', qty: 4, dropName: 'Norwalk drop', from: 'Nate', receivedBy: 'Jordan P', eventDate: '2026-08-21' }
+      { type: 'Received', ref: '3105000740', desc: 'Test anchor A', lot: 'LOTA', exp: EXP_A, qty: 2, dropName: 'Hartford drop', from: 'Matt', receivedBy: 'Katie F', eventDate: '2026-08-20' },
+      { type: 'Received', ref: '0234102102', desc: 'Test screw B', lot: 'LOTB', exp: EXP_B, qty: 3, dropName: 'Hartford drop', from: 'Matt', receivedBy: 'Katie F', eventDate: '2026-08-20' },
+      { type: 'Received', ref: '0130', desc: 'InSpace C', lot: 'LOTC', exp: EXP_C, qty: 5, dropName: 'Norwalk drop', from: 'Nate', receivedBy: 'Jordan P', eventDate: '2026-08-21' },
+      { type: 'Received', ref: '0131', desc: 'InSpace D', lot: 'LOTD', exp: EXP_D, qty: 4, dropName: 'Norwalk drop', from: 'Nate', receivedBy: 'Jordan P', eventDate: '2026-08-21' }
     ]);
     let { ctx, page } = await newPage(browser, hub);
     await ctGate(page, CT_PW, 'Nate');
@@ -89,23 +95,28 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       const sup = await page.evaluate(() => { const em = document.querySelector('.cc-h .fa2-em'), h = document.querySelector('.cc-h'); const ce = getComputedStyle(em), ch = getComputedStyle(h); return { ratio: parseFloat(ce.fontSize) / parseFloat(ch.fontSize), va: ce.verticalAlign, tt: ce.textTransform, hdr: (document.querySelector('#title em') || {}).className }; });
       check('R19b beta reads as a small superscript tag on the heading and the header', sup.ratio < 0.6 && sup.va === 'super' && sup.tt === 'uppercase' && sup.hdr === 'sup', JSON.stringify(sup));
     }
-    // Server statuses: A(2026-08 → Aug 31) = SEND BACK ≤2 MO, B = EXPIRED, D(2026-10-05) = SEND BACK ≤2 MO, C = OK
+    // Server statuses: A(this month, month-only) = SEND BACK ≤2 MO, B = EXPIRED, D(+75d) = ≤3 MO, C = OK
     note('S0 server statuses', JSON.stringify(hub.master().map(r => r[0] + ':' + r[5])));
     check('S1a Home "expired" pill counts only server-EXPIRED (B=3)', /3 expired/.test(pills), pills.replace(/\n/g, ' | '));
-    check('S1b Home "≤3 mo" pill lumps SEND BACK rows in (A2+D4=6)', /6 ≤3 mo/.test(pills), pills.replace(/\n/g, ' | '));
+    check('S1b Home splits "send back" (A=2) from "≤3 mo" (D=4)', /2 send back/.test(pills) && /4 ≤3 mo/.test(pills) && !/6 ≤3 mo/.test(pills), pills.replace(/\n/g, ' | '));
+    if (FIXED) {
+      await page.click('#fa2-pills .fa2-pillgo'); await page.waitForSelector('#fa2-pick', { timeout: 10000 });
+      check('N10 Tapping the send-back pill opens Remove / Return', (await page.evaluate(() => location.hash)) === '#/fa2/return');
+      await go(page, '#/fa2', '#fa2-pills .cc-pill.ok');
+    }
 
     // ---------------- S1: On hand banding vs server status ----------------
     await go(page, '#/fa2/onhand', '#fa2-list .f2c');
     const onhand = await page.evaluate(() => [].map.call(document.querySelectorAll('#fa2-list > *'), n => n.className.indexOf('fa2-eyebrow') > -1 ? '[' + n.innerText + ']' : n.querySelector('.f2top b').innerText + ':' + n.querySelector('.f2chip').innerText).join(' '));
     note('S1 On hand sections (client banding)', onhand);
-    bug('S1c month-only exp 2026-08 banded as Expired on Aug 28 (server: SEND BACK ≤2 MO, valid thru 8/31)', /\[Expired\][^\[]*3105000740:Expired/i.test(onhand), /\[Expiring ≤3 mo\][^\[]*3105000740:≤3 mo/i.test(onhand) && /\[Expired\][^\[]*0234102102:Expired/i.test(onhand), onhand);
+    bug('S1c On hand follows the sheet status: A under Send back ≤2 mo, B Expired, D Expiring ≤3 mo, C OK', /\[Expired\][^\[]*3105000740:Expired/i.test(onhand), /\[Send back ≤2 mo\][^\[]*3105000740:Send back/i.test(onhand) && /\[Expired\][^\[]*0234102102:Expired/i.test(onhand) && /\[Expiring ≤3 mo\][^\[]*0131:≤3 mo/i.test(onhand) && /\[OK\][^\[]*0130:OK/i.test(onhand), onhand);
     await page.fill('#fa2-q', 'inspace');
     const filtered = await page.locator('#fa2-list .f2c').count();
     check('S1d On hand search filters by description', filtered === 2, 'matches=' + filtered);
     if (FIXED) {
       await page.fill('#fa2-q', '');
       const eb = await page.evaluate(() => { const list = document.getElementById('fa2-list').getBoundingClientRect(); const rows = document.querySelector('#fa2-list .f2c').getBoundingClientRect(); const cs = getComputedStyle(document.querySelector('.fa2-eyebrow.warn')); return { classes: [].map.call(document.querySelectorAll('#fa2-list .fa2-eyebrow'), n => n.className), listW: Math.round(list.width), eyeW: Math.round(document.querySelector('.fa2-eyebrow').getBoundingClientRect().width), contentW: Math.round(document.getElementById('content').getBoundingClientRect().width), rowW: Math.round(rows.width), bg: cs.backgroundColor, display: cs.display }; });
-      check('R3 Section labels span the full list width with a coloured band', eb.eyeW === eb.listW && eb.display === 'block' && /rgba\(240, 180, 60/.test(eb.bg) && eb.classes.join(',') === 'fa2-eyebrow bad,fa2-eyebrow warn,fa2-eyebrow ok', JSON.stringify(eb));
+      check('R3 Section labels span the full list width with a coloured band', eb.eyeW === eb.listW && eb.display === 'block' && /rgba\(240, 180, 60/.test(eb.bg) && eb.classes.join(',') === 'fa2-eyebrow bad,fa2-eyebrow warn,fa2-eyebrow soon,fa2-eyebrow ok', JSON.stringify(eb));
       check('R4a On hand rows run edge-to-edge like the catalog (no outer panel inset)', eb.rowW === eb.contentW && eb.contentW === 362, 'row=' + eb.rowW + ' content=' + eb.contentW);
     }
 
@@ -119,6 +130,10 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.fill('#fa2-drop', 'Bridgeport drop');
     await page.click('#fa2-go');
     check('S2b Add step-1 validation (from)', /came from/.test(await text(page, '#fa2-err')));
+    if (FIXED) {
+      const fromChips = await page.evaluate(() => [].map.call(document.querySelectorAll('#fa2-from .fa2-chip'), b => b.innerText.trim()));
+      check('N9 From chips come from the CT roster + Sports team (no hardcoded list, no duplicates, Other last)', fromChips.indexOf('Megan') > -1 && fromChips.indexOf('Isabella') > -1 && new Set(fromChips).size === fromChips.length && fromChips.slice(-2).join(',') === 'Territory Transfer,Other', fromChips.join(','));
+    }
     if (FIXED) {
       const gone = hub.log.length;
       hub.abortReads = 1;
@@ -177,6 +192,8 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     check('S2g REF autofills description from catalog', autoDesc.length > 0, autoDesc);
     await page.fill('#a2-lot', 'LOTA');
     if (FIXED) {
+      await page.click('#a2-addman');
+      check('N2a Manual add refuses the untouched today-default date', /still today/.test(await text(page, '#fa2-err')), await text(page, '#fa2-err'));
       const row = await page.evaluate(() => {
         const lab = [].map.call(document.querySelectorAll('#a2-manwrap .a2fl'), n => n.innerText.trim());
         const e = document.getElementById('a2-exp'), q = document.getElementById('a2-qty');
@@ -271,6 +288,13 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       check('R8c A failed add shows a red pill on Home with a Retry action', bad.hash === '#/fa2' && /bad/.test(bad.cls) && /didn/.test(bad.txt) && bad.retry, JSON.stringify(bad));
       const hit = await page.evaluate(() => { const b = document.getElementById('fa2-flgo'); const r = b.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); const fr = document.getElementById('fa2-flash').getBoundingClientRect(); const rb = document.getElementById('fa2-rf').getBoundingClientRect(); return { onTop: top === b || b.contains(top), over: top && (top.id || top.className), flashRight: Math.round(fr.right), rfLeft: Math.round(rb.left), gap: Math.round(rb.left - fr.right) }; });
       check('R8g Retry is tappable and the pill box stops short of the ↻ button', hit.onTop && hit.flashRight <= hit.rfLeft, JSON.stringify(hit));
+      // the phone dies here: reload (in-memory state gone); Home must find the unsent add and offer it back
+      hub.abortReads = 0;
+      const pendRec = await page.evaluate(() => JSON.parse(localStorage.getItem('tbx_fa2_pend') || 'null'));
+      check('N4a The unsent batch is kept on the phone with its events', pendRec && pendRec.events && pendRec.events.length === 1 && pendRec.events[0].lot === 'FAILLOT', JSON.stringify(pendRec && { label: pendRec.label, n: (pendRec.events || []).length }));
+      await page.reload(); await page.waitForSelector('#fa2-flgo', { timeout: 20000 });
+      const ob = await page.evaluate(() => ({ txt: document.getElementById('fa2-flash').innerText.replace(/\s+/g, ' '), discard: !!document.getElementById('fa2-fldc'), hash: location.hash }));
+      check('N4b After a reload Home reports the unsent add with Retry + Discard', ob.hash === '#/fa2' && /Inventory add \(1 line\) never reached the sheet/.test(ob.txt) && ob.discard, JSON.stringify(ob));
       const failBefore = hub.events('Received').filter(e => e.lot === 'FAILLOT').length;
       await page.click('#fa2-flgo');
       await page.waitForFunction(() => /Inventory add saved/.test((document.getElementById('fa2-flash') || {}).innerText || ''), null, { timeout: 15000 });
@@ -304,6 +328,8 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       check('R11f Submit button is labelled Submit', (await text(page, '#fa2-go')) === 'Submit', await text(page, '#fa2-go'));
       await page.click('#fa2-go');
       check('R11g Required field is enforced by name', /Reason is required/.test(await text(page, '#fa2-err')), await text(page, '#fa2-err'));
+      const ev = await page.evaluate(() => { const e = document.getElementById('fa2-err').getBoundingClientRect(), b = document.querySelector('.k-bar').getBoundingClientRect(); return { top: Math.round(e.top), bottom: Math.round(e.bottom), barTop: Math.round(b.top), vh: window.innerHeight, h: Math.round(e.height) }; });
+      check('N1 The error is on screen and above the sticky Submit bar (not hidden under it)', ev.h > 0 && ev.top >= 0 && ev.bottom <= ev.barTop + 1 && ev.bottom <= ev.vh, JSON.stringify(ev));
       // per-card quantity picker
       const card = page.locator('#fa2-pick .fa2-pk', { hasText: 'InSpace C' });
       await card.locator('.f2sub').click(); await sleep(250);
@@ -389,18 +415,26 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     note('S4 on hand for InSpace C after the double-apply', String((hub.master().find(r => r[0] === '0130') || [])[4]) + ' (should be 3)');
 
     // ---------------- S5: Send back (sports) ----------------
-    await go(page, '#/fa2/send', '#fa2-pick .fa2-row');
+    await go(page, '#/fa2/send', '#fa2-pick .fa2-pk');
     check('S5a Complete button disabled until tracking + picks', await page.locator('#fa2-go').isDisabled());
-    await page.locator('.fa2-qb[data-d="1"]').first().click();
+    async function pickSend(name) { const c = page.locator('#fa2-pick .fa2-pk', { hasText: name }); await c.locator('.f2sub').click(); await sleep(200); await c.locator('.pk-add').click(); await sleep(250); }
+    await pickSend('InSpace C');
     await page.fill('#fa2-trk', '1Z999');
     check('S5b Enabled after pick + tracking', !(await page.locator('#fa2-go').isDisabled()));
+    if (FIXED) {
+      const sendUi = await page.evaluate(() => ({ scan: !!document.getElementById('fa2-scanb'), q: !!document.getElementById('fa2-q'), eyebrows: document.querySelectorAll('#fa2-pick .fa2-eyebrow').length, tray: document.querySelectorAll('#fa2-tray .k-trow').length, bar: !!document.querySelector('.k-bar #fa2-go') }));
+      check('N7a Send back uses the shared kit: scan button, search, expiry eyebrows, tray, sticky Complete bar', sendUi.scan && sendUi.q && sendUi.eyebrows >= 3 && sendUi.tray === 1 && sendUi.bar, JSON.stringify(sendUi));
+    }
     hub.failNext = { action: 'batch', mode: 'abort-after-apply' };
     await page.click('#fa2-go');
     await page.waitForFunction(() => location.hash === '#/fa2' || /tap again|check your signal|didn.t answer/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 10000 });
     if (!(await page.evaluate(() => location.hash === '#/fa2'))) { await page.click('#fa2-go'); await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 10000 }); }
     if (FIXED) {
-      await go(page, '#/fa2/send', '#fa2-pick .fa2-row');
-      await page.locator('.fa2-qb[data-d="1"]').first().click(); await page.fill('#fa2-trk', '1Z2');
+      await page.waitForSelector('#fa2-flash', { timeout: 10000 });
+      const sbFlash = await page.evaluate(() => ({ txt: document.getElementById('fa2-flash').innerText.replace(/\s+/g, ' '), cls: document.getElementById('fa2-flash').className }));
+      check('N7b Home confirms the send-back (count + tracking) instead of landing silently', /Send-back saved — 1 item · 1 unit · tracking 1Z999/.test(sbFlash.txt) && /ok/.test(sbFlash.cls), JSON.stringify(sbFlash));
+      await go(page, '#/fa2/send', '#fa2-pick .fa2-pk');
+      await pickSend('InSpace C'); await page.fill('#fa2-trk', '1Z2');
       hub.failNext = { action: 'batch', mode: 'reject', err: 'tracking', at: 0 };
       await page.click('#fa2-go');
       await page.waitForFunction(() => ((document.getElementById('fa2-err') || {}).textContent || '').length > 0, null, { timeout: 10000 });
@@ -442,6 +476,12 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       check('R12i Manual add: full expiration date required', /full expiration date/.test(await text(page, '#fa2-err')));
       await page.fill('#u-mexp', '2027-09-30'); await page.fill('#u-mqty', '0'); await page.click('#u-addman');
       check('R12j Manual add: qty required', /Qty must be at least 1/.test(await text(page, '#fa2-err')));
+      await page.fill('#u-mqty', '1'); await page.fill('#u-mexp', dstr(-1)); await page.click('#u-addman');
+      check('N2b A past date asks for a second tap before it is filed', /tap Add to list again/.test(await text(page, '#fa2-err')), await text(page, '#fa2-err'));
+      await page.click('#u-addman'); await sleep(200);
+      check('N2c The second tap files it', (await page.locator('#u-tray .k-trow', { hasText: 'NEWLOT' }).count()) === 1);
+      await page.locator('#u-tray .k-trow .k-x').first().click(); await sleep(200);
+      await page.fill('#u-mref', '0132'); await page.fill('#u-mlot', 'NEWLOT'); await page.fill('#u-mexp', '2027-09-30');
       await page.fill('#u-mqty', '1'); await page.click('#u-addman'); await sleep(200);
       await page.locator('#u-tray .k-trow .k-x').first().click(); await sleep(200);
       await page.click('#u-man'); await sleep(200);
@@ -481,8 +521,13 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.waitForSelector('.k-ban', { timeout: 10000 });
     const last = hub.batches().slice(-1)[0];
     const late = last.events.find(e => e.flags === 'Late entry'), used = last.events.find(e => e.type === 'Used in case');
-    check('S6d Overdraft = late-entry Received(short) + Used(all) linked', late && late.qty === useQty - dOnHand && used && used.qty === useQty && late.linkedTo === used.eventId && late.exp === '2026-10-05', JSON.stringify({ lateQty: late && late.qty, lateExp: late && late.exp, usedQty: used && used.qty, receivedBy: late && late.receivedBy }));
+    check('S6d Overdraft = late-entry Received(short) + Used(all) linked', late && late.qty === useQty - dOnHand && used && used.qty === useQty && late.linkedTo === used.eventId && late.exp === EXP_D, JSON.stringify({ lateQty: late && late.qty, lateExp: late && late.exp, usedQty: used && used.qty, receivedBy: late && late.receivedBy }));
     check('S6e Used event carries case fields', used.caseBO === 'C123456' && used.facility === 'WCOSC' && used.surgeon === 'Dr. Test' && used.dos === dosDef);
+    if (FIXED) {
+      const rst = await page.evaluate(() => ({ bo: document.getElementById('u-bo').value, po: document.getElementById('u-po').value, fac: document.getElementById('u-fac').value, ban: (document.querySelector('.k-ban') || {}).innerText || '' }));
+      check('N5 After a save the C-number and PO clear (facility kept) and the banner names the saved case', rst.bo === '' && rst.po === '' && rst.fac === 'WCOSC' && /C123456/.test(rst.ban), JSON.stringify(rst));
+      await page.fill('#u-bo', 'C123456');
+    }
     const manualBtn = await page.locator('#u-man').count();
     bug('S6f usage of a ref/lot never entered: baseline has no manual add / fixed has + Manual', manualBtn === 0, manualBtn === 1, 'u-man=' + manualBtn);
     if (FIXED) {
@@ -500,7 +545,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await page.waitForSelector('.k-ban', { timeout: 10000 });
       const lb = hub.batches().slice(-1)[0];
       const lateM = lb.events.find(e => e.flags === 'Late entry' && e.ref === '0132'), usedM = lb.events.find(e => e.type === 'Used in case' && e.ref === '0132');
-      check('S6i Never-entered usage = late-entry Received(2, exp from form, source) + Used(2), net zero on hand', lateM && lateM.qty === 2 && lateM.exp === '2027-09-30' && lateM.receivedBy === 'Megan trunk' && usedM && usedM.qty === 2 && !(hub.master().find(r => r[0] === '0132')), JSON.stringify({ late: lateM && [lateM.qty, lateM.exp, lateM.receivedBy], used: usedM && usedM.qty }));
+      check('S6i Never-entered usage = late-entry Received(2, exp from form, source) + Used(2), net zero on hand', lateM && lateM.qty === 2 && lateM.exp === '2027-09-30' && lateM.from === 'Megan trunk' && !lateM.receivedBy && usedM && usedM.qty === 2 && !(hub.master().find(r => r[0] === '0132')), JSON.stringify({ late: lateM && [lateM.qty, lateM.exp, lateM.receivedBy], used: usedM && usedM.qty }));
     }
     note('S6 master after usage', JSON.stringify(hub.master().map(r => r[0] + ':' + r[4])));
 
@@ -627,9 +672,10 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     let dialogs = 0; page.on('dialog', async d => { dialogs++; await d.accept(); });
     const delTarget = page.locator('.fa2-row', { hasText: 'Jordan P' }).locator('.a-del');
     await delTarget.click();
+    if (FIXED) { await page.waitForSelector('#cf-yes', { timeout: 5000 }); await page.click('#cf-yes'); }
     await sleep(1500);
     const setCalls2 = hub.log.filter(b => b.action === 'admin' && b.op === 'teams_set').length - setCalls1;
-    bug('S9c deleting one member after a prior save → stacked listeners (2 confirms, 2 teams_set)', dialogs === 2 && setCalls2 === 2, dialogs === 1 && setCalls2 === 1 && hub.teams.length === 3, 'confirms=' + dialogs + ' teams_set=' + setCalls2 + ' teams now=' + hub.teams.map(t => t.name).join(','));
+    bug('S9c deleting one member → one in-app confirm (no window.confirm), one teams_set', dialogs === 2 && setCalls2 === 2, dialogs === 0 && setCalls2 === 1 && hub.teams.length === 3, 'confirms=' + dialogs + ' teams_set=' + setCalls2 + ' teams now=' + hub.teams.map(t => t.name).join(','));
 
     if (FIXED) {
       const syncBefore = hub.log.filter(b => b.action === 'admin' && b.op === 'sync_sharing').length;
@@ -655,6 +701,8 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     if (FIXED) {
       const cardTxt = (await text(page, '#fa2-list .fa2-row')).replace(/\s+/g, ' ');
       check('R1 Transactions card shows C#, account, surgeon, PO and total $', /C777/.test(cardTxt) && /WCOSC · Dr\. Modest/.test(cardTxt) && /PO PO-88/.test(cardTxt) && /\$1,325\.50/.test(cardTxt), cardTxt);
+      const allCards = (await page.locator('#fa2-list').innerText()).replace(/\s+/g, ' ');
+      check('N8 Import outcomes read as words, not raw codes', /Pending review/.test(allCards) && /Auto-applied/.test(allCards) && !/\bauto\b/.test(allCards), allCards.slice(0, 200));
     }
     await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(500); await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(500);
     await page.locator('.fa2-rev').first().click();
@@ -670,7 +718,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       hub.imports.push({ importId: 'imp2', ts: '2026-08-28T12:00:00Z', source: 'email', bo: 'C888', outcome: 'pending', pdf: '', detail: { hdr: { facility: 'Danbury', dos: '2026-08-28', surgeon: 'Dr. Ganal' }, lines: [{ refRaw: '0131', desc: 'InSpace D', lot: 'LOTD', qty: 1, issue: 'overdraft', lineTotal: 500 }] } });
       await page.evaluate(() => document.getElementById('fa2-rf').click()); await page.waitForSelector('.fa2-rev', { timeout: 10000 });
       await page.locator('.fa2-rev').first().click(); await page.waitForSelector('#t-deny', { timeout: 5000 });
-      await page.click('#t-deny'); await page.waitForSelector('.fa2-eyebrow', { timeout: 10000 }); /* S9's dialog handler accepts the confirm */
+      await page.click('#t-deny'); await page.waitForSelector('#cf-yes', { timeout: 5000 }); await page.click('#cf-yes'); await page.waitForSelector('.fa2-eyebrow', { timeout: 10000 });
       await go(page, '#/fa2/history', '#fa2-list .h-ev');
       const hist = await page.evaluate(() => [].map.call(document.querySelectorAll('#fa2-list .h-ev'), n => n.innerText.replace(/\s+/g, ' ')));
       const appr = hist.find(t => /Bill only approved/.test(t)), den = hist.find(t => /Bill only denied/.test(t));
@@ -705,10 +753,12 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       }
       check('R5c ↻ spins while loading and ticks on completion (Home, On hand, History, Transactions)', Object.values(fb).every(Boolean), JSON.stringify(fb));
       // the refresh on Send must not stack pick handlers (qty must step by 1 after a refresh)
-      await go(page, '#/fa2/send', '#fa2-pick .fa2-row');
+      await go(page, '#/fa2/send', '#fa2-pick .fa2-pk');
       await page.evaluate(() => document.getElementById('fa2-rf').click()); await sleep(600);
-      await page.locator('.fa2-qb[data-d="1"]').first().click();
-      check('R5b Refresh on Send re-wires the picker without stacking handlers', (await text(page, '.fa2-qv')) === '1', 'qty=' + (await text(page, '.fa2-qv')));
+      const rcIdx = await page.evaluate(() => [].findIndex.call(document.querySelectorAll('#fa2-pick .fa2-pk'), x => parseInt(x.querySelector('.f2bub').innerText, 10) >= 2));
+      const rc = page.locator('#fa2-pick .fa2-pk').nth(rcIdx);
+      await rc.locator('.f2sub').click(); await sleep(200); await rc.locator('.pk-p').click(); await sleep(150);
+      check('R5b Refresh on Send re-wires the picker without stacking handlers', (await rc.locator('.pk-n').innerText()) === '2', 'n=' + (await rc.locator('.pk-n').innerText()));
     }
 
     // ---------------- S13: legacy #/fa route ----------------
@@ -770,6 +820,11 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       check('S10e Re-scanning GTIN after the held lot creates a SECOND row (lot-less row remains)', rows2.length === 2 && /ZLOT1/.test(rows2[1]), JSON.stringify(rows2));
       await page.locator('#a2-tray .k-trow').first().locator('.k-x').click(); await sleep(200);
       check('S10f After deleting the lot-less row, Save enables', !(await page.locator('#a2-go').isDisabled()));
+      await page.evaluate(() => window.__TBX_ONCODE('(17)280101(10)HELDX')); await sleep(300);
+      const held = await page.evaluate(() => ({ vis: !document.getElementById('a2-held').hidden, txt: document.getElementById('a2-held').innerText, rows: document.querySelectorAll('#a2-tray .k-trow').length }));
+      check('N11a A lot scanned with nothing to attach to shows as held (with an ×)', held.vis && /HELDX/.test(held.txt) && held.rows === 1, JSON.stringify(held));
+      await page.click('#a2-heldx'); await sleep(150);
+      check('N11b × forgets the held lot', await page.evaluate(() => document.getElementById('a2-held').hidden));
     }
     await page.click('#a2-go');
     await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 10000 });
@@ -778,6 +833,22 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     const scanEv = hub.events('Received').filter(e => e.lot === 'ZLOT1').slice(-1)[0] || {};
     check('S10g Scanned exp with DD=00 is sent as month-only "2027-06" (manual path enforces full date)', scanEv.exp === '2027-06' && scanEv.entryMethod === 'scan' && scanEv.lot === 'ZLOT1', JSON.stringify({ exp: scanEv.exp, lot: scanEv.lot, entryMethod: scanEv.entryMethod }));
 
+    if (FIXED) {
+      // ---------------- N3: the in-progress drop survives a reload ----------------
+      await go(page, '#/fa2/add', '#fa2-drop'); await sleep(300);
+      check('N3a A completed drop leaves no draft behind', (await page.locator('#fa2-resume').count()) === 0 && (await page.inputValue('#fa2-drop')) === '', 'drop=' + (await page.inputValue('#fa2-drop')));
+      await page.fill('#fa2-drop', 'Draft drop'); await pickChip(page, 'fa2-from', 'Matt'); await pickChip(page, 'fa2-rb', 'Katie F');
+      await page.click('#fa2-go'); await page.waitForSelector('#a2-go', { timeout: 10000 });
+      await page.click('#a2-man'); await page.fill('#a2-ref', '0130'); await page.fill('#a2-lot', 'DRAFTLOT'); await page.fill('#a2-exp', '2028-05-31'); await page.click('#a2-addman'); await sleep(250);
+      await page.reload(); await page.waitForSelector('#fa2-resume', { timeout: 20000 });
+      const rsm = await page.evaluate(() => ({ txt: document.getElementById('fa2-resume').innerText.replace(/\s+/g, ' '), drop: document.getElementById('fa2-drop').value, from: (document.querySelector('#fa2-from .fa2-chip.on') || {}).innerText, go: document.getElementById('fa2-go').innerText }));
+      check('N3b After a reload Add offers to resume: form restored, 1 item in the tray', /1 item still in the tray/.test(rsm.txt) && rsm.drop === 'Draft drop' && rsm.from === 'Matt' && /Continue — 1 item/.test(rsm.go), JSON.stringify(rsm));
+      await page.click('#fa2-go'); await page.waitForSelector('#a2-go', { timeout: 10000 }); await sleep(300);
+      const trayTxt = await page.evaluate(() => [].map.call(document.querySelectorAll('#a2-tray .k-trow'), n => n.innerText.replace(/\s+/g, ' ')).join('|'));
+      check('N3c The scanned tray is back, Save enabled', /DRAFTLOT/.test(trayTxt) && /2028-05-31/.test(trayTxt) && !(await page.locator('#a2-go').isDisabled()), trayTxt);
+      await go(page, '#/fa2/add', '#fa2-resume'); await page.click('#fa2-restart'); await sleep(300);
+      check('N3d Start over clears the draft', (await page.locator('#fa2-resume').count()) === 0 && (await page.inputValue('#fa2-drop')) === '' && !(await page.evaluate(() => localStorage.getItem('tbx_fa2_draft'))));
+    }
     check('S-errors no uncaught page errors during sports flows', !(hub.pageErrors && hub.pageErrors.length), (hub.pageErrors || []).join(' || ').slice(0, 300));
     await ctx.close();
 
@@ -797,6 +868,24 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       await r.ctx.close();
     }
 
+    if (FIXED) {
+      // ---------------- N6: History beyond the read window ----------------
+      const hubH = new FakeHub({ now: fixedNow });
+      const many = []; for (let i = 0; i < 305; i++) many.push({ type: 'Received', ref: '0130', desc: 'InSpace C', lot: 'BULK' + i, exp: EXP_C, qty: 1, dropName: 'Bulk drop', from: 'Nate', receivedBy: 'Jordan P' });
+      hubH.seed(many);
+      const rH = await newPage(browser, hubH);
+      await ctGate(rH.page, CT_PW, 'Nate');
+      await go(rH.page, '#/fa2/history', '#fa2-list .h-ev');
+      const nBefore = await rH.page.locator('#fa2-list .h-ev').count();
+      check('N6a History shows the newest 300 and offers the rest', nBefore === 300 && (await rH.page.locator('#fa2-more').count()) === 1, 'events=' + nBefore);
+      await rH.page.click('#fa2-more');
+      await rH.page.waitForFunction(() => !document.getElementById('fa2-more') && document.querySelectorAll('#fa2-list .h-ev').length > 300, null, { timeout: 20000 });
+      const nAfter = await rH.page.locator('#fa2-list .h-ev').count();
+      check('N6b Show older loads the whole ledger and the button goes away', nAfter === 305, 'events=' + nAfter);
+      check('N6-errors no uncaught page errors', !(hubH.pageErrors && hubH.pageErrors.length), (hubH.pageErrors || []).join(' || ').slice(0, 300));
+      await rH.ctx.close();
+    }
+
     // ---------------- S12: F&A-side login ----------------
     {
       const hub3 = new FakeHub({ now: fixedNow });
@@ -808,8 +897,9 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       check('S12a FA password at CT gate → fa scope creds, F&A home (3 tiles)', fcreds && fcreds.scope === 'fa' && (await r.page.locator('.ct-big').count()) === 3);
       await go(r.page, '#/fa2/history', '#fa2-list .h-ev');
       check('S12b FA history has no File Correction', (await r.page.locator('.h-fix').count()) === 0);
-      await go(r.page, '#/fa2/send', '#fa2-pick .fa2-row');
-      await r.page.locator('.fa2-qb[data-d="1"]').first().click(); await r.page.fill('#fa2-trk', '1Z1');
+      await go(r.page, '#/fa2/send', '#fa2-pick .fa2-pk');
+      { const c = r.page.locator('#fa2-pick .fa2-pk').first(); await c.locator('.f2sub').click(); await sleep(200); await c.locator('.pk-add').click(); await sleep(250); }
+      await r.page.fill('#fa2-trk', '1Z1');
       check('S12c FA send-back stays disabled until a name is picked', await r.page.locator('#fa2-go').isDisabled());
       await r.page.locator('#fa2-nm .fa2-chip').first().click();
       check('S12d Enabled after name', !(await r.page.locator('#fa2-go').isDisabled()));

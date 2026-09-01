@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.103';
+  var APPVER = '4.104';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1987,7 +1987,7 @@ var GLOSS = {
       });
   }
   function ccTick() {
-    if (!CC.running || (CC.view !== 'count' && CC.view !== 'fa2add2' && CC.view !== 'fa2ret')) return;
+    if (!CC.running || (CC.view !== 'count' && CC.view !== 'fa2add2' && CC.view !== 'fa2ret' && CC.view !== 'fa2send')) return;
     var v = document.getElementById('ccvid');
     if (!v || v.readyState < 2 || !v.videoWidth) {
       CC.stall++;
@@ -2190,7 +2190,7 @@ var GLOSS = {
   function ccOnCode(txt) {
     var now = Date.now();
     if (CC.view === 'fa2add2') { fa2ScanCode(txt, now); return; }
-    if (CC.view === 'fa2ret') { fa2RetCode(txt, now); return; }
+    if (CC.view === 'fa2ret' || CC.view === 'fa2send') { fa2RetCode(txt, now); return; }
 
     if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(120); return; }
     CC.cool = { code: txt, t: now, ms: 2200 };
@@ -3035,7 +3035,7 @@ var GLOSS = {
     FA2.lastWarm = Date.now();
     fa2Call('ping').then(function () {}, function () {});
   }
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') fa2Warm(); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { fa2Warm(); if (CC.view === 'fa2home') fa2OutboxCheck(); } });
   window.addEventListener('pageshow', function () { fa2Warm(); });
   function fa2Retryable(action, extra) {
     if (action === 'read' || action === 'ping' || action === 'import_list') return true;
@@ -3098,10 +3098,11 @@ var GLOSS = {
     var c = fa2CacheGet();
     if (c && !fa2Sane(c.d)) { fa2CacheKill(); c = null; }
     if (!force && c && Date.now() - c.t < 60000) return Promise.resolve(c.d);
-    return fa2Call('read', { limit: 300 }).then(function (j) {
+    var lim = FA2.readLimit || 300;
+    return fa2Call('read', { limit: lim }).then(function (j) {
       if (fa2Sane(j)) { fa2CacheSet(j); return j; }
       // Retry once: these blanks are transient rebuild races, not real states.
-      return fa2Call('read', { limit: 300 }).then(function (j2) {
+      return fa2Call('read', { limit: lim }).then(function (j2) {
         if (fa2Sane(j2)) { fa2CacheSet(j2); return j2; }
         if (c) return c.d;
         throw new Error((j2 && j2.err) || 'server');
@@ -3147,7 +3148,7 @@ var GLOSS = {
   // Did a batch with this opId reach the ledger? Used when the reply was lost,
   // so a dropped response never turns into a "tap again" that double-applies.
   function fa2Landed(opId) {
-    return fa2Call('read', { limit: 40 }).then(function (j) {
+    return fa2Call('read', { limit: 120 }).then(function (j) {
       if (!fa2Sane(j)) return null;
       var ix = j.ledgerCols.indexOf('OpId'); if (ix < 0) return null;
       return (j.ledger || []).some(function (r) { return String(r[ix]) === opId; });
@@ -3161,15 +3162,54 @@ var GLOSS = {
     var stale = (p && p.label === label && p.sig !== sig) ? p.opId : null;
     if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
     var pre = stale ? fa2Landed(stale) : Promise.resolve(false);
+    FA2.inflight = (FA2.inflight || 0) + 1;
     return pre.then(function (landed) {
       if (landed) { fa2PendSet(null); fa2CacheKill(); var e0 = new Error('Your earlier attempt did go through \u2014 check History before saving this again.'); e0.hub = true; throw e0; }
-      fa2PendSet({ opId: opId, label: label, sig: sig });
+      // The events ride along in the record, so a save the phone lost mid-flight
+      // (app killed, page reclaimed) can be re-sent from Home under the same opId.
+      fa2PendSet({ opId: opId, label: label, sig: sig, events: events, t: Date.now() });
       return fa2Call('batch', { opId: opId, events: events }).then(function (j) {
         if (j && j.ok) return j;
         var e1 = new Error((j && j.err) || 'server'); e1.hub = true; e1.at = j ? j.at : undefined; throw e1;
       }, function () {
         return fa2Landed(opId).then(function (landed2) { if (landed2) return { ok: true, recovered: true }; throw new Error('net'); });
       }).then(function (j) { fa2PendSet(null); fa2CacheKill(); return j; });
+    }).then(function (j) { FA2.inflight--; return j; }, function (e) {
+      FA2.inflight--;
+      // The hub answered no: nothing to recover later, so drop the record (a 'dup' means it did land).
+      if (e && e.hub) { fa2PendSet(null); if (String(e.message) === 'dup') fa2CacheKill(); }
+      throw e;
+    });
+  }
+  // A batch the phone never got an answer for is still in tbx_fa2_pend with its
+  // events. Home asks the hub whether it landed and, if not, offers to send it
+  // again under the same opId - never silently, never twice.
+  var FA2_OUTBOX_NAMES = { add: 'Inventory add', use: 'Case usage', ret: 'Removal', send: 'Send-back', fix: 'Correction', dropfix: 'Drop re-file' };
+  function fa2OutboxName(p) { return FA2_OUTBOX_NAMES[String(p.label || '').split('-')[0]] || 'A save'; }
+  function fa2OutboxLabel(p) { var n = (p.events || []).length; return fa2OutboxName(p) + ' (' + n + ' line' + (n === 1 ? '' : 's') + ')'; }
+  function fa2OutboxCheck() {
+    var p = fa2PendGet();
+    if (!p || !p.events || !p.events.length || (FA2.inflight || 0) > 0 || FA2.outboxBusy) return;
+    if (FA2.flash && FA2.flash.state === 'busy') return;
+    FA2.outboxBusy = true;
+    fa2Flash('busy', 'Checking an unsent save\u2026');
+    fa2Landed(p.opId).then(function (landed) {
+      FA2.outboxBusy = false;
+      var lb = fa2OutboxLabel(p);
+      if (landed === true) { fa2PendSet(null); fa2CacheKill(); fa2Flash('ok', lb + ' did reach the sheet \u2014 nothing lost.'); if (CC.view === 'fa2home') fa2HomeLoad(true); return; }
+      fa2Flash('bad', lb + (landed === null ? ' is unsent and the server can\u2019t be reached right now.' : ' never reached the sheet.'),
+        function () { fa2OutboxSend(p); }, function () { fa2PendSet(null); });
+    });
+  }
+  function fa2OutboxSend(p) {
+    var lb = fa2OutboxLabel(p);
+    fa2Flash('busy', 'Sending ' + lb.toLowerCase() + '\u2026');
+    fa2Submit(p.events, p.label, null).then(function () {
+      var n = (p.events || []).length;
+      fa2Flash('ok', fa2OutboxName(p) + ' saved \u2014 ' + n + ' line' + (n === 1 ? '' : 's'));
+      if (CC.view === 'fa2home') fa2HomeLoad(true); else if (CC.view === 'fa2onhand') fa2OnHandLoad(true);
+    }, function (e) {
+      fa2Flash('bad', lb + ': ' + fa2FailMsg(e, 'still couldn\u2019t reach the server.'), (e && e.hub) ? null : function () { fa2OutboxSend(p); }, function () { fa2PendSet(null); });
     });
   }
   var FA2_ERRS = { scope: 'This login can only send product back to Stryker.', auth: 'Access token rejected \u2014 re-enter the CT password.', tracking: 'Tracking # is required.', exp: 'Expiration is required.', qty: 'Quantity can\u2019t be zero.', reverses: 'Nothing to void.', type: 'Unknown event type.', dup: 'Already saved.' };
@@ -3180,7 +3220,14 @@ var GLOSS = {
     if (k === 'badreply') return 'The sheet server sent back an error page instead of data \u2014 try again in a minute.';
     return net || 'Couldn\u2019t reach the server \u2014 check your signal and tap again.';
   }
-  function fa2Err(id, msg) { var el = document.getElementById(id); if (el) { el.textContent = msg; el.hidden = false; } }
+  function fa2Err(id, msg) {
+    var el = document.getElementById(id); if (!el) return;
+    el.textContent = msg; el.hidden = false;
+    // Make sure it is actually on screen (and not tucked under the sticky action bar).
+    try { el.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+    var bar = document.querySelector('.k-bar');
+    if (bar) { var eb = el.getBoundingClientRect().bottom, bt = bar.getBoundingClientRect().top; if (eb > bt - 4 && bar.getBoundingClientRect().bottom <= window.innerHeight) window.scrollBy(0, eb - bt + 8); }
+  }
   function fa2Wide(on) { if (document.body) document.body.classList.toggle('fa2-wide', !!on); }
   function fa2Spin(on) { var b = document.getElementById('fa2-rf'); if (b) { b.classList.toggle('spin', !!on); b.disabled = !!on; } }
   // Every refresh button spins while it works and ticks when it's done, so a tap never looks ignored.
@@ -3206,6 +3253,9 @@ var GLOSS = {
         inner +
         '<div id="fa2-err" class="cc-err" hidden></div>' +
       '</div>');
+    // A sticky bottom bar would otherwise hide the error below the fold: keep the message above it.
+    var er = document.getElementById('fa2-err'), bar = er && er.parentNode ? er.parentNode.querySelector('.k-bar') : null;
+    if (er && bar) bar.parentNode.insertBefore(er, bar);
     if (onRefresh) fa2RefreshWire(onRefresh);
   }
   function fa2Amt(v) { if (v == null || String(v).trim() === '') return null; var n = Number(String(v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : null; }
@@ -3238,8 +3288,8 @@ var GLOSS = {
   }
 
   /* ---------- status pill (survives navigation; drawn wherever a host exists) ---------- */
-  function fa2Flash(state, msg, retry) {
-    FA2.flash = { state: state, msg: msg, retry: retry || null };
+  function fa2Flash(state, msg, retry, discard) {
+    FA2.flash = { state: state, msg: msg, retry: retry || null, discard: discard || null };
     fa2FlashDraw();
   }
   function fa2FlashClear() { FA2.flash = null; clearTimeout(FA2.flashTO); fa2FlashDraw(); }
@@ -3249,24 +3299,48 @@ var GLOSS = {
     clearTimeout(FA2.flashTO);
     if (!fl) { host.hidden = true; host.innerHTML = ''; return; }
     host.className = 'fa2-flash ' + fl.state;
+    var rfn = fl.retry && fl.retry.fn ? fl.retry.fn : fl.retry, rlb = (fl.retry && fl.retry.label) || 'Retry';
     host.innerHTML = '<span class="fa2-fl-dot"></span><span>' + esc(fl.msg) + '</span>' +
-      (fl.retry ? '<button type="button" id="fa2-flgo" class="cc-link fa2-fl-act">Retry</button>' : '');
+      (rfn ? '<button type="button" id="fa2-flgo" class="cc-link fa2-fl-act">' + esc(rlb) + '</button>' : '') +
+      (fl.discard ? '<button type="button" id="fa2-fldc" class="cc-link fa2-fl-dis">Discard</button>' : '');
     host.hidden = false;
-    if (fl.retry) document.getElementById('fa2-flgo').addEventListener('click', function () { var r = fl.retry; fa2FlashClear(); r(); });
+    if (rfn) document.getElementById('fa2-flgo').addEventListener('click', function () { fa2FlashClear(); rfn(); });
+    if (fl.discard) document.getElementById('fa2-fldc').addEventListener('click', function () { var d = fl.discard; fa2FlashClear(); d(); });
     // Success clears itself once it has actually been on screen for a few seconds.
     if (fl.state === 'ok') FA2.flashTO = setTimeout(function () { if (FA2.flash && FA2.flash.state === 'ok') fa2FlashClear(); }, 6000);
   }
   // The drop is sent in the background so the phone can leave the scanner screen
   // immediately; the pill on Home reports processing / saved / failed-with-retry.
-  function fa2AddRun(evs, label, lines, units) {
+  function fa2AddRun(evs, label, lines, units, draft) {
     fa2Flash('busy', 'Inventory add processing\u2026');
     fa2Submit(evs, label, null).then(function () {
       fa2Flash('ok', 'Inventory add saved \u2014 ' + lines + ' item' + (lines === 1 ? '' : 's') + ' \u00b7 ' + units + ' unit' + (units === 1 ? '' : 's'));
       if (CC.view === 'fa2home') fa2HomeLoad(true);
       else if (CC.view === 'fa2onhand') fa2OnHandLoad(true);
     }, function (e) {
-      fa2Flash('bad', fa2FailMsg(e, 'Inventory add didn\u2019t save.'), function () { fa2AddRun(evs, label, lines, units); });
+      if (e && e.hub && draft) {
+        // The sheet refused it: put the whole drop back as a draft so it can be fixed, not retyped.
+        fa2DraftSet(draft);
+        fa2Flash('bad', fa2FailMsg(e, 'Inventory add didn\u2019t save.') + ' The drop is kept on this phone \u2014 open Add inventory to fix it.', { label: 'Open', fn: function () { location.hash = '#/fa2/add'; } });
+        return;
+      }
+      fa2Flash('bad', fa2FailMsg(e, 'Inventory add didn\u2019t save.'), function () { fa2AddRun(evs, label, lines, units, draft); });
     });
+  }
+  // In-progress drop (step-1 form + scanned tray), mirrored to the phone so a
+  // back-swipe, a phone call or Safari reclaiming the page never loses the scans.
+  function fa2DraftGet() { try { return JSON.parse(localStorage.getItem('tbx_fa2_draft') || 'null'); } catch (e) { return null; } }
+  function fa2DraftSet(d) { try { if (d) localStorage.setItem('tbx_fa2_draft', JSON.stringify(d)); else localStorage.removeItem('tbx_fa2_draft'); } catch (e) {} }
+  function fa2DraftSave() { if (FA2.form && FA2.form.kind === 'add') fa2DraftSet({ form: FA2.form, a2: FA2.a2 || { items: {}, order: [] } }); }
+  // Who can hand product over: the CT device roster (what the cycle-count join returns)
+  // plus anyone Admin lists on the Sports team. Hardcoded names only as a last resort.
+  function fa2FromNames() {
+    var out = [], seen = {};
+    function add(n) { n = String(n || '').trim(); if (n && !seen[n.toLowerCase()]) { seen[n.toLowerCase()] = 1; out.push(n); } }
+    var ros = []; try { ros = JSON.parse(ccLS(terrKey('_roster')) || '[]') || []; } catch (e) { ros = []; }
+    ros.forEach(add); fa2Teams('sports').forEach(add);
+    if (!out.length) ['Megan', 'Matt', 'Mia', 'Manny', 'Isabella', 'Nate'].forEach(add);
+    return out;
   }
 
   /* ---------- Home ---------- */
@@ -3279,8 +3353,8 @@ var GLOSS = {
     var tiles;
     if (fa) {
       tiles =
-        '<button id="fa2-onhand" class="ct-big">On hand<span>Product in your possession \u2014 first to expire on top</span></button>' +
-        '<button id="fa2-send" class="ct-big">Send back to Stryker<span>Scan out expiring or unused product \u2014 tracking # required</span></button>' +
+        '<button id="fa2-onhand" class="ct-big">On hand<span>Product in your possession \u2014 expired and send-back lots on top</span></button>' +
+        '<button id="fa2-send" class="ct-big">Send back to Stryker<span>Scan or tap what goes back \u2014 tracking # required</span></button>' +
         '<button id="fa2-hist" class="ct-big">History<span>Every event, newest first</span></button>';
     } else {
       tiles =
@@ -3308,6 +3382,7 @@ var GLOSS = {
     fa2RefreshWire(function () { return fa2HomeLoad(true); });
     fa2FlashDraw();
     fa2HomeLoad(false);
+    fa2OutboxCheck();
   }
   function fa2HomeLoad(force) {
     var p = document.getElementById('fa2-pills'), m = document.getElementById('fa2-msg');
@@ -3315,15 +3390,19 @@ var GLOSS = {
     var g = ++FA2.gen;
     return fa2Load(force).then(function (d) {
       if (CC.view !== 'fa2home' || g !== FA2.gen) return;
-      var units = 0, soon = 0, exp = 0;
+      var units = 0, soon = 0, sb = 0, exp = 0;
       (d.master || []).forEach(function (r) {
-        var q = fa2Num(r[4]); units += q;
-        if (r[5] === 'EXPIRED') exp += q; else if (r[5] !== 'OK') soon += q;
+        var q = fa2Num(r[4]); if (q <= 0) return; units += q;
+        var b = fa2RowBand(r);
+        if (b === 0) exp += q; else if (b === 1) sb += q; else if (b === 2) soon += q;
       });
+      var goSend = fa2IsFA() ? '#/fa2/send' : '#/fa2/return';
       if (p) p.innerHTML =
         '<span class="cc-pill ok">' + units + ' on hand</span>' +
-        (soon ? '<span class="cc-pill wait">' + soon + ' \u22643 mo</span>' : '') +
-        (exp ? '<span class="cc-pill bad">' + exp + ' expired</span>' : '');
+        (exp ? '<button type="button" class="cc-pill bad fa2-pillgo" data-h="' + goSend + '">' + exp + ' expired</button>' : '') +
+        (sb ? '<button type="button" class="cc-pill wait fa2-pillgo" data-h="' + goSend + '">' + sb + ' send back</button>' : '') +
+        (soon ? '<span class="cc-pill busy">' + soon + ' \u22643 mo</span>' : '');
+      if (p) p.querySelectorAll('.fa2-pillgo').forEach(function (b) { b.addEventListener('click', function () { location.hash = b.getAttribute('data-h'); }); });
       if (m) m.textContent = '';
       if (!fa2IsFA()) fa2Call('import_list').then(function (j) {
         if (!j || !j.ok || CC.view !== 'fa2home') return;
@@ -3350,7 +3429,9 @@ var GLOSS = {
       '.f2top b{font-size:15px}' +
       '.f2chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}' +
       '.f2chip.ok{background:rgba(90,200,120,.18);color:#7ed99b}' +
-      '.f2chip.soon{background:rgba(240,180,60,.2);color:#f0c060}' +
+      '.f2chip.soon{background:rgba(90,150,220,.2);color:#8fb9ea}' +
+      '.f2chip.sb{background:rgba(240,180,60,.22);color:#f0c060}' +
+      '.a2held{display:flex;align-items:center;gap:8px;margin:-4px 0 8px}' +
       '.f2chip.exp{background:rgba(240,90,90,.22);color:#f28b8b}' +
       '.f2desc{margin-top:2px;font-size:13px;color:#d8d8d8}' +
       '.f2sub{margin-top:2px;font-size:12px;color:#9a9a9a}' +
@@ -3414,10 +3495,28 @@ var GLOSS = {
   }
   function expNorm(e) { return fa2ExpParse(e) || String(e == null ? '' : e).trim(); }
   function expBand(e) { var n = expNorm(e); if (!/^\d{4}-\d{2}-\d{2}$/.test(n)) return 2; var d = new Date(n + 'T12:00:00'); var now = new Date(); now.setHours(0, 0, 0, 0); if (d < now) return 0; var soon = new Date(now); soon.setMonth(soon.getMonth() + 3); return d <= soon ? 1 : 2; }
-  function expChip(e) { var b = expBand(e); return '<span class="f2chip ' + (b === 0 ? 'exp">Expired' : b === 1 ? 'soon">\u22643 mo' : 'ok">OK') + '</span>'; }
+  // 0 expired \u00b7 1 send back (\u22642 mo) \u00b7 2 expiring (\u22643 mo) \u00b7 3 ok. The sheet's own status
+  // column wins (same bands the weekly email uses); the date math only fills in when it is missing.
+  function expBand4(e) {
+    var n = expNorm(e); if (!/^\d{4}-\d{2}-\d{2}$/.test(n)) return 3;
+    var d = new Date(n + 'T12:00:00'), now = new Date(); now.setHours(0, 0, 0, 0);
+    if (d < now) return 0;
+    var m2 = new Date(now); m2.setMonth(m2.getMonth() + 2); if (d <= m2) return 1;
+    var m3 = new Date(now); m3.setMonth(m3.getMonth() + 3); return d <= m3 ? 2 : 3;
+  }
+  function fa2RowBand(r) {
+    var st = String(r[5] || '');
+    if (st === 'EXPIRED') return 0;
+    if (st.indexOf('SEND BACK') === 0) return 1;
+    if (st === '\u22643 MO') return 2;
+    if (st === 'OK') return 3;
+    return expBand4(r[3]);
+  }
+  var FA2_BAND_NAMES = ['Expired', 'Send back \u22642 mo', 'Expiring \u22643 mo', 'OK'], FA2_BAND_CLS = ['bad', 'warn', 'soon', 'ok'];
+  function fa2RowChip(r) { var b = fa2RowBand(r); return '<span class="f2chip ' + ['exp">Expired', 'sb">Send back', 'soon">\u22643 mo', 'ok">OK'][b] + '</span>'; }
   function fa2BandSort(rows) {
     return rows.slice().sort(function (a, b) {
-      var ba = expBand(a[3]), bb = expBand(b[3]);
+      var ba = fa2RowBand(a), bb = fa2RowBand(b);
       if (ba !== bb) return ba - bb;
       var ra = String(a[0]), rb = String(b[0]);
       if (ra !== rb) return ra < rb ? -1 : 1;
@@ -3538,14 +3637,13 @@ var GLOSS = {
     var rows = (FA2.ohD.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
     if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand \u2014 all clear.') + '</div>'; return; }
     rows = fa2BandSort(rows);
-    var names = ['Expired', 'Expiring \u22643 mo', 'OK'];
     var html = '', last = -1;
     rows.forEach(function (r) {
-      var b = expBand(r[3]);
-      if (b !== last) { html += '<div class="fa2-eyebrow ' + ['bad', 'warn', 'ok'][b] + '">' + names[b] + '</div>'; last = b; }
+      var b = fa2RowBand(r);
+      if (b !== last) { html += '<div class="fa2-eyebrow ' + FA2_BAND_CLS[b] + '">' + FA2_BAND_NAMES[b] + '</div>'; last = b; }
       html +=
           '<div class="f2c">' +
-            '<div class="f2top"><b>' + esc(r[0]) + '</b>' + expChip(r[3]) + '</div>' +
+            '<div class="f2top"><b>' + esc(r[0]) + '</b>' + fa2RowChip(r) + '</div>' +
             (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
             '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (r[6] ? ' \u00b7 ' + esc(r[6]) : '') + '</div>' +
             '<div class="f2qty"><b>' + fa2Num(r[4]) + '</b> on hand</div>' +
@@ -3678,8 +3776,13 @@ var GLOSS = {
         '<div class="h-lines" hidden>' + lines + '</div>' +
       '</div>';
     }).join('');
+    // The read is capped; once the ledger is longer than the window, offer the rest.
+    var lim = FA2.readLimit || 300;
+    if (L.length >= lim) el.innerHTML += '<button type="button" id="fa2-more" class="cc-mini">Show older events</button>';
     FA2.histGroups = groups;
     el.onclick = function (e) {
+      var mo = e.target.closest ? e.target.closest('#fa2-more') : null;
+      if (mo) { mo.disabled = true; mo.textContent = 'Loading\u2026'; FA2.readLimit = Math.min(lim * 3, 6000); fa2CacheKill(); fa2HistLoad(true); return; }
       var fx = e.target.closest ? e.target.closest('.h-fix') : null;
       if (fx) { e.stopPropagation(); fa2Correct(fx.dataset.eid); return; }
       var gx = e.target.closest ? e.target.closest('.h-gfix') : null;
@@ -3853,7 +3956,7 @@ var GLOSS = {
   function fa2ExpQtyRow(expId, qtyId, expVal, qtyVal) {
     return '<div class="fa2-2col">' +
         '<label class="a2f" for="' + expId + '"><span class="a2fl">Expiration</span>' +
-          '<input id="' + expId + '" class="cc-in" type="date" value="' + esc(expVal === undefined ? fa2Today() : (expVal || '')) + '"></label>' +
+          '<input id="' + expId + '" class="cc-in" type="date"' + (expVal === undefined ? ' data-def="1"' : '') + ' value="' + esc(expVal === undefined ? fa2Today() : (expVal || '')) + '"></label>' +
         '<label class="a2f" for="' + qtyId + '"><span class="a2fl">QTY</span>' +
           '<input id="' + qtyId + '" class="cc-in" type="number" min="1" inputmode="numeric" value="' + esc(String(qtyVal === undefined ? 1 : qtyVal)) + '"></label>' +
       '</div>';
@@ -3872,8 +3975,24 @@ var GLOSS = {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
       el.classList.add(v <= fa2Today() ? 'x-bad' : expBand(v) === 1 ? 'x-warn' : 'x-ok');
     }
-    el.addEventListener('input', chk); el.addEventListener('change', chk);
+    function touched() { delete el.dataset.def; delete el.dataset.ack; chk(); }
+    if (!el.dataset.wired) { el.dataset.wired = '1'; el.addEventListener('input', touched); el.addEventListener('change', touched); }
     chk();
+  }
+  // Manual dates: the untouched today-default is never a real expiry, and a date that
+  // is today or already past has to be asked for twice.
+  function fa2ExpGate(expId, errId, again) {
+    var el = document.getElementById(expId); if (!el) return true;
+    var v = el.value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) { fa2Err(errId, 'Pick a full expiration date (day, month, year).'); return false; }
+    if (el.dataset.def) { fa2Err(errId, 'Set the expiration date \u2014 it\u2019s still today\u2019s date.'); return false; }
+    if (v <= fa2Today() && el.dataset.ack !== v) { el.dataset.ack = v; fa2Err(errId, 'That date is today or already past \u2014 tap ' + again + ' again to file it as expired.'); return false; }
+    return true;
+  }
+  function fa2ExpReset(expId) {
+    var el = document.getElementById(expId); if (!el) return;
+    el.value = fa2Today(); el.dataset.def = '1'; delete el.dataset.ack;
+    fa2ExpWire(expId);
   }
   function fa2ItemRows(items, needLot) {
     return items.map(function (it, i) {
@@ -3895,14 +4014,23 @@ var GLOSS = {
     if (!fa2Ensure(fa2Add)) return; fa2Wide(true);
     CC.view = 'fa2add';
     fa2KitCss();
-    if (!FA2.form || FA2.form.kind !== 'add') FA2.form = { kind: 'add', drop: '', date: fa2Today(), from: '', fromOther: '', rb: '', accName: '', accLoc: '', note: '', items: [] };
+    if (!FA2.form || FA2.form.kind !== 'add') {
+      var dr = fa2DraftGet();
+      if (dr && dr.form && dr.form.kind === 'add') { FA2.form = dr.form; FA2.a2 = (dr.a2 && dr.a2.order) ? dr.a2 : { items: {}, order: [] }; FA2.resumed = true; }
+      else { FA2.form = { kind: 'add', drop: '', date: fa2Today(), from: '', fromOther: '', rb: '', accName: '', accLoc: '', note: '', items: [] }; FA2.a2 = { items: {}, order: [] }; FA2.resumed = false; }
+    }
     var f = FA2.form;
+    var nItems = (FA2.a2 && FA2.a2.order) ? FA2.a2.order.length : 0;
     var faNames = fa2Teams('fa');
     var rbOpts = faNames.concat(['Bloomfield Warehouse', 'Account']);
+    var fromNames = fa2FromNames();
+    if (f.from && fromNames.indexOf(f.from) < 0 && !fa2FromNeeds(f.from)) fromNames.unshift(f.from);
+    var fromOpts = fromNames.concat(['Territory Transfer', 'Other']);
     fa2Shell('Add inventory', 'Record a drop to the F&amp;A team.',
+      (FA2.resumed && nItems ? '<div id="fa2-resume" class="cc-sub2 fa2-resume">Picked up where you left off \u2014 ' + nItems + ' item' + (nItems === 1 ? '' : 's') + ' still in the tray. <button type="button" id="fa2-restart" class="cc-link">Start over</button></div>' : '') +
       '<input id="fa2-drop" class="cc-in" placeholder="Drop name (e.g. Hartford office drop)" value="' + esc(f.drop) + '">' +
       '<input id="fa2-date" class="cc-in" type="date" value="' + esc(f.date) + '">' +
-      '<div class="fa2-lab">From</div>' + fa2Chips('fa2-from', ['Megan', 'Matt', 'Mia', 'Manny', 'Isabella', 'Nate', 'Territory Transfer', 'Other'], f.from) +
+      '<div class="fa2-lab">From</div>' + fa2Chips('fa2-from', fromOpts, f.from) +
       '<input id="fa2-fromo" class="cc-in" placeholder="' + esc(fa2FromPh(f.from)) + '" value="' + esc(f.fromOther) + '"' + (fa2FromNeeds(f.from) ? '' : ' hidden') + '>' +
       '<div class="fa2-lab">Received by</div>' + (rbOpts.length > 2 ? '' : '<div class="cc-sub2">Tip: add F&amp;A members in Admin to pick them here.</div>') + fa2Chips('fa2-rb', rbOpts, f.rb) +
       '<div id="fa2-acc"' + (f.rb === 'Account' ? '' : ' hidden') + '>' +
@@ -3910,16 +4038,19 @@ var GLOSS = {
         '<input id="fa2-accl" class="cc-in" placeholder="Where at the account? (required)" value="' + esc(f.accLoc) + '">' +
       '</div>' +
       '<input id="fa2-note" class="cc-in" placeholder="Notes" value="' + esc(f.note || '') + '">' +
-      '<button id="fa2-go" class="cc-btn">Save drop \u2014 add items</button>',
+      '<button id="fa2-go" class="cc-btn">' + (nItems ? 'Continue \u2014 ' + nItems + ' item' + (nItems === 1 ? '' : 's') + ' in the tray' : 'Save drop \u2014 add items') + '</button>',
       function () { return fa2Load(true).then(function () { if (CC.view === 'fa2add') fa2Add(); }); });
-    document.getElementById('fa2-drop').addEventListener('input', function (e) { f.drop = e.target.value; });
-    document.getElementById('fa2-date').addEventListener('input', function (e) { f.date = e.target.value; });
-    fa2ChipWire('fa2-from', function (v) { f.from = v; var fo = document.getElementById('fa2-fromo'); fo.placeholder = fa2FromPh(v); fo.hidden = !fa2FromNeeds(v); });
-    fa2ChipWire('fa2-rb', function (v) { f.rb = v; document.getElementById('fa2-acc').hidden = v !== 'Account'; });
-    document.getElementById('fa2-fromo').addEventListener('input', function (e) { f.fromOther = e.target.value; });
-    document.getElementById('fa2-accn').addEventListener('input', function (e) { f.accName = e.target.value; });
-    document.getElementById('fa2-accl').addEventListener('input', function (e) { f.accLoc = e.target.value; });
-    document.getElementById('fa2-note').addEventListener('input', function (e) { f.note = e.target.value; });
+    var rs = document.getElementById('fa2-restart');
+    if (rs) rs.addEventListener('click', function () { fa2DraftSet(null); FA2.form = null; FA2.a2 = null; FA2.resumed = false; fa2Add(); });
+    var sv = fa2DraftSave;
+    document.getElementById('fa2-drop').addEventListener('input', function (e) { f.drop = e.target.value; sv(); });
+    ['input', 'change'].forEach(function (ev) { document.getElementById('fa2-date').addEventListener(ev, function (e) { f.date = e.target.value; sv(); }); });
+    fa2ChipWire('fa2-from', function (v) { f.from = v; var fo = document.getElementById('fa2-fromo'); fo.placeholder = fa2FromPh(v); fo.hidden = !fa2FromNeeds(v); sv(); });
+    fa2ChipWire('fa2-rb', function (v) { f.rb = v; document.getElementById('fa2-acc').hidden = v !== 'Account'; sv(); });
+    document.getElementById('fa2-fromo').addEventListener('input', function (e) { f.fromOther = e.target.value; sv(); });
+    document.getElementById('fa2-accn').addEventListener('input', function (e) { f.accName = e.target.value; sv(); });
+    document.getElementById('fa2-accl').addEventListener('input', function (e) { f.accLoc = e.target.value; sv(); });
+    document.getElementById('fa2-note').addEventListener('input', function (e) { f.note = e.target.value; sv(); });
     document.getElementById('fa2-go').addEventListener('click', function () {
       var detail = String(f.fromOther || '').trim();
       if (!f.drop.trim()) return fa2Err('fa2-err', 'Give the drop a name.');
@@ -3951,7 +4082,7 @@ var GLOSS = {
     if (!ref && !p.gtin && (lot || exp)) {
       ccFlashGreen();
       if (fa2AttachLE(lot, exp)) { ccStatus((lot ? 'Lot ' + lot : 'Expiry') + ' attached to the last item'); ccSchedule(200); return; }
-      FA2.pendLE = { lot: lot, exp: exp };
+      FA2.pendLE = { lot: lot, exp: exp, t: now }; fa2HeldDraw();
       ccStatus('Lot/expiry held \u2014 now scan the product barcode');
       ccSchedule(200); return;
     }
@@ -3961,7 +4092,8 @@ var GLOSS = {
     }
     if (!ref) { ccStatus('Unknown barcode \u2014 use + Manual'); ccSchedule(300); return; }
     desc = fa2DescOf(ref);
-    if (FA2.pendLE) { lot = lot || FA2.pendLE.lot; exp = exp || FA2.pendLE.exp; FA2.pendLE = null; }
+    if (FA2.pendLE && now - FA2.pendLE.t < FA2_HELD_MS) { lot = lot || FA2.pendLE.lot; exp = exp || FA2.pendLE.exp; }
+    FA2.pendLE = null; fa2HeldDraw();
     ccFlashGreen();
     fa2AddItem({ ref: ref, desc: desc, lot: lot, exp: exp, qty: 1 }, true);
     ccStatus(ref + (lot ? ' \u00b7 Lot ' + lot : ' \u00b7 no lot yet'));
@@ -3974,6 +4106,20 @@ var GLOSS = {
     else { t.items[key] = { ref: o.ref, desc: o.desc || '', lot: o.lot || '', exp: o.exp || '', qty: o.qty || 1, src: fromScan ? 'scan' : 'manual' }; t.order.push(key); }
     if (FA2.a2api) FA2.a2api.redraw();
     fa2A2Gate();
+  }
+  // A lot/expiry that arrived before its product waits 25 s, visibly, then is forgotten -
+  // so a stray label from one box can never end up on the next box scanned minutes later.
+  var FA2_HELD_MS = 25000;
+  function fa2HeldDraw() {
+    var h = document.getElementById('a2-held'); if (!h) return;
+    clearTimeout(FA2.heldTO);
+    var p = FA2.pendLE;
+    if (!p || Date.now() - p.t >= FA2_HELD_MS) { FA2.pendLE = null; h.hidden = true; h.innerHTML = ''; return; }
+    h.hidden = false;
+    h.innerHTML = '<span class="f2bub">' + (p.lot ? 'Lot ' + esc(p.lot) : '') + (p.lot && p.exp ? ' \u00b7 ' : '') + (p.exp ? 'Exp ' + esc(p.exp) : '') + ' held for the next product</span>' +
+      '<button type="button" id="a2-heldx" class="k-x" aria-label="Forget held lot">\u00d7</button>';
+    document.getElementById('a2-heldx').addEventListener('click', function () { FA2.pendLE = null; fa2HeldDraw(); ccStatus('Held lot cleared'); });
+    FA2.heldTO = setTimeout(fa2HeldDraw, FA2_HELD_MS - (Date.now() - p.t) + 50);
   }
   // A lot/expiry-only barcode scanned right after a product barcode belongs to
   // that item (two-barcode labels in either order). Returns true when attached.
@@ -4019,6 +4165,7 @@ var GLOSS = {
       var exp = document.getElementById('ie-exp').value;
       var qty = Math.round(+document.getElementById('ie-qty').value || 0);
       if (!ref) return fa2Err('ie-err', 'REF is required.');
+      if (exp && !fa2ExpGate('ie-exp', 'ie-err', 'Save changes')) return;
       if (qty < 1) return fa2Err('ie-err', 'Qty must be at least 1.');
       var changed = ref !== p.ref || lot !== (p.lot || '') || exp !== fa2DateVal(p.exp);
       var src = (p.src === 'scan' && changed) ? 'manual' : p.src;
@@ -4040,6 +4187,7 @@ var GLOSS = {
     });
   }
   function fa2A2Gate() {
+    fa2DraftSave();
     var b = document.getElementById('a2-go'); if (!b) return;
     var t = FA2.a2, bad = 0;
     t.order.forEach(function (k) { var p = t.items[k]; if (!p.ref || !p.lot || !p.exp || !(p.qty > 0)) bad++; });
@@ -4066,7 +4214,8 @@ var GLOSS = {
     ccStop();
     CC.view = 'fa2add2';
     fa2KitCss();
-    FA2.a2 = { items: {}, order: [] };
+    // The tray survives a trip back to step 1 (and a page reload, via the draft).
+    if (!FA2.a2 || !FA2.a2.order) FA2.a2 = { items: {}, order: [] };
     FA2.pendLE = null;
     render(
       '<div class="card cc-card">' +
@@ -4079,6 +4228,7 @@ var GLOSS = {
           '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
           '<div class="a2hint">Scan the product barcode \u2014 lot and expiry fill in automatically</div>' +
         '</div>' +
+        '<div id="a2-held" class="a2held" hidden></div>' +
         '<button id="a2-man" type="button" class="cc-mini">+ Manual</button>' +
         '<div id="a2-manwrap" class="a2man" hidden>' +
           '<input id="a2-ref" class="cc-in" placeholder="REF (part number)">' +
@@ -4109,14 +4259,13 @@ var GLOSS = {
       var qty = +document.getElementById('a2-qty').value || 0;
       if (!ref) return fa2Err('fa2-err', 'REF is required.');
       if (!lot) return fa2Err('fa2-err', 'LOT is required.');
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) return fa2Err('fa2-err', 'Pick a full expiration date (day, month, year).');
+      if (!fa2ExpGate('a2-exp', 'fa2-err', 'Add to list')) return;
       if (qty < 1) return fa2Err('fa2-err', 'Qty must be at least 1.');
       var er = document.getElementById('fa2-err'); if (er) er.hidden = true;
       fa2AddItem({ ref: ref, desc: document.getElementById('a2-desc').value.trim(), lot: lot, exp: exp, qty: qty }, false);
       ['a2-ref', 'a2-desc', 'a2-lot'].forEach(function (id) { document.getElementById(id).value = ''; });
-      document.getElementById('a2-exp').value = fa2Today();
+      fa2ExpReset('a2-exp');
       document.getElementById('a2-qty').value = '1';
-      fa2ExpWire('a2-exp');
       document.getElementById('a2-ref').focus();
     });
     ccBeepInit();
@@ -4138,46 +4287,10 @@ var GLOSS = {
       t.order.forEach(function (k) { units += t.items[k].qty; });
       var gb = document.getElementById('a2-go'); if (gb) { gb.disabled = true; gb.textContent = 'Saving\u2026'; }
       ccStop();
-      FA2.form = null; FA2.a2 = { items: {}, order: [] }; FA2.a2api = null;
-      fa2AddRun(evs, 'add-' + f.drop.trim() + '-' + f.date, lines, units);
+      FA2.form = null; FA2.a2 = { items: {}, order: [] }; FA2.a2api = null; FA2.resumed = false; fa2DraftSet(null);
+      fa2AddRun(evs, 'add-' + f.drop.trim() + '-' + f.date, lines, units, { form: f, a2: t });
       location.hash = '#/fa2';
     });
-  }
-
-  function fa2Picker(d, picks, allowOver) {
-    var rows = d.master || [];
-    if (!rows.length) return '<div class="cc-empty">Nothing on hand.</div>';
-    return rows.map(function (r, i) {
-      var key = r[0] + '\u0001' + r[2];
-      var onhand = fa2Num(r[4]);
-      var v = picks[key] ? picks[key].qty : 0;
-      return '<div class="fa2-row">' +
-        '<div class="fa2-l"><div class="fa2-t">' + esc(r[0]) + (r[1] ? ' \u2014 ' + esc(r[1]) : '') + '</div>' +
-        '<div class="fa2-s">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + ' \u00b7 ' + onhand + ' on hand</div></div>' +
-        '<div class="fa2-pickq">' +
-          '<button type="button" class="fa2-qb" data-k="' + esc(key) + '" data-d="-1">\u2212</button>' +
-          '<b class="fa2-qv" data-k="' + esc(key) + '">' + v + '</b>' +
-          '<button type="button" class="fa2-qb" data-k="' + esc(key) + '" data-d="1">+</button>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-  }
-  function fa2PickWire(el, d, picks, allowOver, onChange) {
-    var byKey = {};
-    (d.master || []).forEach(function (r) { byKey[r[0] + '\u0001' + r[2]] = { ref: r[0], desc: r[1], lot: r[2], exp: r[3], onhand: fa2Num(r[4]) }; });
-    el.onclick = function (e) {
-      var b = e.target.closest ? e.target.closest('.fa2-qb') : null; if (!b) return;
-      var k = b.dataset.k, m = byKey[k]; if (!m) return;
-      var cur = picks[k] ? picks[k].qty : 0;
-      var next = cur + (+b.dataset.d);
-      if (next < 0) next = 0;
-      if (!allowOver && next > m.onhand) next = m.onhand;
-      if (next === 0) delete picks[k]; else picks[k] = { ref: m.ref, desc: m.desc, lot: m.lot, exp: m.exp, onhand: m.onhand, qty: next };
-      var vEl = el.querySelector('.fa2-qv[data-k="' + (window.CSS && CSS.escape ? CSS.escape(k) : k) + '"]');
-      if (!vEl) { el.querySelectorAll('.fa2-qv').forEach(function (x) { if (x.dataset.k === k) vEl = x; }); }
-      if (vEl) vEl.textContent = next;
-      if (onChange) onChange();
-    };
   }
 
   /* ---------- shared on-hand card picker: tap a card → stepper → Add ---------- */
@@ -4196,6 +4309,17 @@ var GLOSS = {
           '<button type="button" class="cc-btn pk-add">Add</button>' +
         '</div>' : '') +
     '</div>';
+  }
+  function fa2PickListHtml(rows, have, st) {
+    var html = '', last = -1;
+    rows.forEach(function (r) {
+      var b = fa2RowBand(r);
+      if (b !== last) { html += '<div class="fa2-eyebrow ' + FA2_BAND_CLS[b] + '">' + FA2_BAND_NAMES[b] + '</div>'; last = b; }
+      var key = r[0] + '\u0001' + r[2];
+      var oh = fa2Num(r[4]), hv = have(key);
+      html += fa2PickCardHtml(r, key, hv, st.openKey === key, Math.min(st.pickN, Math.max(1, oh - hv)));
+    });
+    return html;
   }
   // state = {openKey, pickN}; api = {rowFor, cardFor, have, add, redraw}
   function fa2PickBind(hostId, st, api) {
@@ -4302,12 +4426,7 @@ var GLOSS = {
       var q = (document.getElementById('fa2-q') || {}).value || '';
       var rows = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
       if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
-      rows = fa2BandSort(rows);
-      el.innerHTML = rows.map(function (r) {
-        var key = r[0] + '\u0001' + r[2];
-        var oh = fa2Num(r[4]), have = tray.items[key] ? tray.items[key].qty : 0;
-        return fa2PickCardHtml(r, key, have, st.openKey === key, Math.min(st.pickN, Math.max(1, oh - have)));
-      }).join('');
+      el.innerHTML = fa2PickListHtml(fa2BandSort(rows), function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, st);
     }
     fa2PickBind('fa2-pick', st, { rowFor: rowFor, cardFor: cardFor, have: function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, add: addToTray, redraw: drawPick });
     // Scanning adds straight from stock — same guard rails as tapping.
@@ -4366,43 +4485,114 @@ var GLOSS = {
   }
 
   /* ---------- Send back to Stryker ---------- */
+  // Same kit as Remove / Return: expiry-banded on-hand cards, a scanner, a tray with
+  // per-lot caps, and a sticky Complete bar. F&A logins pick their name first.
   function fa2Send() {
     setTitle('Send back', ''); backBtn.hidden = false;
     ccStop();
     if (!fa2Ensure(fa2Send)) return; fa2Wide(true);
     CC.view = 'fa2send';
+    fa2KitCss();
     var fa = fa2IsFA();
-    var picks = {}; var trk = { v: '' };
+    var tray = { items: {}, order: [] };
+    var trk = { v: '' };
+    var OH = null, subKey = 'send-' + fa2Uuid(), st = { openKey: '', pickN: 1 };
     var namePick = fa ? '<div class="fa2-lab">Your name</div><div id="fa2-nmwrap"><div class="cc-empty">Loading team\u2026</div></div>' : '';
     fa2Shell('Send back to Stryker', 'Works before or after expiration. <b>Tracking # required to complete.</b>',
       namePick +
-      '<div class="fa2-lab">Items</div><div id="fa2-pick"><div class="cc-empty">Loading\u2026</div></div>' +
+      '<div class="fa2-lab">Going back</div><div id="fa2-tray"></div>' +
+      '<button id="fa2-scanb" type="button">' + fa2ScanIcon(24) + '<span>Scan a barcode</span></button>' +
+      '<div id="fa2-scanwrap" class="a2top" hidden>' +
+        '<video id="ccvid" playsinline muted autoplay></video>' +
+        '<div id="cc-flash" aria-hidden="true"></div>' +
+        '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
+        '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
+        '<div class="a2hint">Scan a product barcode to add it to the send-back</div>' +
+      '</div>' +
+      '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
+      '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
       '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (required)">' +
-      '<button id="fa2-go" class="cc-btn" disabled>Complete send-back</button>',
+      '<div class="k-bar"><button id="fa2-go" class="cc-btn" disabled>Complete send-back</button></div>',
       function () { return loadSend(true); });
     var goBtn = document.getElementById('fa2-go');
-    function gate() { goBtn.disabled = !(trk.v.trim() && Object.keys(picks).length && (!fa || FA2.faName)); }
+    function gate() { var b = document.getElementById('fa2-go'); if (b) b.disabled = !(trk.v.trim() && tray.order.length && (!fa || FA2.faName)); }
     document.getElementById('fa2-trk').addEventListener('input', function (e) { trk.v = e.target.value; gate(); });
+    var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 scan a barcode or tap an item below.', onChange: function () { drawPick(); gate(); } });
+    document.getElementById('fa2-q').addEventListener('input', function () { st.openKey = ''; drawPick(); });
+    function rowFor(k) { var m = null; ((OH && OH.master) || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; }); return m; }
+    function cardFor(k) { var c = null; [].forEach.call(document.querySelectorAll('#fa2-pick .fa2-pk'), function (x) { if (x.getAttribute('data-k') === k) c = x; }); return c; }
+    function addToTray(k, n) {
+      var m = rowFor(k); if (!m) return false;
+      var oh = fa2Num(m[4]), have = tray.items[k] ? tray.items[k].qty : 0;
+      if (have + n > oh) { var c = cardFor(k); kitShake(c, c && c.querySelector('.f2bub')); return false; }
+      if (tray.items[k]) tray.items[k].qty = have + n;
+      else { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: oh, max: oh, qty: n }; tray.order.push(k); }
+      st.openKey = ''; st.pickN = 1;
+      trayApi.redraw();
+      return true;
+    }
+    function drawPick() {
+      var el = document.getElementById('fa2-pick'); if (!el || !OH) return;
+      var q = (document.getElementById('fa2-q') || {}).value || '';
+      var rows = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+      if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
+      el.innerHTML = fa2PickListHtml(fa2BandSort(rows), function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, st);
+    }
+    fa2PickBind('fa2-pick', st, { rowFor: rowFor, cardFor: cardFor, have: function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, add: addToTray, redraw: drawPick });
+    // Scanning adds straight from stock - same guard rails as tapping.
+    FA2.retScan = function (ref, lot) {
+      if (!OH) return 'Still loading stock\u2026';
+      var nref = nrm(ref);
+      var cands = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && nrm(String(r[0])) === nref; });
+      if (!cands.length) return ref + ' isn\u2019t in F&A stock';
+      var m = null;
+      if (lot) {
+        m = cands.filter(function (r) { return String(r[2]).toUpperCase() === String(lot).toUpperCase(); })[0];
+        if (!m) return ref + ' Lot ' + lot + ' isn\u2019t on hand';
+      } else if (cands.length === 1) { m = cands[0]; }
+      else { return ref + ' has ' + cands.length + ' lots \u2014 tap the right one'; }
+      var k = m[0] + '\u0001' + m[2];
+      if (!addToTray(k, 1)) return m[0] + ' \u2014 all ' + fa2Num(m[4]) + ' already selected';
+      ccFlashGreen();
+      return m[0] + (m[2] ? ' \u00b7 Lot ' + m[2] : '') + ' added';
+    };
+    document.getElementById('fa2-scanb').addEventListener('click', function () {
+      var w = document.getElementById('fa2-scanwrap'), on = w.hidden;
+      w.hidden = !on;
+      this.classList.toggle('on', on);
+      this.querySelector('span').textContent = on ? 'Stop scanning' : 'Scan a barcode';
+      if (on) { ccBeepInit(); CC.camOff = false; ccStartCam(); } else { ccStop(); }
+    });
     function loadSend(force) { return fa2Load(force).then(function (d) {
       if (CC.view !== 'fa2send') return;
-      var el = document.getElementById('fa2-pick');
-      el.innerHTML = fa2Picker(d, picks, false);
-      fa2PickWire(el, d, picks, false, gate);
+      OH = d; drawPick();
       if (fa) {
         var names = fa2Teams('fa');
         var nw = document.getElementById('fa2-nmwrap');
-        nw.innerHTML = names.length ? fa2Chips('fa2-nm', names, FA2.faName || '') : '<div class="cc-sub2">No F&amp;A team members set yet \u2014 ask Nate to add you in Admin.</div>';
-        fa2ChipWire('fa2-nm', function (v) { FA2.faName = v; gate(); });
+        if (nw) {
+          nw.innerHTML = names.length ? fa2Chips('fa2-nm', names, FA2.faName || '') : '<div class="cc-sub2">No F&amp;A team members set yet \u2014 ask Nate to add you in Admin.</div>';
+          fa2ChipWire('fa2-nm', function (v) { FA2.faName = v; gate(); });
+        }
       }
+      gate();
     }).catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; }); }
     loadSend(false);
     goBtn.addEventListener('click', function () {
-      var evs = Object.keys(picks).map(function (k) {
-        var p = picks[k];
-        return { type: 'Returned to Stryker', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, tracking: trk.v.trim(), entryMethod: 'manual', enteredBy: fa2Who() };
+      var trkv = trk.v.trim();
+      if (fa && !FA2.faName) return fa2Err('fa2-err', 'Pick your name first.');
+      if (!trkv) return fa2Err('fa2-err', 'Tracking # is required.');
+      if (!tray.order.length) return fa2Err('fa2-err', 'Pick at least one item.');
+      var evs = tray.order.map(function (k) {
+        var p = tray.items[k];
+        return { type: 'Returned to Stryker', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, tracking: trkv, entryMethod: 'manual', enteredBy: fa2Who() };
       });
-      fa2Submit(evs, 'send-' + trk.v.trim(), goBtn)
-        .then(function () { location.hash = '#/fa2'; })
+      var lines = tray.order.length, units = 0; tray.order.forEach(function (k) { units += tray.items[k].qty; });
+      fa2Submit(evs, subKey, goBtn)
+        .then(function () {
+          ccStop();
+          fa2Flash('ok', 'Send-back saved \u2014 ' + lines + ' item' + (lines === 1 ? '' : 's') + ' \u00b7 ' + units + ' unit' + (units === 1 ? '' : 's') + ' \u00b7 tracking ' + trkv);
+          location.hash = '#/fa2';
+        })
         .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); goBtn.disabled = false; goBtn.textContent = 'Complete send-back'; });
     });
   }
@@ -4440,7 +4630,9 @@ var GLOSS = {
       '<div class="k-bar"><button id="fa2-go" class="cc-btn">Save usage</button></div>',
       function () { return fa2Load(true).then(function (d) { if (CC.view !== 'fa2use') return; D2 = d; drawPick(); }); });
     ['bo', 'po', 'fac', 'sur', 'dos'].forEach(function (k) {
-      document.getElementById('u-' + k).addEventListener('input', function (e) { f[k] = e.target.value; });
+      var el = document.getElementById('u-' + k);
+      el.addEventListener('input', function (e) { f[k] = e.target.value; });
+      if (k === 'dos') el.addEventListener('change', function (e) { f[k] = e.target.value; });
     });
     var trayApi = kitTray(document.getElementById('u-tray'), tray, {
       empty: 'Nothing selected yet \u2014 tap items below.',
@@ -4477,7 +4669,7 @@ var GLOSS = {
       var qty = +document.getElementById('u-mqty').value || 0;
       if (!ref) return fa2Err('fa2-err', 'REF is required.');
       if (!lot) return fa2Err('fa2-err', 'LOT is required.');
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) return fa2Err('fa2-err', 'Pick a full expiration date (day, month, year).');
+      if (!fa2ExpGate('u-mexp', 'fa2-err', 'Add to list')) return;
       if (qty < 1) return fa2Err('fa2-err', 'Qty must be at least 1.');
       var er = document.getElementById('fa2-err'); if (er) er.hidden = true;
       // If this ref+lot is actually on hand, use that row so the overdraft math stays right.
@@ -4489,9 +4681,8 @@ var GLOSS = {
       else { tray.items[k] = { ref: ref, desc: document.getElementById('u-mdesc').value.trim(), lot: lot, exp: exp, onhand: 0, qty: qty }; tray.order.push(k); }
       trayApi.redraw();
       ['u-mref', 'u-mdesc', 'u-mlot'].forEach(function (id) { document.getElementById(id).value = ''; });
-      document.getElementById('u-mexp').value = fa2Today();
+      fa2ExpReset('u-mexp');
       document.getElementById('u-mqty').value = '1';
-      fa2ExpWire('u-mexp');
       document.getElementById('u-mref').focus();
     });
     function drawPick() {
@@ -4499,12 +4690,7 @@ var GLOSS = {
       var q = (document.getElementById('fa2-q') || {}).value || '';
       var rows = (D2.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
       if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
-      rows = fa2BandSort(rows);
-      el.innerHTML = rows.map(function (r) {
-        var key = r[0] + '\u0001' + r[2];
-        var oh = fa2Num(r[4]), have = tray.items[key] ? tray.items[key].qty : 0;
-        return fa2PickCardHtml(r, key, have, st.openKey === key, Math.min(st.pickN, Math.max(1, oh - have)));
-      }).join('');
+      el.innerHTML = fa2PickListHtml(fa2BandSort(rows), function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, st);
     }
     fa2PickBind('fa2-pick', st, { rowFor: rowFor, cardFor: cardFor, have: function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, add: addToTray, redraw: drawPick });
     fa2Load(false).then(function (d) { if (CC.view !== 'fa2use') return; D2 = d; drawPick(); })
@@ -4523,7 +4709,7 @@ var GLOSS = {
         var eid = fa2Uuid();
         if (over[k]) {
           evs.push({ eventId: fa2Uuid(), type: 'Received', ref: p.ref, desc: p.desc, lot: p.lot, exp: p.exp || over[k].exp || '2099-12',
-            qty: p.qty - p.onhand, receivedBy: over[k].src, eventDate: over[k].date, note: over[k].notes,
+            qty: p.qty - p.onhand, from: over[k].src, eventDate: over[k].date, note: over[k].notes,
             flags: 'Late entry', linkedTo: eid, entryMethod: 'manual', enteredBy: fa2Who() });
         }
         evs.push({ eventId: eid, type: 'Used in case', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty,
@@ -4532,9 +4718,15 @@ var GLOSS = {
       });
       fa2Submit(evs, 'use-' + f.bo.trim(), document.getElementById('fa2-go'))
         .then(function () {
+          var savedBo = f.bo.trim(), savedLines = tray.order.length;
           tray.items = {}; tray.order = []; for (var k in over) delete over[k];
           trayApi.redraw();
-          kitBanner(document.querySelector('.cc-card'), 'Usage saved');
+          // Next case starts with a blank C-number / PO so nothing files under the case just saved.
+          f.bo = ''; f.po = '';
+          var boEl = document.getElementById('u-bo'), poEl = document.getElementById('u-po');
+          if (boEl) boEl.value = ''; if (poEl) poEl.value = '';
+          try { window.scrollTo(0, 0); } catch (e0) {}
+          kitBanner(document.querySelector('.cc-card'), 'Usage saved for ' + savedBo + ' \u2014 ' + savedLines + ' line' + (savedLines === 1 ? '' : 's') + '. Enter the next C-number.');
           var b = document.getElementById('fa2-go'); if (b) { b.disabled = false; b.textContent = 'Save usage'; }
           fa2Load(true).then(function (d2) { if (CC.view !== 'fa2use') return; D2 = d2; drawPick(); }).catch(function () {});
         })
@@ -4570,6 +4762,20 @@ var GLOSS = {
   }
 
   /* ---------- Transactions (imports approve/deny) ---------- */
+  var FA2_OUTCOMES = { pending: 'Pending review', 'revised-pending': 'Pending (revised)', auto: 'Auto-applied', approved: 'Approved', denied: 'Denied', duplicate: 'Duplicate', 'ignored-not-a-bo': 'Not a bill only' };
+  function fa2Outcome(o) { return FA2_OUTCOMES[o] || String(o || '').replace(/-/g, ' '); }
+  // A small in-app yes/no; window.confirm looks foreign in the installed app and can't be styled.
+  function fa2Confirm(title, msg, okLabel, danger) {
+    return new Promise(function (res) {
+      var wrap = document.createElement('div'); wrap.className = 'fa2-modal';
+      wrap.innerHTML = '<div class="fa2-mcard"><div class="fa2-t">' + esc(title) + '</div>' +
+        (msg ? '<div class="fa2-s" style="margin:6px 0 10px">' + esc(msg) + '</div>' : '') +
+        '<div class="fa2-mrow"><button type="button" id="cf-no" class="cc-mini">Cancel</button><button type="button" id="cf-yes" class="cc-btn' + (danger ? ' cc-endb' : '') + '">' + esc(okLabel || 'OK') + '</button></div></div>';
+      document.body.appendChild(wrap);
+      wrap.querySelector('#cf-no').addEventListener('click', function () { wrap.remove(); res(false); });
+      wrap.querySelector('#cf-yes').addEventListener('click', function () { wrap.remove(); res(true); });
+    });
+  }
   function fa2Trans() {
     setTitle('Transactions', ''); backBtn.hidden = false;
     ccStop();
@@ -4620,7 +4826,7 @@ var GLOSS = {
           .concat(iss ? [iss + ' issue' + (iss > 1 ? 's' : '')] : []).filter(Boolean).join(' \u00b7 ');
         var pc = isPend ? 'wait' : (x.outcome === 'auto' || x.outcome === 'approved' ? 'ok' : (x.outcome === 'denied' ? 'bad' : ''));
         return '<div class="fa2-row">' +
-          '<div class="fa2-l"><div class="fa2-t">' + esc(x.bo || '(no BO)') + ' <span class="cc-pill ' + pc + '">' + esc(x.outcome) + '</span></div>' +
+          '<div class="fa2-l"><div class="fa2-t">' + esc(x.bo || '(no BO)') + ' <span class="cc-pill ' + pc + '">' + esc(fa2Outcome(x.outcome)) + '</span></div>' +
           (who ? '<div class="fa2-s fa2-who">' + esc(who) + '</div>' : '') +
           '<div class="fa2-s">' + esc(sub) + (x.pdf ? ' \u00b7 <a class="cc-link" href="' + esc(x.pdf) + '" target="_blank" rel="noopener">PDF</a>' : '') + '</div></div>' +
           '<div class="fa2-r">' + (tot != null ? '<b class="fa2-amt">' + fa2Money(tot) + '</b>' : '') +
@@ -4692,10 +4898,12 @@ var GLOSS = {
     });
     document.getElementById('t-back').addEventListener('click', function () { fa2Trans(); });
     document.getElementById('t-deny').addEventListener('click', function () {
-      if (!confirm('Deny this whole import? No inventory changes.')) return;
-      fa2Call('import_deny', { importId: x.importId, by: fa2Who() }).then(function (j) {
-        if (j && j.ok) { fa2Trans(); } else fa2Err('fa2-err', 'Deny failed: ' + ((j && j.err) || 'server'));
-      }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
+      fa2Confirm('Deny this whole import?', 'No inventory changes will be made.', 'Deny all', true).then(function (ok) {
+        if (!ok) return;
+        fa2Call('import_deny', { importId: x.importId, by: fa2Who() }).then(function (j) {
+          if (j && j.ok) { fa2Trans(); } else fa2Err('fa2-err', 'Deny failed: ' + ((j && j.err) || 'server'));
+        }).catch(function () { fa2Err('fa2-err', 'Couldn\u2019t reach the server.'); });
+      });
     });
     document.getElementById('t-appr').addEventListener('click', function () {
       var send = lines.map(function (L) {
@@ -4797,7 +5005,7 @@ var GLOSS = {
           return;
         }
         var d = e.target.closest ? e.target.closest('.a-del') : null;
-        if (d) { if (confirm('Remove this person? Their sheet access is revoked too.')) { FA2.teams.splice(+d.dataset.i, 1); saveTeams(); } return; }
+        if (d) { var di = +d.dataset.i; fa2Confirm('Remove this person?', 'Their sheet access is revoked too.', 'Remove', true).then(function (ok) { if (ok) { FA2.teams.splice(di, 1); saveTeams(); } }); return; }
         var a = e.target.closest ? e.target.closest('.a-add') : null;
         if (a) {
           if (a.disabled) return;
