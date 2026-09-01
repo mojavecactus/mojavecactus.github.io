@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.104';
+  var APPVER = '4.105';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3127,7 +3127,16 @@ var GLOSS = {
     if (s === '\u22643 MO') return 'busy';
     return 'ok';
   }
-  function fa2Who() { return fa2IsFA() ? (FA2.faName || '') : (CC.dev || ''); }
+  // A cycle-count device is registered as "Mia's iPhone"; the person is "Mia".
+  // Used for the From chips and for who-did-it on sports-side events.
+  function fa2PersonName(n) {
+    n = String(n || '').replace(/\s+/g, ' ').trim();
+    n = n.replace(/\s*\(.*?\)\s*$/, '');
+    n = n.replace(/(?:['\u2019`]s)?\s*\b(?:iphone|ipad|ipod|phone|android|pixel|galaxy|samsung|mobile|cell|device)\b.*$/i, '').trim();
+    n = n.replace(/['\u2019`]s$/, '').trim();
+    return n;
+  }
+  function fa2Who() { return fa2IsFA() ? (FA2.faName || '') : (fa2PersonName(CC.dev) || CC.dev || ''); }
   // Kept out of the read cache on purpose: that cache is wiped after every save,
   // and the roster must still fill the chip lists on the very next screen.
   function fa2TeamsSave(list) {
@@ -3336,9 +3345,11 @@ var GLOSS = {
   // plus anyone Admin lists on the Sports team. Hardcoded names only as a last resort.
   function fa2FromNames() {
     var out = [], seen = {};
-    function add(n) { n = String(n || '').trim(); if (n && !seen[n.toLowerCase()]) { seen[n.toLowerCase()] = 1; out.push(n); } }
+    function add(n) { n = fa2PersonName(n); if (n && !seen[n.toLowerCase()]) { seen[n.toLowerCase()] = 1; out.push(n); } }
+    // Admin's Sports team spelling first, then anyone on the device roster it doesn't already cover.
+    fa2Teams('sports').forEach(add);
     var ros = []; try { ros = JSON.parse(ccLS(terrKey('_roster')) || '[]') || []; } catch (e) { ros = []; }
-    ros.forEach(add); fa2Teams('sports').forEach(add);
+    ros.forEach(add);
     if (!out.length) ['Megan', 'Matt', 'Mia', 'Manny', 'Isabella', 'Nate'].forEach(add);
     return out;
   }

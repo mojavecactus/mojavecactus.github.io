@@ -35,7 +35,7 @@ async function newPage(browser, hub, opts) {
       return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
     }
     // CT bound script / legacy FA / CC hub metrics: benign stubs
-    if (/action=roster/.test(url)) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ devices: ['Matt', 'Nate', 'Mia', 'Manny', 'Isabella', 'Megan'] }) });
+    if (/action=roster/.test(url)) return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ devices: ['Matt', 'Nate', 'Mia\'s iPhone', 'Manny', 'Isabella (work)', 'Megan', 'iPhone'] }) });
     return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, rows: [] }) });
   });
   if (opts.clock) { await page.clock.install({ time: opts.clock }); }
@@ -132,7 +132,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     check('S2b Add step-1 validation (from)', /came from/.test(await text(page, '#fa2-err')));
     if (FIXED) {
       const fromChips = await page.evaluate(() => [].map.call(document.querySelectorAll('#fa2-from .fa2-chip'), b => b.innerText.trim()));
-      check('N9 From chips come from the CT roster + Sports team (no hardcoded list, no duplicates, Other last)', fromChips.indexOf('Megan') > -1 && fromChips.indexOf('Isabella') > -1 && new Set(fromChips).size === fromChips.length && fromChips.slice(-2).join(',') === 'Territory Transfer,Other', fromChips.join(','));
+      check('N9 From chips are people: Sports team first, device names collapsed onto them (no \u201cMia\u2019s iPhone\u201d, no bare \u201ciPhone\u201d, no duplicates, Other last)', fromChips.join(',') === 'Nate,Matt,Mia,Manny,Isabella,Megan,Territory Transfer,Other', fromChips.join(','));
     }
     if (FIXED) {
       const gone = hub.log.length;
