@@ -90,6 +90,12 @@ class FakeHub {
     const f = this.failNext; if (f && f.action === body.action) { this.failNext = null; if (f.mode === 'blank') return { ok: true }; if (f.mode === 'reject') return { ok: false, err: f.err, at: f.at }; }
     switch (body.action) {
       case 'ping': return { ok: true, scope, version: 'fake-1.0' };
+      case 'tracking_set': {
+        // fills the Tracking column on the send-back rows of one batch; both scopes may call it
+        const trk = String(body.tracking || '').trim(); if (!body.opId || !trk) return { ok: false, err: 'tracking' };
+        let n = 0; this.ledger.forEach(e => { if (e.opId === body.opId && (e.type === 'Returned to Stryker' || e.type === 'Sent back to Stryker')) { e.tracking = trk; n++; } });
+        return n ? { ok: true, updated: n } : { ok: false, err: 'noop' };
+      }
       case 'read': {
         const L = this.ledger.slice().reverse().slice(0, body.limit || 1000).map(e => this.row(e));
         return { ok: true, master: this.master(), masterCols: MASTER_COLS, ledger: L, ledgerCols: LEDGER_COLS, cases: [], casesCols: [], toggles: this.toggles, teams: this.teams };

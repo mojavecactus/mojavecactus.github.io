@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.109';
+  var APPVER = '4.110';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3081,7 +3081,7 @@ var GLOSS = {
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { fa2Warm(); if (CC.view === 'fa2home') fa2OutboxCheck(); } });
   window.addEventListener('pageshow', function () { fa2Warm(); });
   function fa2Retryable(action, extra) {
-    if (action === 'read' || action === 'ping' || action === 'import_list') return true;
+    if (action === 'read' || action === 'ping' || action === 'import_list' || action === 'tracking_set') return true;
     if (action === 'admin' && extra && /^(toggles_get|teams_get|report_preview)$/.test(String(extra.op))) return true;
     return false;
   }
@@ -3214,6 +3214,7 @@ var GLOSS = {
       // The events ride along in the record, so a save the phone lost mid-flight
       // (app killed, page reclaimed) can be re-sent from Home under the same opId.
       fa2PendSet({ opId: opId, label: label, sig: sig, events: events, t: Date.now() });
+      FA2.lastOpId = opId;
       return fa2Call('batch', { opId: opId, events: events }).then(function (j) {
         if (j && j.ok) return j;
         var e1 = new Error((j && j.err) || 'server'); e1.hub = true; e1.at = j ? j.at : undefined; throw e1;
@@ -3333,6 +3334,103 @@ var GLOSS = {
     });
   }
 
+  /* ---------- send-back tracking reminders ----------
+     A send-back saved without a tracking # is chased from Home on every phone:
+     pending = ledger rows of type Returned/Sent back to Stryker with a blank Tracking
+     column, grouped by OpId (plus this phone's own just-saved ones until the read
+     catches up). Entering the # calls the hub's tracking_set, which fills that column
+     on those rows — stock lines are never edited, so the ledger stays append-only. */
+  var FA2_TRK_TYPES = { 'Returned to Stryker': 1, 'Sent back to Stryker': 1 };
+  function fa2TrkLocal() { try { return JSON.parse(localStorage.getItem('tbx_fa2_trk') || '[]') || []; } catch (e) { return []; } }
+  function fa2TrkLocalSave(l) { try { localStorage.setItem('tbx_fa2_trk', JSON.stringify(l.slice(-30))); } catch (e) {} }
+  function fa2TrkLocalAdd(p) { var l = fa2TrkLocal().filter(function (x) { return x.opId !== p.opId; }); l.push(p); fa2TrkLocalSave(l); }
+  function fa2TrkLocalDrop(opId) { fa2TrkLocalSave(fa2TrkLocal().filter(function (x) { return x.opId !== opId; })); }
+  function fa2TrkPending(d) {
+    var out = [], byOp = {}, seenOp = {}, filled = {};
+    if (d && d.ledger && d.ledgerCols) {
+      var ix = {}; d.ledgerCols.forEach(function (c, i) { ix[String(c).toLowerCase()] = i; });
+      var g = function (r, k) { var i = ix[k]; return i === undefined ? '' : String(r[i] == null ? '' : r[i]); };
+      var voided = {};
+      d.ledger.forEach(function (r) { if (g(r, 'type') === 'Void' && g(r, 'reverses')) voided[g(r, 'reverses')] = 1; });
+      d.ledger.forEach(function (r) {
+        if (!FA2_TRK_TYPES[g(r, 'type')] || voided[g(r, 'eventid')]) return;
+        var op = g(r, 'opid') || g(r, 'eventid'); if (!op) return;
+        seenOp[op] = 1;
+        if (g(r, 'tracking').trim()) { filled[op] = 1; return; }
+        var p = byOp[op];
+        if (!p) { p = byOp[op] = { opId: op, ts: g(r, 'timestamp'), lines: 0, units: 0, by: g(r, 'enteredby'), refs: [] }; out.push(p); }
+        p.lines++; p.units += Math.abs(fa2Num(g(r, 'qty')));
+        var q = Math.abs(fa2Num(g(r, 'qty'))); p.refs.push(g(r, 'ref') + (q > 1 ? ' \u00d7' + q : ''));
+      });
+    }
+    // this phone's own recent saves: drop once the sheet shows them tracked, keep while the read lags
+    var loc = fa2TrkLocal(), keep = [];
+    loc.forEach(function (p) {
+      if (filled[p.opId] && !byOp[p.opId]) return;
+      keep.push(p);
+      if (!byOp[p.opId] && !seenOp[p.opId]) out.push(p);
+    });
+    if (keep.length !== loc.length) fa2TrkLocalSave(keep);
+    out.sort(function (a, b) { return String(b.ts).localeCompare(String(a.ts)); });
+    return out;
+  }
+  function fa2TrkDraw(list) {
+    var el = document.getElementById('fa2-trkpend'); if (!el) return;
+    if (!list.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div class="fa2-trkp"><div class="t">Tracking # needed \u00b7 ' + list.length + ' send-back' + (list.length === 1 ? '' : 's') + '</div>' +
+      list.map(function (p, i) {
+        return '<div class="r"><div class="m">' + esc(faFmt(p.ts)) + ' \u00b7 ' + p.lines + ' item' + (p.lines === 1 ? '' : 's') + ' \u00b7 ' + p.units + ' unit' + (p.units === 1 ? '' : 's') +
+          '<span>' + esc((p.refs || []).slice(0, 4).join(', ') + ((p.refs || []).length > 4 ? ' \u2026' : '')) + (p.by ? ' \u00b7 ' + esc(p.by) : '') + (p.trk ? ' \u00b7 # ' + esc(p.trk) + ' saved on this phone, waiting for the hub' : '') + '</span></div>' +
+          '<button type="button" data-trk="' + i + '">Add tracking</button></div>';
+      }).join('') + '</div>';
+    el.querySelectorAll('[data-trk]').forEach(function (b) { b.addEventListener('click', function () { fa2TrackSheet(list[+b.getAttribute('data-trk')]); }); });
+  }
+  function fa2TrackSave(p, trk) {
+    return fa2Call('tracking_set', { opId: p.opId, tracking: trk, enteredBy: fa2Who() }).then(function (j) {
+      if (j && j.ok) { fa2TrkLocalDrop(p.opId); fa2CacheKill(); return j; }
+      var e = new Error((j && j.err) || 'server'); e.hub = true; throw e;
+    });
+  }
+  function fa2TrackSheet(p) {
+    var sh = askSheet();
+    sh.innerHTML = '<div class="as-card"><h3>Add the tracking #</h3>' +
+      '<div class="ask-b">Send-back ' + esc(faFmt(p.ts)) + ' \u00b7 ' + p.lines + ' item' + (p.lines === 1 ? '' : 's') + ' \u00b7 ' + p.units + ' unit' + (p.units === 1 ? '' : 's') + (p.by ? ' \u00b7 ' + esc(p.by) : '') +
+      '\n' + esc((p.refs || []).join(', ')) + '\n\nThe stock is already off the sheet. Enter the carrier tracking # from the label \u2014 this reminder stays on Home until it\u2019s in.</div>' +
+      '<input id="trk-in" class="cc-in" autocomplete="off" autocapitalize="characters" placeholder="Tracking #" value="' + esc(p.trk || '') + '">' +
+      '<div id="trk-err" class="cc-err" hidden></div>' +
+      '<div class="ask-row"><button type="button" class="ask-no">Later</button><button type="button" class="ask-ok ok">Save tracking</button></div></div>';
+    var inp = sh.querySelector('#trk-in'), ok = sh.querySelector('.ask-ok');
+    function close() { sh.hidden = true; sh.onclick = null; }
+    function save() {
+      var v = (inp.value || '').trim();
+      if (!v) { inp.classList.add('cc-need'); inp.focus(); return; }
+      ok.disabled = true; ok.textContent = 'Saving\u2026';
+      fa2TrackSave(p, v).then(function () {
+        close(); fa2Flash('ok', 'Tracking saved \u2014 ' + v);
+        if (CC.view === 'fa2home') fa2HomeLoad(true);
+      }, function (e) {
+        ok.disabled = false; ok.textContent = 'Save tracking';
+        var er = sh.querySelector('#trk-err');
+        if (e && e.hub && String(e.message) === 'action') {
+          // Older hub without tracking_set: keep the number on this phone and say so.
+          p.trk = v; fa2TrkLocalAdd(p); close();
+          fa2Flash('bad', 'Saved on this phone. The hub needs its tracking update before it reaches the sheet \u2014 tell Nate.');
+          if (CC.view === 'fa2home') fa2HomeLoad(false);
+          return;
+        }
+        if (er) { er.textContent = fa2FailMsg(e); er.hidden = false; }
+      });
+    }
+    sh.onclick = function (e) {
+      if (e.target === sh || e.target.closest('.ask-no')) { close(); return; }
+      if (e.target.closest('.ask-ok')) save();
+    };
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') save(); });
+    inp.addEventListener('input', function () { inp.classList.remove('cc-need'); });
+    sh.hidden = false;
+    setTimeout(function () { try { inp.focus(); } catch (e) {} }, 80);
+  }
+
   /* ---------- status pill (survives navigation; drawn wherever a host exists) ---------- */
   function fa2Flash(state, msg, retry, discard) {
     FA2.flash = { state: state, msg: msg, retry: retry || null, discard: discard || null };
@@ -3421,6 +3519,7 @@ var GLOSS = {
         '<h2 class="cc-h">F&amp;A Inventory <em class="fa2-em">beta</em></h2>' +
         '<div class="cc-sub">' + (fa ? 'F&amp;A view \u2014 send-backs only. Everything else is read-only.' : 'Live field stock \u2014 everything handed to the Foot &amp; Ankle team.') + '</div>' +
         '<div id="fa2-pills" class="fa2-pills"></div>' +
+        '<div id="fa2-trkpend"></div>' +
         tiles +
         '<div id="fa2-msg" class="cc-sub2"></div>' +
       '</div>');
@@ -3429,6 +3528,7 @@ var GLOSS = {
     go('fa2-trans', '#/fa2/trans'); go('fa2-add', '#/fa2/add'); go('fa2-ret', '#/fa2/return'); go('fa2-use', '#/fa2/use'); go('fa2-adm', '#/fa2/admin');
     fa2RefreshWire(function () { return fa2HomeLoad(true); });
     fa2FlashDraw();
+    fa2TrkDraw(fa2TrkPending(null));
     fa2HomeLoad(false);
     fa2OutboxCheck();
   }
@@ -3451,6 +3551,7 @@ var GLOSS = {
         (sb ? '<button type="button" class="cc-pill wait fa2-pillgo" data-h="' + goSend + '">' + sb + ' send back</button>' : '') +
         (soon ? '<span class="cc-pill busy">' + soon + ' \u22643 mo</span>' : '');
       if (p) p.querySelectorAll('.fa2-pillgo').forEach(function (b) { b.addEventListener('click', function () { location.hash = b.getAttribute('data-h'); }); });
+      fa2TrkDraw(fa2TrkPending(d));
       if (m) m.textContent = '';
       if (!fa2IsFA()) fa2Call('import_list').then(function (j) {
         if (!j || !j.ok || CC.view !== 'fa2home') return;
@@ -4574,18 +4675,18 @@ var GLOSS = {
     var trk = { v: '' };
     var OH = null, subKey = 'send-' + fa2Uuid(), st = { openKey: '', pickN: 1 };
     var namePick = fa ? '<div class="fa2-lab">Your name</div><div id="fa2-nmwrap"><div class="cc-empty">Loading team\u2026</div></div>' : '';
-    fa2Shell('Send back to Stryker', 'Works before or after expiration. <b>Tracking # required to complete.</b>',
+    fa2Shell('Send back to Stryker', 'Works before or after expiration. Save the send-back now; add the tracking # when the label is printed.',
       namePick +
       '<div class="fa2-lab">Going back</div><div id="fa2-tray"></div>' +
       '<button id="fa2-scanb" type="button">' + fa2ScanIcon(24) + '<span>Scan a barcode</span></button>' +
       '<div id="fa2-scanwrap" hidden>' + ccCamPanelHtml() + '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
       '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
-      '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (required)">' +
+      '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (optional \u2014 add it later from Home)">' +
       '<div class="k-bar"><button id="fa2-go" class="cc-btn" disabled>Complete send-back</button></div>',
       function () { return loadSend(true); });
     var goBtn = document.getElementById('fa2-go');
-    function gate() { var b = document.getElementById('fa2-go'); if (b) b.disabled = !(trk.v.trim() && tray.order.length && (!fa || FA2.faName)); }
+    function gate() { var b = document.getElementById('fa2-go'); if (b) b.disabled = !(tray.order.length && (!fa || FA2.faName)); }
     document.getElementById('fa2-trk').addEventListener('input', function (e) { trk.v = e.target.value; gate(); });
     var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 scan a barcode or tap an item below.', onChange: function () { drawPick(); gate(); } });
     document.getElementById('fa2-q').addEventListener('input', function () { st.openKey = ''; drawPick(); });
@@ -4641,18 +4742,25 @@ var GLOSS = {
     goBtn.addEventListener('click', function () {
       var trkv = trk.v.trim();
       if (fa && !FA2.faName) return fa2Err('fa2-err', 'Pick your name first.');
-      if (!trkv) return fa2Err('fa2-err', 'Tracking # is required.');
       if (!tray.order.length) return fa2Err('fa2-err', 'Pick at least one item.');
       var evs = tray.order.map(function (k) {
         var p = tray.items[k];
         return { type: 'Returned to Stryker', ref: p.ref, desc: p.desc, lot: p.lot, qty: p.qty, tracking: trkv, entryMethod: 'manual', enteredBy: fa2Who() };
       });
       var lines = tray.order.length, units = 0; tray.order.forEach(function (k) { units += tray.items[k].qty; });
+      var refs = tray.order.map(function (k) { return tray.items[k].ref + (tray.items[k].qty > 1 ? ' \u00d7' + tray.items[k].qty : ''); });
       fa2Submit(evs, subKey, goBtn)
-        .then(function () {
+        .then(function (j) {
           ccStop();
-          fa2Flash('ok', 'Send-back saved \u2014 ' + lines + ' item' + (lines === 1 ? '' : 's') + ' \u00b7 ' + units + ' unit' + (units === 1 ? '' : 's') + ' \u00b7 tracking ' + trkv);
+          fa2Flash('ok', 'Send-back saved \u2014 ' + lines + ' item' + (lines === 1 ? '' : 's') + ' \u00b7 ' + units + ' unit' + (units === 1 ? '' : 's') + (trkv ? ' \u00b7 tracking ' + trkv : ''));
           location.hash = '#/fa2';
+          if (!trkv) {
+            // Box can be sealed and the stock is already off the sheet; the tracking #
+            // is chased from Home until someone enters it.
+            var pend = { opId: (j && j.opId) || FA2.lastOpId || '', ts: new Date().toISOString(), lines: lines, units: units, by: fa2Who(), refs: refs };
+            fa2TrkLocalAdd(pend);
+            setTimeout(function () { fa2TrackSheet(pend); }, 350);
+          }
         })
         .catch(function (e) { fa2Err('fa2-err', fa2FailMsg(e)); goBtn.disabled = false; goBtn.textContent = 'Complete send-back'; });
     });
