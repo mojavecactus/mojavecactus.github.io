@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.105';
+  var APPVER = '4.106';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1933,8 +1933,11 @@ var GLOSS = {
     ccFlushSoon(t0, 600);
   }
   function ccModeUI() {
-    ccStatus('Aim at a barcode \u2014 each scan confirms quantity');
+    ccStatus(CC.view === 'fa2add2' ? 'Aim at the product barcode \u2014 lot and expiry fill in automatically'
+      : (CC.view === 'fa2ret' || CC.view === 'fa2send') ? 'Aim at a product barcode \u2014 each scan adds one'
+      : 'Aim at a barcode \u2014 each scan confirms quantity');
   }
+  function ccNoCamHint() { return (CC.view === 'fa2ret' || CC.view === 'fa2send') ? 'tap an item in the list' : 'tap + Manual to add items'; }
   function ccRefocus(force) {
     var t = CC.track;
     if (!t || !t.applyConstraints) return;
@@ -1987,7 +1990,7 @@ var GLOSS = {
       });
   }
   function ccTick() {
-    if (!CC.running || (CC.view !== 'count' && CC.view !== 'fa2add2' && CC.view !== 'fa2ret' && CC.view !== 'fa2send')) return;
+    if (!CC.running || !ccScanView()) return;
     var v = document.getElementById('ccvid');
     if (!v || v.readyState < 2 || !v.videoWidth) {
       CC.stall++;
@@ -2115,7 +2118,7 @@ var GLOSS = {
       '<div class="cc-help-steps">' +
         '<b>In Safari</b><br>Tap <b>aA</b> in the address bar &rarr; <b>Website Settings</b> &rarr; set <b>Camera</b> to <b>Allow</b> &rarr; tap Reload below.' +
         '<br><br><b>From the Home Screen icon</b><br>Settings app &rarr; <b>Apps</b> &rarr; <b>Safari</b> &rarr; <b>Camera</b> &rarr; <b>Allow</b>, then reopen the app.' +
-        '<br><br>Counting still works without the camera \u2014 use <b>+ Manual</b> to type a part number and lot.' +
+        '<br><br>' + (CC.view === 'fa2ret' || CC.view === 'fa2send' ? 'You can still tap the item in the list below.' : 'This still works without the camera \u2014 use <b>+ Manual</b> to type a part number and lot.') +
       '</div>' +
       '<div class="cc-sh-row"><button id="cc-hx" class="cc-cancel">Close</button><button id="cc-hr" class="cc-btn">Reload</button></div>';
     document.getElementById('cc-hx').onclick = function () { ccModalClose(sheet); CC.running = true; ccSchedule(300); };
@@ -2140,17 +2143,55 @@ var GLOSS = {
     CC.stream = null; CC.track = null;
     var v = document.getElementById('ccvid'); if (v) { try { v.srcObject = null; } catch (e2) {} }
     var tb = document.getElementById('cc-torch'); if (tb) { tb.hidden = true; tb.classList.remove('on'); }
-    ccStatus('Camera off \u2014 tap + Manual to add items');
+    ccStatus('Camera off \u2014 ' + ccNoCamHint());
   }
   function ccCamAlive() { var t = CC.track; return !!(t && t.readyState === 'live' && !t.muted); }
   function ccCamRecover() {
-    if (CC.camOff || CC.view !== 'count' || CC.camBusy || ccCamAlive()) return;
+    if (CC.camOff || !ccScanView() || CC.camBusy || ccCamAlive()) return;
     CC.camBusy = true;
     ccStatus('Restarting camera\u2026');
     try { if (CC.stream) CC.stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
     CC.stream = null; CC.track = null; CC.running = false;
     if (CC.tickTO) { clearTimeout(CC.tickTO); CC.tickTO = null; }
-    setTimeout(function () { CC.camBusy = false; if (CC.view === 'count') ccStartCam(); }, 300);
+    setTimeout(function () { CC.camBusy = false; if (ccScanView()) ccStartCam(); }, 300);
+  }
+  function ccScanView() { return CC.view === 'count' || CC.view === 'fa2add2' || CC.view === 'fa2ret' || CC.view === 'fa2send'; }
+  // One camera panel for every scanning screen: the same box, aiming frame, flash,
+  // status line, torch, ? help and Camera-off toggle the cycle count uses, wired the
+  // same way (tap the preview to refocus, a beep per read, screen kept awake, camera
+  // restarts itself after a lock or app switch). The F&A screens must never drift
+  // from this - any new scanning screen renders ccCamPanelHtml() + ccCamPanelWire().
+  function ccCamPanelHtml(opts) {
+    opts = opts || {};
+    return '<div id="cctop">' +
+        '<video id="ccvid" playsinline muted autoplay></video>' +
+        '<div id="cc-target" aria-hidden="true"><i></i><i></i><i></i><i></i></div>' +
+        '<div id="cc-flash" aria-hidden="true"></div>' +
+        '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
+        '<button id="cc-help" class="cc-help" aria-label="Camera help" title="Camera not working?">?</button>' +
+        '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
+        '<div id="ccbar">' +
+          (opts.manualId ? '<button id="' + esc(opts.manualId) + '" type="button" class="cc-mini">+ Manual</button>' : '') +
+          '<button id="cc-cam" type="button" class="cc-mini">Camera off</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="cc-sheet" hidden></div>';
+  }
+  function ccCamPanelWire() {
+    var top = document.getElementById('cctop');
+    if (top && !top.dataset.wired) {
+      top.dataset.wired = '1';
+      document.getElementById('ccvid').addEventListener('click', function () { ccRefocus(true); });
+      document.getElementById('cc-help').addEventListener('click', function (e) { e.stopPropagation(); ccCamHelp(false); });
+      document.getElementById('cc-cam').addEventListener('click', function () { ccCamSet(CC.camOff); });
+      // Outside the count screen the page scrolls, so pin the preview under the header
+      // (the count screen gets the same effect from body.cc-fixed).
+      if (!top.closest('#ccwrap')) { top.classList.add('cc-pinned'); var bar = document.getElementById('bar'); top.style.top = (bar ? bar.offsetHeight : 0) + 'px'; }
+    }
+    ccBeepInit();
+    CC.camOff = false;
+    ccStartCam();
+    ccWake();
   }
   function ccResume(ms) { ccSchedule(ms || 250); }
   function ccRearm(ms) { CC.cool.t = Date.now(); CC.cool.ms = ms || 2200; }
@@ -3464,9 +3505,6 @@ var GLOSS = {
       '.k-bar{position:sticky;bottom:0;padding-top:8px;z-index:6}' +
       '.cc-in[type=date]{min-width:0;max-width:100%;box-sizing:border-box}' +
       '#fa2-more{margin:10px 0 14px}' +
-      '.a2top{position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:4/3;margin-bottom:10px}' +
-      '.a2top video{width:100%;height:100%;object-fit:cover;display:block}' +
-      '.a2hint{position:absolute;left:0;right:0;bottom:0;padding:6px 10px;background:rgba(0,0,0,.55);color:#ddd;font-size:12px;text-align:center}' +
       '.a2man{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px 12px;margin:8px 0}' +
       '.h-ev{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px 12px;margin:8px 0;cursor:pointer}' +
       '.h-ev.open{background:rgba(255,255,255,.07)}' +
@@ -4091,7 +4129,7 @@ var GLOSS = {
     var p = r.p || {};
     var lot = p.lot || '', exp = ccExp(p.exp), ref = r.sku || '', desc = '';
     if (!ref && !p.gtin && (lot || exp)) {
-      ccFlashGreen();
+      ccFlashGreen(); ccBeep('ok');
       if (fa2AttachLE(lot, exp)) { ccStatus((lot ? 'Lot ' + lot : 'Expiry') + ' attached to the last item'); ccSchedule(200); return; }
       FA2.pendLE = { lot: lot, exp: exp, t: now }; fa2HeldDraw();
       ccStatus('Lot/expiry held \u2014 now scan the product barcode');
@@ -4101,11 +4139,13 @@ var GLOSS = {
       var n = nrm(txt);
       if (n.length >= 5 && n.length <= 20 && BYPN[n]) ref = skuOf(BYPN[n]);
     }
-    if (!ref) { ccStatus('Unknown barcode \u2014 use + Manual'); ccSchedule(300); return; }
+    if (!ref) { ccBeep('warn'); ccStatus('Unknown barcode \u2014 use + Manual'); ccSchedule(300); return; }
     desc = fa2DescOf(ref);
     if (FA2.pendLE && now - FA2.pendLE.t < FA2_HELD_MS) { lot = lot || FA2.pendLE.lot; exp = exp || FA2.pendLE.exp; }
     FA2.pendLE = null; fa2HeldDraw();
     ccFlashGreen();
+    var had = !!FA2.a2.items[ref + '\u0001' + (lot || '')];
+    ccBeep(ccIsExpired(exp) ? 'expired' : (had ? 'dup' : 'ok'));
     fa2AddItem({ ref: ref, desc: desc, lot: lot, exp: exp, qty: 1 }, true);
     ccStatus(ref + (lot ? ' \u00b7 Lot ' + lot : ' \u00b7 no lot yet'));
     ccSchedule(220);
@@ -4212,7 +4252,7 @@ var GLOSS = {
     var r = window.__TBX_RESOLVE ? window.__TBX_RESOLVE(txt) : { sku: null, p: {} };
     var p = r.p || {}, ref = r.sku || '';
     if (!ref) { var n = nrm(txt); if (n.length >= 5 && n.length <= 20 && BYPN[n]) ref = skuOf(BYPN[n]); }
-    if (!ref) { ccStatus('Unknown barcode \u2014 tap the item in the list'); ccSchedule(300); return; }
+    if (!ref) { ccBeep('warn'); ccStatus('Unknown barcode \u2014 tap the item in the list'); ccSchedule(300); return; }
     ccStatus(FA2.retScan ? FA2.retScan(ref, p.lot || '') : '');
     ccSchedule(220);
   }
@@ -4232,15 +4272,8 @@ var GLOSS = {
       '<div class="card cc-card">' +
         '<h2 class="cc-h">Add items</h2>' +
         '<div class="cc-sub">' + esc(f.drop) + ' \u00b7 ' + esc(f.date) + ' \u00b7 from ' + esc(fa2FromValue(f)) + '</div>' +
-        '<div class="a2top">' +
-          '<video id="ccvid" playsinline muted autoplay></video>' +
-          '<div id="cc-flash" aria-hidden="true"></div>' +
-          '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
-          '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
-          '<div class="a2hint">Scan the product barcode \u2014 lot and expiry fill in automatically</div>' +
-        '</div>' +
+        ccCamPanelHtml({ manualId: 'a2-man' }) +
         '<div id="a2-held" class="a2held" hidden></div>' +
-        '<button id="a2-man" type="button" class="cc-mini">+ Manual</button>' +
         '<div id="a2-manwrap" class="a2man" hidden>' +
           '<input id="a2-ref" class="cc-in" placeholder="REF (part number)">' +
           '<input id="a2-desc" class="cc-in" placeholder="Description">' +
@@ -4279,9 +4312,7 @@ var GLOSS = {
       document.getElementById('a2-qty').value = '1';
       document.getElementById('a2-ref').focus();
     });
-    ccBeepInit();
-    CC.camOff = false;
-    ccStartCam();
+    ccCamPanelWire();
     fa2A2Gate();
     document.getElementById('a2-go').addEventListener('click', function () {
       var t = FA2.a2;
@@ -4394,13 +4425,7 @@ var GLOSS = {
       '<div id="fa2-rfields"></div>' +
       '<div class="fa2-lab">Selected</div><div id="fa2-tray"></div>' +
       '<button id="fa2-scanb" type="button">' + fa2ScanIcon(24) + '<span>Scan a barcode</span></button>' +
-      '<div id="fa2-scanwrap" class="a2top" hidden>' +
-        '<video id="ccvid" playsinline muted autoplay></video>' +
-        '<div id="cc-flash" aria-hidden="true"></div>' +
-        '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
-        '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
-        '<div class="a2hint">Scan a product barcode to pull it from stock</div>' +
-      '</div>' +
+      '<div id="fa2-scanwrap" hidden>' + ccCamPanelHtml() + '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
       '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
       '<div class="k-bar"><button id="fa2-go" class="cc-btn">Submit</button></div>',
@@ -4445,16 +4470,17 @@ var GLOSS = {
       if (!OH) return 'Still loading stock\u2026';
       var nref = nrm(ref);
       var cands = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && nrm(String(r[0])) === nref; });
-      if (!cands.length) return ref + ' isn\u2019t in F&A stock';
+      var miss = function (msg) { ccBeep('warn'); return msg; };
+      if (!cands.length) return miss(ref + ' isn\u2019t in F&A stock');
       var m = null;
       if (lot) {
         m = cands.filter(function (r) { return String(r[2]).toUpperCase() === String(lot).toUpperCase(); })[0];
-        if (!m) return ref + ' Lot ' + lot + ' isn\u2019t on hand';
+        if (!m) return miss(ref + ' Lot ' + lot + ' isn\u2019t on hand');
       } else if (cands.length === 1) { m = cands[0]; }
-      else { return ref + ' has ' + cands.length + ' lots \u2014 tap the right one'; }
+      else { return miss(ref + ' has ' + cands.length + ' lots \u2014 tap the right one'); }
       var k = m[0] + '\u0001' + m[2];
-      if (!addToTray(k, 1)) return m[0] + ' \u2014 all ' + fa2Num(m[4]) + ' already selected';
-      ccFlashGreen();
+      if (!addToTray(k, 1)) return miss(m[0] + ' \u2014 all ' + fa2Num(m[4]) + ' already selected');
+      ccFlashGreen(); ccBeep('ok');
       return m[0] + (m[2] ? ' \u00b7 Lot ' + m[2] : '') + ' added';
     };
     document.getElementById('fa2-scanb').addEventListener('click', function () {
@@ -4462,7 +4488,7 @@ var GLOSS = {
       w.hidden = !on;
       this.classList.toggle('on', on);
       this.querySelector('span').textContent = on ? 'Stop scanning' : 'Scan a barcode';
-      if (on) { ccBeepInit(); CC.camOff = false; ccStartCam(); } else { ccStop(); }
+      if (on) { ccCamPanelWire(); } else { ccStop(); }
     });
     fa2Load(false).then(function (d) { if (CC.view !== 'fa2ret') return; OH = d; drawPick(); })
       .catch(function () { var el = document.getElementById('fa2-pick'); if (el) el.innerHTML = '<div class="cc-empty">Couldn\u2019t load on-hand.</div>'; });
@@ -4513,13 +4539,7 @@ var GLOSS = {
       namePick +
       '<div class="fa2-lab">Going back</div><div id="fa2-tray"></div>' +
       '<button id="fa2-scanb" type="button">' + fa2ScanIcon(24) + '<span>Scan a barcode</span></button>' +
-      '<div id="fa2-scanwrap" class="a2top" hidden>' +
-        '<video id="ccvid" playsinline muted autoplay></video>' +
-        '<div id="cc-flash" aria-hidden="true"></div>' +
-        '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
-        '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
-        '<div class="a2hint">Scan a product barcode to add it to the send-back</div>' +
-      '</div>' +
+      '<div id="fa2-scanwrap" hidden>' + ccCamPanelHtml() + '</div>' +
       '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
       '<div class="fa2-lab">On hand \u2014 tap to choose a quantity</div><div id="fa2-pick" class="k-scroll"><div class="cc-empty">Loading\u2026</div></div>' +
       '<input id="fa2-trk" class="cc-in" placeholder="Tracking # (required)">' +
@@ -4555,16 +4575,17 @@ var GLOSS = {
       if (!OH) return 'Still loading stock\u2026';
       var nref = nrm(ref);
       var cands = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && nrm(String(r[0])) === nref; });
-      if (!cands.length) return ref + ' isn\u2019t in F&A stock';
+      var miss = function (msg) { ccBeep('warn'); return msg; };
+      if (!cands.length) return miss(ref + ' isn\u2019t in F&A stock');
       var m = null;
       if (lot) {
         m = cands.filter(function (r) { return String(r[2]).toUpperCase() === String(lot).toUpperCase(); })[0];
-        if (!m) return ref + ' Lot ' + lot + ' isn\u2019t on hand';
+        if (!m) return miss(ref + ' Lot ' + lot + ' isn\u2019t on hand');
       } else if (cands.length === 1) { m = cands[0]; }
-      else { return ref + ' has ' + cands.length + ' lots \u2014 tap the right one'; }
+      else { return miss(ref + ' has ' + cands.length + ' lots \u2014 tap the right one'); }
       var k = m[0] + '\u0001' + m[2];
-      if (!addToTray(k, 1)) return m[0] + ' \u2014 all ' + fa2Num(m[4]) + ' already selected';
-      ccFlashGreen();
+      if (!addToTray(k, 1)) return miss(m[0] + ' \u2014 all ' + fa2Num(m[4]) + ' already selected');
+      ccFlashGreen(); ccBeep('ok');
       return m[0] + (m[2] ? ' \u00b7 Lot ' + m[2] : '') + ' added';
     };
     document.getElementById('fa2-scanb').addEventListener('click', function () {
@@ -4572,7 +4593,7 @@ var GLOSS = {
       w.hidden = !on;
       this.classList.toggle('on', on);
       this.querySelector('span').textContent = on ? 'Stop scanning' : 'Scan a barcode';
-      if (on) { ccBeepInit(); CC.camOff = false; ccStartCam(); } else { ccStop(); }
+      if (on) { ccCamPanelWire(); } else { ccStop(); }
     });
     function loadSend(force) { return fa2Load(force).then(function (d) {
       if (CC.view !== 'fa2send') return;

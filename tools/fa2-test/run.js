@@ -18,6 +18,7 @@ async function newPage(browser, hub, opts) {
   opts = opts || {};
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'America/New_York', isMobile: true, hasTouch: true });
   await ctx.addInitScript(() => { try { localStorage.setItem('tbx_ann_cc-launch', 'x'); localStorage.setItem('tbx_tour_done', '1'); } catch (e) {} });
+  try { await ctx.grantPermissions(['camera']); } catch (e) {}
   const page = await ctx.newPage();
   page.on('pageerror', e => { hub.pageErrors = hub.pageErrors || []; hub.pageErrors.push(String(e)); });
   await page.route('**/sw.js', r => r.fulfill({ status: 404, body: '' }));
@@ -65,7 +66,8 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
 (async () => {
   const server = spawn('python3', ['-m', 'http.server', String(PORT)], { cwd: process.env.REPO, stdio: 'ignore' });
   await sleep(800);
-  const browser = await chromium.launch({ headless: true });
+  // A fake camera so getUserMedia succeeds and the shared camera panel behaves as on a phone (no auto-opened help sheet).
+  const browser = await chromium.launch({ headless: true, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const fixedNow = () => new Date();
   // Seed expirations are relative to today so the band tests never drift with the calendar.
   const dstr = days => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + days); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
@@ -183,7 +185,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.waitForSelector('#a2-go', { timeout: 10000 });
     check('S2f Step 2 renders, Save disabled with empty tray', await page.locator('#a2-go').isDisabled());
     if (FIXED) {
-      const cam = await page.evaluate(() => { const r = document.querySelector('.a2top').getBoundingClientRect(); const c = document.getElementById('content').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), cw: Math.round(c.width), vh: window.innerHeight }; });
+      const cam = await page.evaluate(() => { const r = document.getElementById('cctop').getBoundingClientRect(); const c = document.getElementById('content').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), cw: Math.round(c.width), vh: window.innerHeight }; });
       check('R4b Scanner box is full content width and sized like the Cycle Count camera (34vh, ≥207px)', cam.w === cam.cw && cam.h >= 207 && Math.abs(cam.h - Math.round(cam.vh * 0.34)) <= 2, JSON.stringify(cam));
     }
     await page.click('#a2-man');
@@ -424,6 +426,10 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     if (FIXED) {
       const sendUi = await page.evaluate(() => ({ scan: !!document.getElementById('fa2-scanb'), q: !!document.getElementById('fa2-q'), eyebrows: document.querySelectorAll('#fa2-pick .fa2-eyebrow').length, tray: document.querySelectorAll('#fa2-tray .k-trow').length, bar: !!document.querySelector('.k-bar #fa2-go') }));
       check('N7a Send back uses the shared kit: scan button, search, expiry eyebrows, tray, sticky Complete bar', sendUi.scan && sendUi.q && sendUi.eyebrows >= 3 && sendUi.tray === 1 && sendUi.bar, JSON.stringify(sendUi));
+      await page.click('#fa2-scanb'); await sleep(400);
+      const sp = await page.evaluate(() => { const t = document.querySelector('#fa2-scanwrap #cctop'); return t ? { kids: [].map.call(t.children, n => n.tagName.toLowerCase() + (n.id ? '#' + n.id : '')).join(','), hidden: document.getElementById('fa2-scanwrap').hidden, cam: !!t.querySelector('#ccbar #cc-cam'), help: !!t.querySelector('#cc-help'), pos: getComputedStyle(t).position } : null; });
+      check('N12e Send back\u2019s scanner is the same camera panel (frame, help, Camera off, pinned)', sp && !sp.hidden && sp.kids === 'video#ccvid,div#cc-target,div#cc-flash,button#cc-torch,button#cc-help,div#cc-stat,div#ccbar' && sp.cam && sp.help && sp.pos === 'sticky', JSON.stringify(sp));
+      await page.click('#fa2-scanb'); await sleep(200);
     }
     hub.failNext = { action: 'batch', mode: 'abort-after-apply' };
     await page.click('#fa2-go');
@@ -793,6 +799,18 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await go(page, '#/fa2/add', '#fa2-drop');
     await page.fill('#fa2-drop', 'Scan drop'); await pickChip(page, 'fa2-from', 'Mia'); await pickChip(page, 'fa2-rb', 'Katie F');
     await page.click('#fa2-go'); await page.waitForSelector('#a2-go', { timeout: 10000 });
+    if (FIXED) {
+      const panel = await page.evaluate(() => { const t = document.getElementById('cctop'); const kids = [].map.call(t.children, n => n.tagName.toLowerCase() + (n.id ? '#' + n.id : '')); const cs = getComputedStyle(t); return { kids, pos: cs.position, top: cs.top, sheet: !!document.getElementById('cc-sheet'), target: !!t.querySelector('#cc-target i:nth-child(4)'), manual: !!t.querySelector('#ccbar #a2-man'), cam: !!t.querySelector('#ccbar #cc-cam'), help: !!t.querySelector('#cc-help'), stat: (document.getElementById('cc-stat') || {}).innerText }; });
+      check('N12a Add items uses the cycle-count camera panel: preview, aiming frame, flash, torch, ? help, status, + Manual / Camera off bar, help sheet', panel.kids.join(',') === 'video#ccvid,div#cc-target,div#cc-flash,button#cc-torch,button#cc-help,div#cc-stat,div#ccbar' && panel.sheet && panel.target && panel.manual && panel.cam && panel.help, JSON.stringify(panel));
+      check('N12b The preview is pinned under the header while the tray scrolls', panel.pos === 'sticky' && parseInt(panel.top, 10) >= 40, JSON.stringify({ pos: panel.pos, top: panel.top }));
+      await page.click('#cc-cam'); await sleep(200);
+      const off = await page.evaluate(() => ({ stat: document.getElementById('cc-stat').innerText, btn: document.getElementById('cc-cam').innerText, target: getComputedStyle(document.getElementById('cc-target')).display }));
+      check('N12c Camera off works like the count screen (status, button flips, frame hides)', /Camera off/.test(off.stat) && off.btn === 'Camera on' && off.target === 'none', JSON.stringify(off));
+      await page.click('#cc-cam'); await sleep(300);
+      await page.click('#cc-help'); await page.waitForSelector('#cc-sheet:not([hidden])', { timeout: 5000 });
+      check('N12d ? opens the same camera-help sheet', /Camera not working/.test(await text(page, '#cc-sheet')));
+      await page.click('#cc-hx'); await sleep(200);
+    }
     await page.evaluate(() => window.__TBX_ONCODE('(01)07613327570463'));
     await sleep(300);
     const row1 = await text(page, '#a2-tray .k-trow');

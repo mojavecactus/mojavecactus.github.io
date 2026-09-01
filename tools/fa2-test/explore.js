@@ -18,6 +18,7 @@ async function newPage(browser, hub, opts) {
   opts = opts || {};
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'America/New_York', isMobile: true, hasTouch: true });
   await ctx.addInitScript(() => { try { localStorage.setItem('tbx_ann_cc-launch', 'x'); localStorage.setItem('tbx_tour_done', '1'); } catch (e) {} });
+  try { await ctx.grantPermissions(['camera']); } catch (e) {}
   const page = await ctx.newPage();
   page.on('pageerror', e => { hub.pageErrors = hub.pageErrors || []; hub.pageErrors.push(String(e)); });
   await page.route('**/sw.js', r => r.fulfill({ status: 404, body: '' }));
@@ -66,6 +67,7 @@ async function newPageSized(browser, hub, w, hgt, opts) {
   opts = opts || {};
   const ctx = await browser.newContext({ viewport: { width: w, height: hgt }, timezoneId: 'America/New_York', isMobile: true, hasTouch: true });
   await ctx.addInitScript(() => { try { localStorage.setItem('tbx_ann_cc-launch', 'x'); localStorage.setItem('tbx_tour_done', '1'); } catch (e) {} });
+  try { await ctx.grantPermissions(['camera']); } catch (e) {}
   const page = await ctx.newPage();
   page.on('pageerror', e => { hub.pageErrors = hub.pageErrors || []; hub.pageErrors.push(String(e)); });
   await page.route('**/sw.js', r => r.fulfill({ status: 404, body: '' }));
@@ -108,7 +110,8 @@ const dstr = days => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(
 (async () => {
   const server = spawn('python3', ['-m', 'http.server', String(PORT)], { cwd: process.env.REPO, stdio: 'ignore' });
   await sleep(800);
-  const browser = await chromium.launch({ headless: true });
+  // A fake camera so getUserMedia succeeds and the shared camera panel behaves as on a phone (no auto-opened help sheet).
+  const browser = await chromium.launch({ headless: true, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const fixedNow = () => new Date();
   const seeds = () => [
     { type: 'Received', ref: '3105000740', desc: 'Test anchor A', lot: 'LOTA', exp: dstr(0).slice(0, 7), qty: 2, dropName: 'Hartford drop', from: 'Matt', receivedBy: 'Katie F' },
