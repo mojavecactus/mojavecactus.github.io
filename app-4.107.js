@@ -28,7 +28,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.106';
+  var APPVER = '4.107';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1565,6 +1565,8 @@ var GLOSS = {
     if (CC.poll) { clearInterval(CC.poll); CC.poll = null; }
     if (CC.wake) { try { CC.wake.release(); } catch (e2) {} CC.wake = null; }
     if (document.body) document.body.classList.remove('cc-fixed');
+    var sh = document.getElementById('cc-sheet'); if (sh) { sh.hidden = true; sh.classList.remove('cc-modal'); }
+    var bd = document.getElementById('cc-backdrop'); if (bd) bd.hidden = true;
   }
   // ---- offline-first sync engine: scans land in a local ledger instantly and
   // ---- upload in the background as idempotent ops (opId-deduped server side).
@@ -4129,11 +4131,11 @@ var GLOSS = {
     var p = r.p || {};
     var lot = p.lot || '', exp = ccExp(p.exp), ref = r.sku || '', desc = '';
     if (!ref && !p.gtin && (lot || exp)) {
-      ccFlashGreen(); ccBeep('ok');
-      if (fa2AttachLE(lot, exp)) { ccStatus((lot ? 'Lot ' + lot : 'Expiry') + ' attached to the last item'); ccSchedule(200); return; }
+      ccFlashGreen();
+      if (fa2AttachLE(lot, exp)) { ccBeep('ok'); ccStatus((lot ? 'Lot ' + lot : 'Expiry') + ' attached to the last item'); ccSchedule(200); return; }
       FA2.pendLE = { lot: lot, exp: exp, t: now }; fa2HeldDraw();
-      ccStatus('Lot/expiry held \u2014 now scan the product barcode');
-      ccSchedule(200); return;
+      fa2LotEntry(lot, exp);
+      return;
     }
     if (!ref) {
       var n = nrm(txt);
@@ -4144,11 +4146,128 @@ var GLOSS = {
     if (FA2.pendLE && now - FA2.pendLE.t < FA2_HELD_MS) { lot = lot || FA2.pendLE.lot; exp = exp || FA2.pendLE.exp; }
     FA2.pendLE = null; fa2HeldDraw();
     ccFlashGreen();
-    var had = !!FA2.a2.items[ref + '\u0001' + (lot || '')];
+    fa2ScanConfirm(ref, desc, lot, exp);
+  }
+  // The count screen's per-scan sheet, shared by every F&A scanning screen: the camera
+  // pauses, the item shows with its lot/expiry, a quantity is picked, Confirm adds it and
+  // Cancel resumes. Confirm re-arms fast (600 ms) so the same box can be scanned again.
+  function fa2ScanSheet(o) {
+    CC.running = false;
+    var sheet = document.getElementById('cc-sheet');
+    if (!sheet) { CC.running = true; ccSchedule(300); return; }
+    ccModalOpen(sheet);
+    FA2.sheetMax = o.max || 0;
+    sheet.innerHTML =
+      '<div class="cc-sh-h">' + o.title + '</div>' +
+      (o.sub ? '<div class="cc-sub">' + o.sub + '</div>' : '') +
+      (o.expired ? '<div class="cc-exptag">EXPIRED</div>' : '') +
+      (o.fields || '') +
+      (o.note ? '<div class="cc-note">' + o.note + '</div>' : '') +
+      '<div class="cc-qlabel">' + esc(o.qtyLabel || 'Quantity') + '</div>' +
+      '<div class="cc-qtyrow"><button id="cc-cqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
+        '<input id="cc-cqv" class="cc-qin" type="number" inputmode="numeric" min="1" value="1">' +
+        '<button id="cc-cqp" class="cc-qbtn" aria-label="Increase">+</button></div>' +
+      '<div class="cc-sh-row"><button id="cc-cx" class="cc-cancel">Cancel</button><button id="cc-cok" class="cc-btn">' + esc(o.okLabel || 'Confirm') + '</button></div>';
+    var qv = document.getElementById('cc-cqv');
+    function cap(n) { n = Math.max(1, Math.round(+n || 1)); return FA2.sheetMax ? Math.min(FA2.sheetMax, n) : n; }
+    document.getElementById('cc-cqm').onclick = function () { qv.value = Math.max(1, (+qv.value || 1) - 1); };
+    document.getElementById('cc-cqp').onclick = function () { qv.value = cap((+qv.value || 0) + 1); };
+    function resume(ms) { ccModalClose(sheet); CC.running = true; ccSchedule(ms || 220); }
+    document.getElementById('cc-cok').onclick = function () {
+      var q = cap(qv.value);
+      if (o.onOk(q) === false) return;
+      resume(220); ccRearm(600);
+    };
+    document.getElementById('cc-cx').onclick = function () {
+      resume(300); ccRearm(2200); ccStatus('Cancelled \u2014 keep scanning');
+      if (o.onCancel) o.onCancel();
+    };
+  }
+  function fa2ScanConfirm(ref, desc, lot, exp) {
+    var had = FA2.a2.items[ref + '\u0001' + (lot || '')];
     ccBeep(ccIsExpired(exp) ? 'expired' : (had ? 'dup' : 'ok'));
-    fa2AddItem({ ref: ref, desc: desc, lot: lot, exp: exp, qty: 1 }, true);
-    ccStatus(ref + (lot ? ' \u00b7 Lot ' + lot : ' \u00b7 no lot yet'));
-    ccSchedule(220);
+    try { navigator.vibrate && navigator.vibrate(had ? [30, 60, 30] : 35); } catch (e) {}
+    fa2ScanSheet({
+      title: esc(ref) + (desc ? ' \u2014 ' + esc(desc) : ''),
+      sub: (lot ? 'Lot ' + esc(lot) : 'No lot on this barcode') + (exp ? ' \u00b7 Exp ' + esc(exp) : (lot ? ' \u00b7 no expiry on this barcode' : '')),
+      expired: ccIsExpired(exp),
+      fields: (lot ? '' : '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box (or scan the lot barcode next)">') +
+              (exp ? '' : '<label class="a2f"><span class="a2fl">Expiration \u2014 optional here, needed before saving</span><input id="cc-cexp" class="cc-in" type="date"></label>'),
+      note: had ? 'Already in list: <b>' + had.qty + '</b> \u00b7 this adds on top' : '',
+      qtyLabel: had ? 'Add quantity' : 'Quantity',
+      onOk: function (q) {
+        var lv = document.getElementById('cc-clot'), xv = document.getElementById('cc-cexp');
+        var useLot = lot || (lv ? lv.value.trim() : '');
+        var useExp = exp || ((xv && /^\d{4}-\d{2}-\d{2}$/.test(xv.value)) ? xv.value : '');
+        fa2AddItem({ ref: ref, desc: desc, lot: useLot, exp: useExp, qty: q }, true);
+        ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (useLot ? ' \u00b7 Lot ' + useLot : ' \u00b7 scan its lot barcode next'));
+      }
+    });
+    if (document.getElementById('cc-cexp')) fa2ExpWire('cc-cexp');
+  }
+  // Lot barcode before its product: the count screen's "Lot barcode" sheet. Type the
+  // part number, or Cancel and scan the product barcode next - the lot stays held.
+  function fa2LotEntry(lot, exp) {
+    ccBeep(ccIsExpired(exp) ? 'expired' : 'dup');
+    fa2ScanSheet({
+      title: 'Lot barcode',
+      sub: (lot ? 'Lot ' + esc(lot) : 'No lot') + (exp ? ' \u00b7 Exp ' + esc(exp) : ''),
+      expired: ccIsExpired(exp),
+      fields: '<div class="cc-sub2">No part number on this barcode \u2014 scan the product barcode next, or type it from the box.</div>' +
+              '<input id="cc-lpn" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Part number">',
+      okLabel: 'Add',
+      onOk: function (q) {
+        var pn = document.getElementById('cc-lpn'), v = pn ? pn.value.trim() : '';
+        if (!v) { if (pn) { pn.classList.add('cc-need'); try { pn.focus(); } catch (e) {} } return false; }
+        FA2.pendLE = null; fa2HeldDraw();
+        fa2AddItem({ ref: v, desc: fa2DescOf(v), lot: lot, exp: exp, qty: q }, true);
+        ccStatus('Added ' + v + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
+      },
+      onCancel: function () { ccStatus('Lot held \u2014 now scan the product barcode'); }
+    });
+    var pn0 = document.getElementById('cc-lpn');
+    if (pn0) { pn0.addEventListener('input', function () { pn0.classList.remove('cc-need'); }); }
+  }
+  // Remove / Send: the scanned product's stock rows -> the same sheet (a lot to pick when
+  // the barcode had none and several are on hand, quantity capped at what is left).
+  function fa2ScanPick(cands, lot, tray, addToTray) {
+    var miss = function (msg) { ccBeep('warn'); return msg; };
+    var ref = String(cands[0][0]), m = null;
+    if (lot) {
+      m = cands.filter(function (r) { return String(r[2]).toUpperCase() === String(lot).toUpperCase(); })[0];
+      if (!m) return miss(ref + ' Lot ' + lot + ' isn\u2019t on hand');
+    } else if (cands.length === 1) { m = cands[0]; }
+    function have(r) { var k = r[0] + '\u0001' + r[2]; return tray.items[k] ? tray.items[k].qty : 0; }
+    function left(r) { return fa2Num(r[4]) - have(r); }
+    if (m && left(m) <= 0) return miss(ref + ' \u2014 all ' + fa2Num(m[4]) + ' already selected');
+    var opts = cands.filter(function (r) { return left(r) > 0; });
+    if (!m && !opts.length) return miss(ref + ' \u2014 everything on hand is already selected');
+    var cur = m || opts[0], pick = !m && opts.length > 1;
+    ccFlashGreen();
+    ccBeep(fa2RowBand(cur) === 0 ? 'expired' : 'ok');
+    try { navigator.vibrate && navigator.vibrate(35); } catch (e) {}
+    function subFor(r) { return (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + ' \u00b7 ' + fa2Num(r[4]) + ' on hand' + (have(r) ? ' \u00b7 ' + have(r) + ' already selected' : ''); }
+    fa2ScanSheet({
+      title: esc(ref) + (cur[1] ? ' \u2014 ' + esc(cur[1]) : ''),
+      sub: subFor(cur),
+      expired: fa2RowBand(cur) === 0,
+      fields: pick ? '<div class="cc-sub2">Which lot?</div>' + fa2Chips('cc-lots', opts.map(function (r) { return String(r[2]); }), String(cur[2])) : '',
+      max: left(cur),
+      onOk: function (q) {
+        var k = cur[0] + '\u0001' + cur[2];
+        if (!addToTray(k, q)) return false;
+        ccStatus('Added ' + cur[0] + (q > 1 ? ' \u00d7' + q : '') + (cur[2] ? ' \u00b7 Lot ' + cur[2] : ''));
+      }
+    });
+    if (pick) fa2ChipWire('cc-lots', function (v) {
+      cur = opts.filter(function (r) { return String(r[2]) === v; })[0] || cur;
+      var sb = document.querySelector('#cc-sheet .cc-sub'); if (sb) sb.innerHTML = subFor(cur);
+      var xt = document.querySelector('#cc-sheet .cc-exptag'); if (xt) xt.remove();
+      if (fa2RowBand(cur) === 0 && sb) sb.insertAdjacentHTML('afterend', '<div class="cc-exptag">EXPIRED</div>');
+      FA2.sheetMax = left(cur);
+      var qv = document.getElementById('cc-cqv'); if (qv) qv.value = Math.min(+qv.value || 1, FA2.sheetMax);
+    });
+    return '';
   }
   function fa2AddItem(o, fromScan) {
     var key = (o.ref || '') + '\u0001' + (o.lot || '');
@@ -4158,9 +4277,9 @@ var GLOSS = {
     if (FA2.a2api) FA2.a2api.redraw();
     fa2A2Gate();
   }
-  // A lot/expiry that arrived before its product waits 25 s, visibly, then is forgotten -
+  // A lot/expiry that arrived before its product waits 2 min (as on the count screen), visibly, then is forgotten -
   // so a stray label from one box can never end up on the next box scanned minutes later.
-  var FA2_HELD_MS = 25000;
+  var FA2_HELD_MS = 120000;
   function fa2HeldDraw() {
     var h = document.getElementById('a2-held'); if (!h) return;
     clearTimeout(FA2.heldTO);
@@ -4470,18 +4589,8 @@ var GLOSS = {
       if (!OH) return 'Still loading stock\u2026';
       var nref = nrm(ref);
       var cands = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && nrm(String(r[0])) === nref; });
-      var miss = function (msg) { ccBeep('warn'); return msg; };
-      if (!cands.length) return miss(ref + ' isn\u2019t in F&A stock');
-      var m = null;
-      if (lot) {
-        m = cands.filter(function (r) { return String(r[2]).toUpperCase() === String(lot).toUpperCase(); })[0];
-        if (!m) return miss(ref + ' Lot ' + lot + ' isn\u2019t on hand');
-      } else if (cands.length === 1) { m = cands[0]; }
-      else { return miss(ref + ' has ' + cands.length + ' lots \u2014 tap the right one'); }
-      var k = m[0] + '\u0001' + m[2];
-      if (!addToTray(k, 1)) return miss(m[0] + ' \u2014 all ' + fa2Num(m[4]) + ' already selected');
-      ccFlashGreen(); ccBeep('ok');
-      return m[0] + (m[2] ? ' \u00b7 Lot ' + m[2] : '') + ' added';
+      if (!cands.length) { ccBeep('warn'); return ref + ' isn\u2019t in F&A stock'; }
+      return fa2ScanPick(cands, lot, tray, addToTray);
     };
     document.getElementById('fa2-scanb').addEventListener('click', function () {
       var w = document.getElementById('fa2-scanwrap'), on = w.hidden;
@@ -4575,18 +4684,8 @@ var GLOSS = {
       if (!OH) return 'Still loading stock\u2026';
       var nref = nrm(ref);
       var cands = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && nrm(String(r[0])) === nref; });
-      var miss = function (msg) { ccBeep('warn'); return msg; };
-      if (!cands.length) return miss(ref + ' isn\u2019t in F&A stock');
-      var m = null;
-      if (lot) {
-        m = cands.filter(function (r) { return String(r[2]).toUpperCase() === String(lot).toUpperCase(); })[0];
-        if (!m) return miss(ref + ' Lot ' + lot + ' isn\u2019t on hand');
-      } else if (cands.length === 1) { m = cands[0]; }
-      else { return miss(ref + ' has ' + cands.length + ' lots \u2014 tap the right one'); }
-      var k = m[0] + '\u0001' + m[2];
-      if (!addToTray(k, 1)) return miss(m[0] + ' \u2014 all ' + fa2Num(m[4]) + ' already selected');
-      ccFlashGreen(); ccBeep('ok');
-      return m[0] + (m[2] ? ' \u00b7 Lot ' + m[2] : '') + ' added';
+      if (!cands.length) { ccBeep('warn'); return ref + ' isn\u2019t in F&A stock'; }
+      return fa2ScanPick(cands, lot, tray, addToTray);
     };
     document.getElementById('fa2-scanb').addEventListener('click', function () {
       var w = document.getElementById('fa2-scanwrap'), on = w.hidden;

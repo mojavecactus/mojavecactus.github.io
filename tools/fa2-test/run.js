@@ -374,8 +374,13 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       check('R11l Scan button reveals the camera panel and flips to Stop scanning', !(await page.evaluate(() => document.getElementById('fa2-scanwrap').hidden)) && (await text(page, '#fa2-scanb')) === 'Stop scanning' && (await page.evaluate(() => document.getElementById('fa2-scanb').classList.contains('on'))), await text(page, '#fa2-scanb'));
       await page.evaluate(() => window.__TBX_ONCODE('(01)07290013396041(10)LOTC'));
       await sleep(400);
+      const rsh = await page.evaluate(() => { const s = document.getElementById('cc-sheet'); return { open: !s.hidden, h: (s.querySelector('.cc-sh-h') || {}).innerText, sub: (s.querySelector('.cc-sub') || {}).innerText, qty: document.querySelector('#fa2-tray .k-step b').innerText, max: (document.getElementById('cc-cqv') || {}).value }; });
+      check('N13g Scanning stock on Remove/Return opens the sheet with the lot, expiry, on hand and what is already selected', rsh.open && /0130/.test(rsh.h) && /Lot LOTC/.test(rsh.sub) && /5 on hand/.test(rsh.sub) && /3 already selected/.test(rsh.sub) && rsh.qty === '3', JSON.stringify(rsh));
+      await page.click('#cc-cqp'); await page.click('#cc-cqp'); await page.click('#cc-cqp'); // capped at what is left (2)
+      check('N13h Quantity is capped at what is left on hand', (await page.evaluate(() => document.getElementById('cc-cqv').value)) === '2');
+      await page.click('#cc-cqm'); await page.click('#cc-cok'); await sleep(300);
       const scanned = await page.evaluate(() => ({ qty: document.querySelector('#fa2-tray .k-step b').innerText, stat: (document.getElementById('cc-stat') || {}).textContent }));
-      check('R11m Scanning a stocked ref+lot adds one to the tray', scanned.qty === '4' && /added/.test(scanned.stat), JSON.stringify(scanned));
+      check('R11m Confirming the scan adds the chosen quantity to the tray', scanned.qty === '4' && /Added 0130/.test(scanned.stat), JSON.stringify(scanned));
       await page.evaluate(() => window.__TBX_ONCODE('(01)07613327570463(10)NOPE'));
       await sleep(400);
       const bad = await page.evaluate(() => ({ qty: document.querySelector('#fa2-tray .k-step b').innerText, stat: (document.getElementById('cc-stat') || {}).textContent }));
@@ -813,6 +818,15 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     }
     await page.evaluate(() => window.__TBX_ONCODE('(01)07613327570463'));
     await sleep(300);
+    if (FIXED) {
+      const sh = await page.evaluate(() => { const s = document.getElementById('cc-sheet'); return { open: !!s && !s.hidden && s.classList.contains('cc-modal'), backdrop: !document.getElementById('cc-backdrop').hidden, h: (s.querySelector('.cc-sh-h') || {}).innerText, sub: (s.querySelector('.cc-sub') || {}).innerText, lotBox: !!document.getElementById('cc-clot'), expBox: !!document.getElementById('cc-cexp'), qty: (document.getElementById('cc-cqv') || {}).value, ok: (document.getElementById('cc-cok') || {}).innerText, cancel: (document.getElementById('cc-cx') || {}).innerText, rows: document.querySelectorAll('#a2-tray .k-trow').length }; });
+      check('N13a A product scan pauses on the count-screen sheet: item, lot/expiry line, quantity 1, Cancel / Confirm — nothing added yet', sh.open && sh.backdrop && /3105000740/.test(sh.h) && /No lot on this barcode/.test(sh.sub) && sh.lotBox && sh.expBox && sh.qty === '1' && sh.ok === 'Confirm' && sh.cancel === 'Cancel' && sh.rows === 0, JSON.stringify(sh));
+      await page.click('#cc-cx'); await sleep(300);
+      check('N13b Cancel adds nothing and resumes scanning', (await page.locator('#a2-tray .k-trow').count()) === 0 && (await page.evaluate(() => document.getElementById('cc-sheet').hidden)) && /Cancelled/.test(await text(page, '#cc-stat')));
+      await sleep(2300); // cancel re-arms the same code for 2.2 s, like the count screen
+      await page.evaluate(() => window.__TBX_ONCODE('(01)07613327570463')); await sleep(300);
+      await page.click('#cc-cok'); await sleep(300);
+    }
     const row1 = await text(page, '#a2-tray .k-trow');
     check('S10a GTIN-only scan adds a row flagged as missing its lot', /3105000740/.test(row1) && /No lot/.test(row1), row1.replace(/\n/g, ' | '));
     if (FIXED) {
@@ -838,11 +852,32 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
       check('S10e Re-scanning GTIN after the held lot creates a SECOND row (lot-less row remains)', rows2.length === 2 && /ZLOT1/.test(rows2[1]), JSON.stringify(rows2));
       await page.locator('#a2-tray .k-trow').first().locator('.k-x').click(); await sleep(200);
       check('S10f After deleting the lot-less row, Save enables', !(await page.locator('#a2-go').isDisabled()));
+    }
+    if (FIXED) {
+      // lot barcode with nothing to attach to -> the count screen's "Lot barcode" sheet, lot held behind it
       await page.evaluate(() => window.__TBX_ONCODE('(17)280101(10)HELDX')); await sleep(300);
-      const held = await page.evaluate(() => ({ vis: !document.getElementById('a2-held').hidden, txt: document.getElementById('a2-held').innerText, rows: document.querySelectorAll('#a2-tray .k-trow').length }));
-      check('N11a A lot scanned with nothing to attach to shows as held (with an ×)', held.vis && /HELDX/.test(held.txt) && held.rows === 1, JSON.stringify(held));
+      const ls = await page.evaluate(() => { const s = document.getElementById('cc-sheet'); return { open: !s.hidden, h: (s.querySelector('.cc-sh-h') || {}).innerText, pn: !!document.getElementById('cc-lpn'), ok: (document.getElementById('cc-cok') || {}).innerText, rows: document.querySelectorAll('#a2-tray .k-trow').length }; });
+      check('N13c A lot-only scan with nothing to attach to opens the "Lot barcode" sheet (part number box, Add)', ls.open && ls.h === 'Lot barcode' && ls.pn && ls.ok === 'Add' && ls.rows === 1, JSON.stringify(ls));
+      await page.click('#cc-cok'); await sleep(150);
+      check('N13d Add without a part number is refused (box flagged)', (await page.evaluate(() => document.getElementById('cc-lpn').classList.contains('cc-need') && !document.getElementById('cc-sheet').hidden)));
+      await page.click('#cc-cx'); await sleep(300);
+      const held = await page.evaluate(() => ({ vis: !document.getElementById('a2-held').hidden, txt: document.getElementById('a2-held').innerText, rows: document.querySelectorAll('#a2-tray .k-trow').length, stat: document.getElementById('cc-stat').innerText }));
+      check('N11a Cancel keeps the lot held (chip with an ×) and says to scan the product next', held.vis && /HELDX/.test(held.txt) && held.rows === 1 && /scan the product/.test(held.stat), JSON.stringify(held));
       await page.click('#a2-heldx'); await sleep(150);
       check('N11b × forgets the held lot', await page.evaluate(() => document.getElementById('a2-held').hidden));
+      // typed part number on the lot sheet adds the item with that lot, quantity from the stepper
+      await sleep(2300); await page.evaluate(() => window.__TBX_ONCODE('(17)280101(10)HELDX')); await sleep(300);
+      await page.fill('#cc-lpn', '0130'); await page.click('#cc-cqp'); await page.click('#cc-cok'); await sleep(300);
+      const typed = await page.evaluate(() => [].map.call(document.querySelectorAll('#a2-tray .k-trow'), n => n.innerText.replace(/\s+/g, ' ')));
+      check('N13e Typing the part number on the lot sheet adds it with that lot and quantity, held chip cleared', typed.length === 2 && /0130.*HELDX/.test(typed[1]) && /\b2\b/.test(typed[1]) && (await page.evaluate(() => document.getElementById('a2-held').hidden)), JSON.stringify(typed));
+      await page.locator('#a2-tray .k-trow').last().locator('.k-x').click(); await sleep(200);
+      // re-scanning a box already in the list: "adds on top" note, Add quantity
+      await page.evaluate(() => window.__TBX_ONCODE('(01)07613327570463(17)270600(10)ZLOT1')); await sleep(300);
+      const dup = await page.evaluate(() => ({ note: (document.querySelector('#cc-sheet .cc-note') || {}).innerText, label: (document.querySelector('#cc-sheet .cc-qlabel') || {}).innerText, lotBox: !!document.getElementById('cc-clot') }));
+      await page.click('#cc-cqp'); await page.click('#cc-cok'); await sleep(300);
+      const dq = await page.evaluate(() => document.querySelector('#a2-tray .k-trow .k-step b').innerText);
+      check('N13f Re-scanning a box already in the list shows "Already in list: 1 · adds on top", Add quantity 2 → row is 3', /Already in list: 1/.test(dup.note) && /^add quantity$/i.test(dup.label) && !dup.lotBox && dq === '3', JSON.stringify({ dup, dq }));
+      check('S10f Save is enabled with a complete row', !(await page.locator('#a2-go').isDisabled()));
     }
     await page.click('#a2-go');
     await page.waitForFunction(() => location.hash === '#/fa2', null, { timeout: 10000 });

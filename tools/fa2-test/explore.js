@@ -379,12 +379,15 @@ const dstr = days => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(
       await go(page, '#/fa2/add', '#fa2-drop'); await page.fill('#fa2-drop', 'Clock drop'); await pickChip(page, 'fa2-from', 'Mia'); await pickChip(page, 'fa2-rb', 'Katie F');
       await page.click('#fa2-go'); await page.waitForSelector('#a2-go', { timeout: 10000 });
       await page.evaluate(() => window.__TBX_ONCODE('(17)280101(10)STALELOT')); await sleep(200);
+      await page.click('#cc-cx'); await sleep(200); // the Lot-barcode sheet: cancel, the lot stays held
       const h1 = await page.evaluate(() => !document.getElementById('a2-held').hidden);
-      await page.clock.runFor(26000); await sleep(200);
+      await page.clock.runFor(121000); await sleep(200);
       const h2 = await page.evaluate(() => !document.getElementById('a2-held').hidden);
       await page.evaluate(() => window.__TBX_ONCODE('(01)07613327570463')); await sleep(300);
+      const sub = await page.evaluate(() => (document.querySelector('#cc-sheet .cc-sub') || {}).innerText || '');
+      await page.click('#cc-cok'); await sleep(300);
       const row = await page.evaluate(() => (document.querySelector('#a2-tray .k-trow') || {}).innerText || '');
-      check('X8a A held lot is forgotten after 25 s and does not attach to a product scanned later', h1 && !h2 && /No lot/.test(row) && !/STALELOT/.test(row), JSON.stringify({ h1, h2, row: row.replace(/\s+/g, ' ') }));
+      check('X8a A held lot is forgotten after 2 min and does not attach to a product scanned later', h1 && !h2 && /No lot on this barcode/.test(sub) && /No lot/.test(row) && !/STALELOT/.test(row), JSON.stringify({ h1, h2, sub, row: row.replace(/\s+/g, ' ') }));
       await ctx.close();
     }
   } catch (e) {
