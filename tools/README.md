@@ -43,20 +43,21 @@ a new password.
    the new CACHE to that number **+1** (`tbx-vNNN-YYYYMMDD`). Never reuse or guess a number —
    this is what prevents two sessions colliding on the same version.
 7. `node tools/verify.mjs` — must print VERIFY PASSED. Fix any FAIL before committing.
-8. Commit payload.enc.json + sw.js (+ app-<ver>.js/img as needed), push, then trigger a Pages build.
+8. Commit payload.enc.json + sw.js (+ app-<ver>.js/img as needed) and push.
    The app bundle is versioned by filename: `git mv app-<old>.js app-<new>.js`, then update the
    `<script src>` in index.html and both sw.js entries (ASSETS + CORE); verify.mjs/integrity.py read
-   the name from index.html
-   (`POST /repos/<owner>/<repo>/pages/builds`) and poll `/pages/builds/latest` until
-   `status=built` on the pushed SHA; re-trigger if a stale SHA reports built.
+   the name from index.html.
+9. Trigger a Pages build (`POST /repos/<owner>/<repo>/pages/builds`) and poll `/pages/builds/latest`
+   until `status=built` on the pushed SHA; re-trigger if a stale SHA reports built.
 
 ## Conventions
 
-- **Serialization:** `data.js` is written as `window.TOOLBOX=` + `JSON.stringify(D)` + `;\n`
-  (plain JSON, trailing newline). The old `\u002d` dash-escaping is retired; semantic JSON
-  comparison — not byte diff — is the correct round-trip test.
+- **Serialization:** `data.js` is written as `'window.TOOLBOX='+JSON.stringify(D).replace(/-/g,'\\u002d')+';\n'`
+  — one line, trailing newline, every `-` escaped as `\u002d` (this is what the live payload uses).
+  `gtin.js` is exactly two lines. Semantic JSON comparison — not byte diff — is the correct
+  round-trip test.
 - **Spec style:** metric values are written tight (`4mm`, not `4 mm`). verify.mjs enforces this.
-- **CACHE** bumps on every deploy. **APPVER** bumps only for user-visible feature changes.
+- **CACHE** bumps on every deploy. **APPVER** bumps whenever app logic changes (bundle rename).
   **What's New** entries are added only with wording provided by the owner; releases are
   otherwise silent.
 - One-shot migration scripts stay out of the repo (run them from a scratch directory);

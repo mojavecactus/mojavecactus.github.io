@@ -129,6 +129,30 @@ all.forEach(i => (i.specs || []).forEach(([k, v]) => {
   if (/\d mm\b/.test(String(v))) FAIL('spaced-mm spec value: ' + i.sku + ' ' + k + '=' + v);
 }));
 
+// ---- 8b uom + hidden lints ----
+{
+  all.forEach(i => {
+    if (i.uom === undefined || i.uom === '') { if (!i.hidden) FAIL('missing uom: ' + i.sku); return; }
+    if (!/^(Each|Kit|Box of \d+)$/.test(i.uom)) FAIL('uom not in canonical form (Each | Kit | Box of N): ' + i.sku + ' -> "' + i.uom + '"');
+  });
+  // hidden pseudo-items (user guides, error codes) never reach a tile count
+  D.items.filter(i => i.hidden).forEach(i => { if (i.uom) WARN('hidden item carries a uom: ' + i.sku); });
+}
+
+// ---- 8c app bundle: no undefined identifiers (the skuOf-out-of-scope class) ----
+{
+  try {
+    const out = execFileSync('npx', ['--yes', 'eslint@8', '--no-eslintrc', '--env', 'browser,es2020', '--parser-options=ecmaVersion:2020',
+      '--global', 'ZXingWASM,html2canvas', '--rule', 'no-undef:error', '--rule', 'no-dupe-keys:error', '--rule', 'no-unreachable:error',
+      '--format', 'unix', R + '/' + APP, R + '/sw.js'], { stdio: 'pipe', timeout: 180000 }).toString();
+    if (out.trim()) FAIL('eslint: ' + out.trim().split('\n')[0]);
+  } catch (e) {
+    const o = String((e.stdout || '') + (e.stderr || ''));
+    if (/no-undef|no-dupe-keys|no-unreachable/.test(o)) o.split('\n').filter(l => /Error/.test(l)).slice(0, 10).forEach(l => FAIL('eslint: ' + l.trim()));
+    else WARN('eslint could not run (offline?) — undefined-identifier check skipped');
+  }
+}
+
 // ---- 9 gtin ----
 {
   const BY = {};

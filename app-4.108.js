@@ -18,17 +18,29 @@
     function go() { location.reload(); }
     Promise.all(jobs).then(go, go);
   }
-  window.addEventListener('error', function () { heal(); });
-  window.__tbxHeal = heal;
+  // Auto-heal only covers a broken boot (cache/SW corruption). Once the app has
+  // routed successfully, a runtime error is a bug, not a cache problem — wiping
+  // every cache and reloading would just loop. Also rate-limited across sessions.
+  function healOK() {
+    if (window.__tbxRouted) return false;
+    try {
+      var last = +(localStorage.getItem('tbx_heal_ts') || 0);
+      if (Date.now() - last < 600000) return false;
+      localStorage.setItem('tbx_heal_ts', String(Date.now()));
+    } catch (e) {}
+    return true;
+  }
+  window.addEventListener('error', function () { if (healOK()) heal(); });
+  window.__tbxHeal = function () { if (healOK()) heal(); };
 })();
 window.TBX_BOOT = function () {
   if (window.__tbxBooted) return;
   window.__tbxBooted = true;
-  var D = window.TOOLBOX, view = document.getElementById('view'),
+  var D = window.TOOLBOX,
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.107';
+  var APPVER = '4.108';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -103,6 +115,15 @@ var GLOSS = {
   D.probes.forEach(function (p, i) { if (!BYPN[nrm(p.sku)]) BYPN[nrm(p.sku)] = { kind: 'probe', idx: i }; });
   D.shavers.forEach(function (s, i) { if (!BYPN[nrm(s.sku)]) BYPN[nrm(s.sku)] = { kind: 'shaver', idx: i }; });
   function pnRoute(sku) { return '#/pn/' + encodeURIComponent(sku); }
+  function skuOf(entry) {
+    if (!entry) return null;
+    var pool = entry.kind === 'item' ? D.items : entry.kind === 'probe' ? D.probes : D.shavers;
+    return (pool[entry.idx] || {}).sku || null;
+  }
+  function recOf(entry) {
+    if (!entry) return null;
+    return entry.kind === 'item' ? D.items[entry.idx] : entry.kind === 'probe' ? D.probes[entry.idx] : D.shavers[entry.idx];
+  }
 
   // ---- favorites (per device) with permalink migration ----
   function favs() { try { return JSON.parse(localStorage.getItem('tbx_favs') || '[]'); } catch (e) { return []; } }
@@ -112,7 +133,7 @@ var GLOSS = {
       var sku = f.it && f.it.sku;
       if (sku && f.route !== pnRoute(sku)) { f.route = pnRoute(sku); changed = true; }
     });
-    if (changed) localStorage.setItem('tbx_favs', JSON.stringify(list));
+    if (changed) { try { localStorage.setItem('tbx_favs', JSON.stringify(list)); } catch (e) {} }
   })();
   function isFav(route) { return favs().some(function (f) { return f.route === route; }); }
   function toggleFav(f) {
@@ -120,7 +141,7 @@ var GLOSS = {
     if (list.some(function (x) { return x.route === f.route; })) {
       list = list.filter(function (x) { return x.route !== f.route; });
     } else { list.unshift(f); }
-    localStorage.setItem('tbx_favs', JSON.stringify(list.slice(0, 40)));
+    try { localStorage.setItem('tbx_favs', JSON.stringify(list.slice(0, 40))); } catch (e) {}
   }
 
   // ---- copy ----
@@ -342,9 +363,6 @@ var GLOSS = {
       '<div class="rl"><b class="ti">' + esc(t) + (sz ? ' <span class="sz">' + esc(sz) + '</span>' : '') + '</b>' +
       line2 + '</div>' + (tags ? '<div class="subtags">' + tags + '</div>' : '') + '</button>';
   }
-  function rowsFor(list) {
-    return '<div class="list">' + list.map(function (r) { return rowHTML(r.route, r.it, r.sub); }).join('') + '</div>';
-  }
   var SFILT = null;
   var SBUCKETS = ['Arthroscopy', 'Biologics', 'Capital', 'Disposables', 'Implants', 'Instruments', 'Suture'];
   function resultsHTML() {
@@ -512,22 +530,33 @@ var GLOSS = {
     });
     return out.slice(0, 8);
   }
-  function usedWith(inst) {
-    if (inst.cat !== 'Disposables' && inst.cat !== 'Instruments' && inst.cat !== 'Capital') return [];
-    var groups = {}, order = [];
+  // Reverse index instrument-sku -> implants that list it, built once on first
+  // use (instrFor over every implant is ~600k comparisons; per card that was a
+  // visible pause on older phones).
+  var USEDBY = null;
+  function usedByIndex() {
+    if (USEDBY) return USEDBY;
+    USEDBY = {};
     D.items.forEach(function (a) {
       if (a.cat === 'Disposables' || a.cat === 'Instruments' || a.cat === 'Capital' || a.cat === 'Suture') return;
       if (!a.specs || !a.specs.length) return;
-      var l = instrFor(a);
+      var l = instrFor(a), seen = {};
       for (var i = 0; i < l.length; i++) {
-        if (l[i].it.sku === inst.sku) {
-          var famShort = FAMSHORT[a.fam] || (a.fam || '').split(' ')[0];
-          var key = famShort + '|' + (a.sz || '');
-          if (!groups[key]) { groups[key] = { fam: a.fam, cat: a.cat, famShort: famShort, sz: a.sz || '', items: [] }; order.push(key); }
-          groups[key].items.push(a);
-          break;
-        }
+        var k = l[i].it.sku;
+        if (seen[k]) continue; seen[k] = 1;
+        (USEDBY[k] = USEDBY[k] || []).push(a);
       }
+    });
+    return USEDBY;
+  }
+  function usedWith(inst) {
+    if (inst.cat !== 'Disposables' && inst.cat !== 'Instruments' && inst.cat !== 'Capital') return [];
+    var groups = {}, order = [];
+    (usedByIndex()[inst.sku] || []).forEach(function (a) {
+      var famShort = FAMSHORT[a.fam] || (a.fam || '').split(' ')[0];
+      var key = famShort + '|' + (a.sz || '');
+      if (!groups[key]) { groups[key] = { fam: a.fam, cat: a.cat, famShort: famShort, sz: a.sz || '', items: [] }; order.push(key); }
+      groups[key].items.push(a);
     });
     return order.map(function (k) {
       var g = groups[k];
@@ -539,8 +568,17 @@ var GLOSS = {
   }
 
   // ---- screens ----
+  // One definition of "how many items are in a category" for every tile and row:
+  // visible items whose cat OR cat2 matches, which is exactly what the screen
+  // behind the tile lists.
+  var CATN = {};
+  function catCount(c) {
+    if (CATN[c] !== undefined) return CATN[c];
+    var n = 0; D.items.forEach(function (i) { if (!i.hidden && (i.cat === c || i.cat2 === c)) n++; });
+    return (CATN[c] = n);
+  }
   function implantCount() {
-    var n = 0; IMPLANT_CATS.forEach(function (c) { n += D.counts[c] || 0; }); return n;
+    var n = 0; IMPLANT_CATS.forEach(function (c) { n += catCount(c); }); return n;
   }
   function pumpTubing() {
     return D.items.filter(function (i) { return i.fam === 'CrossFlow arthroscopy pump' && i.cat === 'Disposables'; });
@@ -567,40 +605,7 @@ var GLOSS = {
     el.classList.add('bye');
     setTimeout(function () { el.remove(); }, 260);
   }
-  var ANN_ID = 'cc-launch';
-  function annMetric(ev) {
-    try {
-      if (!hubOn()) return;
-      fetch(HUB.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ key: HUB.key, action: 'metric', ev: ev, ann: ANN_ID, ver: APPVER }) }).catch(function () {});
-    } catch (e) {}
-  }
-  function showAnn() {
-    try {
-      if (!hubOn()) return;
-      if (localStorage.getItem('tbx_ann_' + ANN_ID)) return;
-    } catch (e) { return; }
-    if (document.getElementById('annov')) return;
-    var ov = document.createElement('div');
-    ov.id = 'annov';
-    ov.innerHTML = '<div class="ann-card">' +
-      '<button id="ann-x" aria-label="Dismiss">&#x2715;</button>' +
-      '<div class="ann-t">What&#8217;s new</div>' +
-      '<div class="ann-b">Cycle count scanner functionality now available! Sign up your territory in the Inventory Management tab on the Home Screen. &#8220;How it works&#8221; document located <button id="ann-here" class="ann-link" type="button">HERE</button></div>' +
-      '</div>';
-    document.body.appendChild(ov);
-    function fin(ev) {
-      try {
-        localStorage.setItem('tbx_ann_' + ANN_ID, ev);
-        localStorage.setItem('tbx_wn_seen', String((window.TBX_WN || {}).v || 1));
-      } catch (e) {}
-      annMetric(ev);
-      ov.remove();
-    }
-    document.getElementById('ann-x').addEventListener('click', function () { fin('x'); });
-    document.getElementById('ann-here').addEventListener('click', function () { fin('here'); location.hash = '#/teams/help'; });
-  }
   function showWN() {
-    if (document.getElementById('annov')) return;
     try {
       var WN = window.TBX_WN;
       if (!WN || !WN.items || !WN.items.length) return;
@@ -623,15 +628,24 @@ var GLOSS = {
       (WN2.items.length > 1 ? '<button id="wnmore">Show all ' + WN2.items.length + ' &#x203A;</button>' : '');
     document.body.appendChild(el);
   }
-  // ---- expiration status ----
+  // ---- expiration: one parser, one day-count, every consumer derives from these ----
+  // expIso(v): anything a label or a person writes -> 'YYYY-MM-DD' ('' if unreadable).
+  // Month-only forms ('2026-08', GS1 '260800', 'Aug 2026') mean the last day of that month.
+  function expDaysLeft(v) {
+    var iso = expIso(v); if (!iso) return null;
+    var d = new Date(iso + 'T12:00:00'), today = new Date(); today.setHours(12, 0, 0, 0);
+    return Math.round((d - today) / 86400000);
+  }
+  // Six-digit GS1/HIBC YYMMDD -> display form used on cards, count rows and the sheet:
+  // 'YYYY-MM-DD', or 'YYYY-MM' when the label carries no day.
+  function expDisp(e6) {
+    if (!e6 || e6.length !== 6) return '';
+    var dd = e6.slice(4);
+    return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : '');
+  }
   function expStatus(e6) {
     if (!e6 || e6.length !== 6) return null;
-    var y = 2000 + +e6.slice(0, 2), mm = +e6.slice(2, 4), dd = +e6.slice(4);
-    if (!mm || mm > 12) return null;
-    var d = dd ? new Date(y, mm - 1, dd) : new Date(y, mm, 0);
-    var today = new Date(); today.setHours(0, 0, 0, 0);
-    d.setHours(0, 0, 0, 0);
-    var days = Math.round((d - today) / 86400000);
+    var days = expDaysLeft(e6); if (days === null) return null;
     if (days < 0) return { k: 'expired', days: days };
     if (days <= 30) return { k: 'soon', days: days };
     return { k: 'ok', days: days };
@@ -1002,12 +1016,12 @@ var GLOSS = {
     setTitle('Sports', 'Med Toolbox'); backBtn.hidden = true;
     var tileDefs = [
       { label: 'Arthroscopy', go: '#/top/arthroscopy', n: D.probes.length + D.shavers.length + pumpTubing().length + capArthro().length },
-      { label: 'Allografts & Biologics', go: '#/cat/' + encodeURIComponent('Allografts & Biologics'), n: D.counts['Allografts & Biologics'] || 0 },
-      { label: 'Disposables', go: '#/cat/' + encodeURIComponent('Disposables'), n: D.counts['Disposables'] || 0 },
+      { label: 'Allografts & Biologics', go: '#/cat/' + encodeURIComponent('Allografts & Biologics'), n: catCount('Allografts & Biologics') },
+      { label: 'Disposables', go: '#/cat/' + encodeURIComponent('Disposables'), n: catCount('Disposables') },
       { label: 'Implants', go: '#/top/implants', n: implantCount() },
-      { label: 'Instruments', go: '#/cat/' + encodeURIComponent('Instruments'), n: D.counts['Instruments'] || 0 },
-      { label: 'Capital', go: '#/cat/' + encodeURIComponent('Capital'), n: D.counts['Capital'] || 0 },
-      { label: 'Suture', go: '#/cat/' + encodeURIComponent('Suture'), n: D.counts['Suture'] || 0 }
+      { label: 'Instruments', go: '#/cat/' + encodeURIComponent('Instruments'), n: catCount('Instruments') },
+      { label: 'Capital', go: '#/cat/' + encodeURIComponent('Capital'), n: catCount('Capital') },
+      { label: 'Suture', go: '#/cat/' + encodeURIComponent('Suture'), n: catCount('Suture') }
     ];
     tileDefs.sort(function (a, b) { return a.label.localeCompare(b.label); });
     var tiles = tileDefs.map(function (t) {
@@ -1039,7 +1053,6 @@ var GLOSS = {
       '<button class="footlink" data-act="checkupd">Check for updates</button></div>');
     content.classList.add('homeview');
     homeBtn.classList.remove('away');
-    showAnn();
     showWN();
   }
   function topScreen(which) {
@@ -1050,9 +1063,9 @@ var GLOSS = {
         if (a === 'Other') return 1; if (b === 'Other') return -1;
         return a.localeCompare(b);
       });
-      var tiles = icats.filter(function (c) { return D.counts[c]; }).map(function (c) {
+      var tiles = icats.filter(function (c) { return catCount(c); }).map(function (c) {
         return '<button class="tile" data-go="#/cat/' + encodeURIComponent(c) + '">' +
-          '<span class="tl"><b>' + esc(c) + '</b><span class="n">' + D.counts[c] + ' items</span></span>' +
+          '<span class="tl"><b>' + esc(c) + '</b><span class="n">' + catCount(c) + ' items</span></span>' +
           '<span class="ct">&#x203A;</span></button>';
       }).join('');
       render('<div class="tiles">' + tiles + '</div>');
@@ -1122,7 +1135,7 @@ var GLOSS = {
     setTitle(cfg.title[0], cfg.title[1]); backBtn.hidden = false;
     var famGroup = dispFamGroup(cat), counts = {};
     D.items.forEach(function (it) {
-      if (it.cat !== cat && it.cat2 !== cat) return;
+      if (it.hidden || (it.cat !== cat && it.cat2 !== cat)) return;
       var g = grpOf(it, famGroup, cfg.fallback);
       counts[g] = (counts[g] || 0) + 1;
     });
@@ -1138,7 +1151,7 @@ var GLOSS = {
     setTitle(g, ''); backBtn.hidden = false;
     var famGroup = dispFamGroup(cat), fams = {}, order = [];
     D.items.forEach(function (it) {
-      if (it.cat !== cat && it.cat2 !== cat) return;
+      if (it.hidden || (it.cat !== cat && it.cat2 !== cat)) return;
       var itg = grpOf(it, famGroup, cfg.fallback);
       if (itg !== g) return;
       if (!fams[it.fam]) { fams[it.fam] = 0; order.push(it.fam); }
@@ -1261,7 +1274,7 @@ var GLOSS = {
       var bar = '<div class="fchips">' + chips.map(function (k) {
         return '<button class="fchip' + (sel === k ? ' on' : '') + '" data-fp="' + esc(k) + '">' + esc(k) + '</button>';
       }).join('') + '</div>';
-      var list = D.items.filter(function (it) { return it.cat === c && it.fam === fam && it[field] === sel; });
+      var list = D.items.filter(function (it) { return !it.hidden && it.cat === c && it.fam === fam && it[field] === sel; });
       var body = list.length ? '<div class="list">' + list.map(function (it) {
         return rowHTML(pnRoute(it.sku), it, '');
       }).join('') + '</div>' : '<div class="empty">No items.</div>';
@@ -1321,18 +1334,17 @@ var GLOSS = {
       fav: { route: pnRoute(it.sku), it: { t: it.t || it.name, sz: it.sz || '', ld: it.ld || '', sku: it.sku } } }));
   }
   function probeCard(p) {
-    setTitle('Arthro ', 'Probes'); backBtn.hidden = false;
+    setTitle('SERFAS ', 'RF Wands'); backBtn.hidden = false;
     CUR_IT = p;
     render(specCard({ name: p.name, fam: p.fam, sku: p.sku, uom: p.uom, tags: p.tags, specs: p.specs, imgs: p.imgs, imgFull: p.imgFull, note: p.note,
-      src: p.src || 'SERFAS energy probes guide 1000904464 Rev A (2023) — part numbers, diameters, lengths; RF settings from legacy Toolbox site, verify against console',
+      src: p.src,
       fav: { route: pnRoute(p.sku), it: { t: p.name, sku: p.sku } } }));
   }
   function shaverCard(s) {
     setTitle('Shaver ', 'Blades'); backBtn.hidden = false;
     CUR_IT = s;
     render(specCard({ name: s.name, fam: (s.fam ? s.fam + ' series' : 'Shaver blades & burs'), sku: s.sku, uom: s.uom, tags: s.tags, specs: s.specs, imgs: s.imgs, imgFull: s.imgFull, warn: s.warn,
-      note: s.note || 'Speed settings held pending verification of the console parameter fields — flagged for review.',
-      src: s.src || 'Part numbers cross-checked against the 2026 Sports Medicine product guide (Jan 2026); descriptions from the Cutter and bur guide 1000900564 Rev C (2024) and CrossBlade brochures. Reference images from Cutters and burs competitive cross reference 1000904542 Rev A (2023).',
+      note: s.note, src: s.src,
       fav: { route: pnRoute(s.sku), it: { t: s.name, sku: s.sku } } }));
   }
   function recents() { try { return JSON.parse(localStorage.getItem('tbx_recents') || '[]'); } catch (e) { return []; } }
@@ -1367,8 +1379,8 @@ var GLOSS = {
         '<div class="tip"><b>Search smart.</b> Part numbers work with or without dashes.</div>' +
         '<div class="tip"><b>Scan the label.</b> The barcode button reads any package barcode &mdash; the card opens with lot and expiration shown.</div>' +
         '<div class="tip"><b>Zoom the fine print.</b> Tap any product photo to view it fullscreen; pinch or double-tap to zoom.</div>' +
-        '<div class="tip"><b>Save your go-tos.</b> The Save button on any card pins it to Favorites at the top of home.</div>' +
-        '<div class="tip"><b>Take it offline.</b> Once loaded, everything works offline with zero signal preventing blackouts in hospital deadzones.</div>' +
+        '<div class="tip"><b>Save your go-tos.</b> Tap &#9734; Favorite on any card to pin it to Favorites at the top of home.</div>' +
+        '<div class="tip"><b>Take it offline.</b> Once loaded, everything works with zero signal &mdash; no blackouts in hospital dead zones.</div>' +
         '<div class="tip"><b>Install it.</b> Add the site to your home screen for the full app experience. <button class="footlink" data-act="a2hs" style="padding:0">Show me how &#x203A;</button></div>' +
       '</div>' +
       '<div class="grouphead ab-gh">Credits</div>' +
@@ -1543,14 +1555,8 @@ var GLOSS = {
     ccHistLoad();
   }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
-  function ccExp(e6) { if (!e6 || e6.length !== 6) return ''; var dd = e6.slice(4); return '20' + e6.slice(0, 2) + '-' + e6.slice(2, 4) + (dd !== '00' ? '-' + dd : ''); }
-  function ccIsExpired(exp) {
-    if (!exp) return false;
-    var m = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(exp); if (!m) return false;
-    var y = +m[1], mo = +m[2], d = m[3] ? +m[3] : 0;
-    var end = d ? new Date(y, mo - 1, d, 23, 59, 59) : new Date(y, mo, 0, 23, 59, 59);
-    return Date.now() > end.getTime();
-  }
+  function ccExp(e6) { return expDisp(e6); }
+  function ccIsExpired(exp) { var n = expDaysLeft(exp); return n !== null && n < 0; }
   function ccBar(hide) {
     var b = document.getElementById('bottombar'); if (b) b.style.display = hide ? 'none' : '';
     if (document.body) document.body.classList.toggle('ct-chrome-off', !!hide);
@@ -1570,14 +1576,12 @@ var GLOSS = {
   }
   // ---- offline-first sync engine: scans land in a local ledger instantly and
   // ---- upload in the background as idempotent ops (opId-deduped server side).
-  var SY = { cc: { timer: null, inflight: false, retry: 0, lastOk: 0 }, fa: { timer: null, inflight: false, retry: 0, lastOk: 0 } };
+  var SY = { cc: { timer: null, inflight: false, retry: 0, lastOk: 0, inAt: 0 } };
   function ccNRef(x) { return String(x == null ? '' : x).replace(/[^0-9A-Za-z]/g, '').toUpperCase(); }
   function ccNLot(x) { return String(x == null ? '' : x).trim().toUpperCase(); }
   function ccNLoc(x) { return String(x == null ? '' : x).trim().toLowerCase(); }
   function ccKeyCC(loc, ref, lot) { return ccNLoc(loc) + '||' + ccNRef(ref) + '||' + ccNLot(lot); }
-  function ccKeyFA(sid, ref, lot) { return String(sid == null ? '' : sid).trim() + '||' + ccNRef(ref) + '||' + ccNLot(lot); }
   function ccSyncSt(t) {
-    if (t === 'fa') return FA;
     if (t === terrTgt()) return CC;
     var s = TDET[t];
     if (!s) { s = TDET[t] = { rows: [], base: [], ops: [], creds: null, dev: '', loaded: false }; }
@@ -1588,7 +1592,7 @@ var GLOSS = {
     }
     return s;
   }
-  var BSAVE = { cc: null, fa: null };
+  var BSAVE = { cc: null };
   function ccSaveBaseNow(t) {
     if (BSAVE[t]) { clearTimeout(BSAVE[t]); BSAVE[t] = null; }
     try { localStorage.setItem('tbx_' + t + '_base', JSON.stringify(ccSyncSt(t).base)); } catch (e) {}
@@ -1606,18 +1610,17 @@ var GLOSS = {
   }
   function ccOpRow(t, op, q, dev) {
     var r = { id: 'p' + op.opId, ts: op.ts || new Date().toISOString(), dev: dev || '', ref: op.ref, desc: op.desc || '', fam: op.fam || '', lot: op.lot || '', exp: op.exp || '', expired: !!op.expired, qty: q, pending: true };
-    if (t === 'fa') { r.sid = op.sid; r.started = op.started || ''; r.cname = op.cname || ''; r.from = op.from || ''; r.drop = op.drop || ''; r.snotes = op.snotes || ''; r.sby = op.sby || ''; }
-    else { r.loc = op.loc; r.notes = op.notes || ''; }
+    r.loc = op.loc; r.notes = op.notes || '';
     return r;
   }
   function ccDeriveCore(base, ops, t, dev) {
     var rows = base.map(function (r) { var c = {}; for (var k in r) c[k] = r[k]; return c; });
     var idx = {};
-    function keyRow(x) { return t === 'fa' ? ccKeyFA(x.sid, x.ref, x.lot) : ccKeyCC(x.loc, x.ref, x.lot); }
+    function keyRow(x) { return ccKeyCC(x.loc, x.ref, x.lot); }
     function reindex() { idx = {}; for (var i = 0; i < rows.length; i++) { var k = keyRow(rows[i]); if (!(k in idx)) idx[k] = i; } }
     reindex();
     ops.forEach(function (op) {
-      var k = t === 'fa' ? ccKeyFA(op.sid, op.ref, op.lot) : ccKeyCC(op.loc, op.ref, op.lot);
+      var k = ccKeyCC(op.loc, op.ref, op.lot);
       var j = (k in idx) ? idx[k] : -1;
       if (op.t === 'add') {
         var q = Math.max(1, Math.round(+op.qty || 1));
@@ -1635,14 +1638,11 @@ var GLOSS = {
   }
   function ccDerive(t) {
     var st = ccSyncSt(t);
-    var rows = ccDeriveCore(st.base || [], st.ops || [], t, t === 'fa' ? ccDevFor('cc') : ccDevFor(t));
+    var rows = ccDeriveCore(st.base || [], st.ops || [], t, ccDevFor(t));
     st.rows = rows;
     return rows;
   }
-  function ccEndpoint(t) {
-    if (t === 'fa') { var c = ccCredsFor('cc'); return (c && c.fa) ? c.fa : null; }
-    return ccCredsFor(t);
-  }
+  function ccEndpoint(t) { return ccCredsFor(t); }
   function ccEnqueue(t, op) {
     op.opId = 'o' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     if (!op.ts) op.ts = new Date().toISOString();
@@ -1651,14 +1651,13 @@ var GLOSS = {
     ccDerive(t);
     ccRenderList();
     if (CC.view === 'cchome' && t === CC.tgt) ccHomeCards();
-    if (CC.view === 'fahome' && t === 'fa') faCards();
     ccPill();
     ccFlushSoon(t, 1200);
   }
   function ccFlushSoon(t, ms) { var y = ccSY(t); if (y.timer) clearTimeout(y.timer); y.timer = setTimeout(function () { ccFlush(t); }, ms || 800); }
   function ccFlush(t, keep) {
     var y = ccSY(t), st = ccSyncSt(t), ep = ccEndpoint(t);
-    var dv = t === 'fa' ? ccDevFor('cc') : ccDevFor(t);
+    var dv = ccDevFor(t);
     if (!ep || !dv) { ccPill(); return; }
     if (y.inflight) {
       if (Date.now() - (y.inAt || 0) < 25000) { ccPill(); ccFlushSoon(t, 6000); return; }
@@ -1672,7 +1671,9 @@ var GLOSS = {
       .then(function (j) {
         y.inflight = false;
         if (!j || !j.ok || !j.applied) {
-          if (j && j.err === 'dev') ccStatus('This device isn\u2019t on the roster \u2014 tap change on ' + terrByTgt(t === 'fa' ? 'cc' : t).name);
+          // Not on the roster: nothing will change until the device is re-picked
+          // (which flushes again), so don't sit in a retry loop.
+          if (j && j.err === 'dev') { ccStatus('This device isn\u2019t on the roster \u2014 tap change on ' + terrByTgt(t).name); ccPill(); return; }
           if (j && j.err === 'busy') { ccPill(); ccFlushSoon(t, 1500 + Math.floor(Math.random() * 2500)); return; }
           y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 5000 * Math.max(1, y.retry)); return;
         }
@@ -1687,8 +1688,7 @@ var GLOSS = {
         y.retry = 0; y.lastOk = Date.now();
         ccSyncSave(t, true); ccDerive(t); ccRenderList();
         if (CC.view === 'cchome' && t === CC.tgt) ccHomeCards();
-        if (CC.view === 'fahome' && t === 'fa') faCards();
-        ccPill();
+            ccPill();
         if (st.ops.length) ccFlushSoon(t, 400);
       })
       .catch(function () { y.inflight = false; y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 4000 * Math.max(1, y.retry)); });
@@ -1697,7 +1697,7 @@ var GLOSS = {
     var ep = ccEndpoint(t);
     if (!ep) return Promise.reject(new Error('nocreds'));
     var y = ccSY(t), startOk = y.lastOk;
-    var q = t === 'fa' ? '&action=list' : '&action=pull&dev=' + encodeURIComponent((t === 'fa' ? ccDevFor('cc') : ccDevFor(t)) || '');
+    var q = '&action=pull&dev=' + encodeURIComponent(ccDevFor(t) || '');
     return fetch(ep.url + '?token=' + encodeURIComponent(ep.token) + q)
       .then(function (r) { return r.json(); })
       .then(function (j) {
@@ -1722,22 +1722,33 @@ var GLOSS = {
     else { el.textContent = n + ' to sync'; el.className = 'cc-pill wait'; }
   }
   window.addEventListener('online', function () {
-    ccFlushSoon(terrTgt(), 300); ccFlushSoon('fa', 600);
+    ccFlushSoon(terrTgt(), 300);
     ccAllCcTgts().forEach(function (tg, i) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 900 + i * 300); });
   });
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { try { ccFlush(terrTgt(), true); ccFlush('fa', true); } catch (e) {} } else if (document.visibilityState === 'visible') { try { if (CC.view === 'count') { ccWake(); ccBeepInit(); setTimeout(function () { ccCamRecover(); }, 500); } ccFlushSoon(terrTgt(), 800); ccFlushSoon('fa', 1200); ccAllCcTgts().forEach(function (tg, i2) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 1600 + i2 * 300); }); } catch (e2) {} } });
-  window.addEventListener('pagehide', function () { try { ccSaveBaseNow(terrTgt()); ccSaveBaseNow('fa'); } catch (e) {} });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') {
+      try { ccFlush(terrTgt(), true); } catch (e) {}
+      return;
+    }
+    if (document.visibilityState !== 'visible') return;
+    try {
+      if (CC.view === 'count') { ccWake(); ccBeepInit(); setTimeout(function () { ccCamRecover(); }, 500); }
+      ccFlushSoon(terrTgt(), 800);
+      ccAllCcTgts().forEach(function (tg, i2) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 1600 + i2 * 300); });
+    } catch (e2) {}
+  });
+  window.addEventListener('pagehide', function () { try { ccSaveBaseNow(terrTgt()); } catch (e) {} });
   // Boot: if this phone has queued scans from a previous session, load creds and push them out silently.
-  // Deferred a tick so the whole module (incl. FA below) has evaluated first.
+  // Deferred a tick so the whole module has evaluated first.
   setTimeout(function () {
     try {
-      if (ccLS('tbx_cc') && ((ccLS('tbx_cc_ops') || '[]') !== '[]' || (ccLS('tbx_fa_ops') || '[]') !== '[]')) {
+      if (ccLS('tbx_cc') && (ccLS('tbx_cc_ops') || '[]') !== '[]') {
         if (CC.terr === 'ct') {
           if (!CC.creds) CC.creds = JSON.parse(ccLS('tbx_cc'));
           if (!CC.dev) CC.dev = ccLS('tbx_cc_dev') || '';
-          if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad('cc'); ccSyncLoad('fa'); }
+          if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad('cc'); }
         }
-        ccFlushSoon('cc', 2000); ccFlushSoon('fa', 3000);
+        ccFlushSoon('cc', 2000);
       }
       TORDER.concat(HORDER).forEach(function (k, i) {
         var tg = TERR[k].tgt;
@@ -1832,7 +1843,7 @@ var GLOSS = {
         '<div class="card cc-card">' +
           '<h2 class="cc-h">Whose phone is this?</h2>' +
           '<div class="cc-sub">Every scan from this phone goes to its own tab on the team sheet.</div>' +
-          '<select id="cc-dev" class="cc-in cc-sel"><option value="" disabled selected>Select this device\u2026</option>' + list.map(function (d) { return '<option value="' + esc(d) + '">' + esc(d) + '</option>'; }).join('') + '</select>' +
+          '<select id="cc-dev" class="cc-in cc-sel"><option value="" disabled selected>' + (list.length ? 'Select this device\u2026' : 'Loading devices\u2026') + '</option>' + list.map(function (d) { return '<option value="' + esc(d) + '">' + esc(d) + '</option>'; }).join('') + '</select>' +
           '<button id="cc-devgo" class="cc-btn">Continue</button>' +
         '</div>');
       document.getElementById('cc-devgo').addEventListener('click', function () {
@@ -1853,7 +1864,6 @@ var GLOSS = {
     var list = [];
     try { list = JSON.parse(ccLS(terrKey('_roster')) || '[]') || []; } catch (e) {}
     if (!list.length && CC.creds && CC.creds.devices && CC.creds.devices.length) list = CC.creds.devices.slice();
-    if (!list.length && CC.terr === 'ct') list = ["Matt's iPhone", "Nate's iPhone", "Mia's iPhone", "Manny's iPhone", "Isabella's iPhone", "Megan's iPhone"];
     return list;
   }
   function ccSession() {
@@ -1895,40 +1905,21 @@ var GLOSS = {
     if (document.body) document.body.classList.add('cc-fixed');
     render(
       '<div id="ccwrap">' +
-        '<div id="cctop">' +
-          '<video id="ccvid" playsinline muted autoplay></video>' +
-          '<div id="cc-target" aria-hidden="true"><i></i><i></i><i></i><i></i></div>' +
-          '<div id="cc-flash" aria-hidden="true"></div>' +
-          '<button id="cc-end" class="cc-endtop">End</button>' +
-          '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
-          '<button id="cc-help" class="cc-help" aria-label="Camera help" title="Camera not working?">?</button>' +
-          '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
-          '<div id="ccbar">' +
-            '<button id="cc-manual" class="cc-mini">+ Manual</button>' +
-            '<button id="cc-cam" class="cc-mini">Camera off</button>' +
-          '</div>' +
-        '</div>' +
-        '<div id="cchead"><span id="cc-locname">' + (CC.tgt === 'fa' && FA.sess ? esc(FA.sess.cname || ((FA.sess.from || '?') + ' \u2192 ' + (FA.sess.drop || '?'))) : esc(CC.loc)) + '</span><span id="cc-pill" class="cc-pill"></span><span id="cc-tot"></span></div>' +
+        ccCamPanelHtml({ manualId: 'cc-manual', endId: 'cc-end' }) +
+        '<div id="cchead"><span id="cc-locname">' + esc(CC.loc) + '</span><span id="cc-pill" class="cc-pill"></span><span id="cc-tot"></span></div>' +
         '<div id="cclist"><div class="cc-empty">Loading list\u2026</div></div>' +
-        '<div id="cc-sheet" hidden></div>' +
       '</div>');
     CC.mode = 'single';
-    document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccFlushSoon(CC.tgt, 100); if (CC.tgt === 'fa') { faScreen(); } else { ccScreen(); } });
+    document.getElementById('cc-end').addEventListener('click', function () { ccStop(); ccFlushSoon(CC.tgt, 100); ccScreen(); });
     document.getElementById('cc-manual').addEventListener('click', function () { ccManual(); });
-    document.getElementById('cc-cam').addEventListener('click', function () { ccCamSet(CC.camOff); });
-    document.getElementById('cc-help').addEventListener('click', function (e) { e.stopPropagation(); ccCamHelp(false); });
-    document.getElementById('ccvid').addEventListener('click', function () { ccRefocus(true); });
     document.getElementById('cclist').addEventListener('click', function (e) {
       var row = e.target.closest ? e.target.closest('.ccrow') : null;
       if (!row) return;
       var r = ccRowsSrc().filter(function (x) { return x.id === row.dataset.id; })[0];
       if (r) ccEditor(r);
     });
-    ccBeepInit();
-    CC.camOff = false;
-    ccStartCam();
+    ccCamPanelWire();
     ccHistLoad();
-    ccWake();
     var t0 = CC.tgt;
     ccDerive(t0); ccRenderList(); ccPill();
     ccPull(t0).then(function () { ccRenderList(); }).catch(function () {});
@@ -2169,6 +2160,7 @@ var GLOSS = {
         '<video id="ccvid" playsinline muted autoplay></video>' +
         '<div id="cc-target" aria-hidden="true"><i></i><i></i><i></i><i></i></div>' +
         '<div id="cc-flash" aria-hidden="true"></div>' +
+        (opts.endId ? '<button id="' + esc(opts.endId) + '" type="button" class="cc-endtop">End</button>' : '') +
         '<button id="cc-torch" class="cc-torch" hidden>&#9889;</button>' +
         '<button id="cc-help" class="cc-help" aria-label="Camera help" title="Camera not working?">?</button>' +
         '<div id="cc-stat" class="cc-stat">Starting camera\u2026</div>' +
@@ -2195,7 +2187,6 @@ var GLOSS = {
     ccStartCam();
     ccWake();
   }
-  function ccResume(ms) { ccSchedule(ms || 250); }
   function ccRearm(ms) { CC.cool.t = Date.now(); CC.cool.ms = ms || 2200; }
   function ccWake() {
     try {
@@ -2251,7 +2242,7 @@ var GLOSS = {
     if (r.sku) {
       ref = r.sku;
       var e = BYPN[nrm(r.sku)];
-      var it = e ? (e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]) : null;
+      var it = e ? (recOf(e)) : null;
       if (it) { desc = it.t || it.name || ''; fam = it.fam || ''; }
     } else if (r.p && r.p.gtin) {
       ccFlashGreen();
@@ -2312,8 +2303,7 @@ var GLOSS = {
     qty = Math.max(1, Math.round(+qty || 1));
     var t = CC.tgt;
     var op = { t: 'add', ref: ref, desc: desc || '', fam: fam || '', lot: lot || '', exp: exp || '', expired: ccIsExpired(exp), qty: qty };
-    if (t === 'fa') { var fs = FA.sess || {}; op.sid = fs.sid; op.started = fs.started; op.cname = fs.cname; op.from = fs.from; op.drop = fs.drop; op.snotes = fs.snotes; op.sby = fs.sby; }
-    else { op.loc = CC.loc; op.notes = CC.notes || ''; }
+    op.loc = CC.loc; op.notes = CC.notes || '';
     CC.pend = null;
     var key = ccHK({ ref: ref, lot: lot });
     if (!CC.hist[key]) CC.hist[key] = [];
@@ -2349,7 +2339,7 @@ var GLOSS = {
       var q = Math.max(1, Math.round(+qv.value || 1));
       var e3 = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = '', fam = '', ref = v;
-      if (e3) { var it = e3.kind === 'item' ? D.items[e3.idx] : e3.kind === 'probe' ? D.probes[e3.idx] : D.shavers[e3.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
+      if (e3) { var it = recOf(e3); ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
       ccModalClose(sheet); CC.running = true;
       ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
       ccRearm(600);
@@ -2384,7 +2374,7 @@ var GLOSS = {
       var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = descv, fam = '', ref = v;
       if (e) {
-        var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx];
+        var it = recOf(e);
         ref = it.sku; if (!desc) desc = it.t || it.name || ''; fam = it.fam || '';
         // Only remember it when the typed number matched a real catalogue item,
         // and key it on the full GTIN so packaging levels stay distinct.
@@ -2433,7 +2423,7 @@ var GLOSS = {
       }
       var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = '', fam = '', ref = v;
-      if (e) { var it = e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx]; ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
+      if (e) { var it = recOf(e); ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
       sheet.hidden = true; CC.running = true; ccRearm();
       var q = Math.max(1, Math.round(+qvEl.value || 1));
       ccAdd(ref, desc, fam, lot, '', q); ccSchedule(400);
@@ -2470,8 +2460,7 @@ var GLOSS = {
         CC.hist[key].push(delta); ccHistSave();
         var t = CC.tgt;
         var op = { t: 'set', ref: r.ref, lot: r.lot || '', qty: nq, desc: r.desc || '', fam: r.fam || '', exp: r.exp || '', expired: !!(r.expired || ccIsExpired(r.exp)) };
-        if (t === 'fa') { op.sid = r.sid; op.started = r.started; op.cname = r.cname; op.from = r.from; op.drop = r.drop; op.snotes = r.snotes; op.sby = r.sby; }
-        else { op.loc = r.loc; op.notes = r.notes || ''; }
+        op.loc = r.loc; op.notes = r.notes || '';
         ccEnqueue(t, op);
       };
       document.getElementById('cc-qdel').onclick = function () {
@@ -2480,7 +2469,7 @@ var GLOSS = {
         delete CC.hist[key]; ccHistSave();
         var t = CC.tgt;
         var op = { t: 'del', ref: r.ref, lot: r.lot || '' };
-        if (t === 'fa') { op.sid = r.sid; } else { op.loc = r.loc; }
+        op.loc = r.loc;
         ccEnqueue(t, op);
       };
     }
@@ -2493,14 +2482,12 @@ var GLOSS = {
   function ccRenderList() {
     var list = document.getElementById('cclist');
     if (!list) return;
-    var rows = CC.tgt === 'fa'
-      ? FA.rows.filter(function (x) { return FA.sess && x.sid === FA.sess.sid; })
-      : CC.rows.filter(function (x) { return ccNLoc(x.loc) === ccNLoc(CC.loc); });
+    var rows = CC.rows.filter(function (x) { return ccNLoc(x.loc) === ccNLoc(CC.loc); });
     rows.sort(function (a, b) { return String(b.ts).localeCompare(String(a.ts)); });
     var tot = 0; rows.forEach(function (x) { tot += (+x.qty || 0); });
     var totEl = document.getElementById('cc-tot');
     if (totEl) totEl.textContent = rows.length + ' lines \u00b7 ' + tot + ' units';
-    if (!rows.length) { if (CC.listSig !== 'empty') { list.innerHTML = '<div class="cc-empty">' + (CC.tgt === 'fa' ? 'No scans in this count yet' : 'No scans yet at this location') + ' \u2014 point the camera at a barcode.</div>'; CC.listSig = 'empty'; } return; }
+    if (!rows.length) { if (CC.listSig !== 'empty') { list.innerHTML = '<div class="cc-empty">No scans yet at this location \u2014 point the camera at a barcode.</div>'; CC.listSig = 'empty'; } return; }
     var CAP = 150;
     var shown = rows.length > CAP ? rows.slice(0, CAP) : rows;
     var sig = shown.map(function (x) { return x.id + ':' + x.qty + ':' + (x.lot || '') + ':' + (x.exp || '') + ':' + (x.pending ? 1 : 0) + ':' + (x.desc || ''); }).join('|') + '#' + rows.length;
@@ -2517,8 +2504,7 @@ var GLOSS = {
     }).join('');
   }
 
-  // ---- CT team hub + F&A inventory (shares the cycle-count scan pipeline via CC.tgt) ----
-  var FA = { rows: [], base: [], ops: [], sess: null, byId: {} };
+  // ---- CT team hub ----
   function ctEnsure(then) {
     if (!CC.creds) { var st = ccLS(terrKey('')); if (st) { try { CC.creds = JSON.parse(st); } catch (e) {} } }
     if (!CC.creds) { CC.ret = then; ccGate(); return false; }
@@ -2536,13 +2522,11 @@ var GLOSS = {
     if (!CC.syncLoaded) { CC.syncLoaded = true; ccSyncLoad(terrTgt()); }
     return true;
   }
-  function ccRowsSrc() { return CC.tgt === 'fa' ? FA.rows : CC.rows; }
+  function ccRowsSrc() { return CC.rows; }
   function ccMatch(x, ref, lot) {
-    if (CC.tgt === 'fa') return !!FA.sess && x.sid === FA.sess.sid && ccNRef(x.ref) === ccNRef(ref) && ccNLot(x.lot) === ccNLot(lot);
     return ccNLoc(x.loc) === ccNLoc(CC.loc) && ccNRef(x.ref) === ccNRef(ref) && ccNLot(x.lot) === ccNLot(lot);
   }
   function ccHK(o) {
-    if (CC.tgt === 'fa') return 'fa|' + String(o.sid || (FA.sess && FA.sess.sid) || '') + '|' + ccNRef(o.ref) + '|' + ccNLot(o.lot);
     return ccHistKey(ccNLoc(o.loc !== undefined ? o.loc : CC.loc), ccNRef(o.ref), ccNLot(o.lot));
   }
   function ctScreen() {
@@ -2575,8 +2559,8 @@ var GLOSS = {
       prompt('Copy these and send them over:', t);
     });
     document.getElementById('ct-devchg').addEventListener('click', function () {
-      var pend = (CC.ops || []).length + (TR.fa ? (FA.ops || []).length : 0);
-      if (pend) { alert('This phone still has ' + pend + ' unsent scan' + (pend > 1 ? 's' : '') + '. Get signal so they finish syncing, then change the device.'); ccFlushSoon(terrTgt(), 200); if (TR.fa) ccFlushSoon('fa', 500); return; }
+      var pend = (CC.ops || []).length;
+      if (pend) { alert('This phone still has ' + pend + ' unsent scan' + (pend > 1 ? 's' : '') + '. Get signal so they finish syncing, then change the device.'); ccFlushSoon(terrTgt(), 200); return; }
       try { localStorage.removeItem(terrKey('_dev')); } catch (e) {}
       CC.dev = ''; CC.ret = ctScreen; ccDevice();
     });
@@ -2922,119 +2906,36 @@ var GLOSS = {
       '</div>';
     }).join('');
   }
-  function faScreen() {
-    setTitle('F&A Inventory', ''); backBtn.hidden = false;
-    ccStop();
-    if (!ctEnsure(faScreen)) return;
-    if (!CC.creds.fa) {
-      CC.creds = null; try { localStorage.removeItem('tbx_cc'); } catch (e) {}
-      CC.ret = faScreen; CC.gateMsg = 'New CT tools added \u2014 enter the team password once to enable them.';
-      ccGate(); return;
-    }
-    CC.tgt = 'fa'; CC.view = 'fahome';
-    render(
-      '<div class="card cc-card cc-home">' +
-        '<button id="fa-rf" class="cc-rfb" aria-label="Refresh counts">&#x21bb;</button>' +
-        '<h2 class="cc-h">F&amp;A Inventory</h2>' +
-        '<div class="cc-sub">Product handed to the Foot &amp; Ankle team, one count per drop.</div>' +
-        '<button id="fa-new" class="cc-btn">Start new count</button>' +
-        '<div id="fa-sync" class="cc-sync"></div>' +
-        '<div id="fa-cards" class="ctc-wrap"><div class="cc-empty">Loading counts\u2026</div></div>' +
-      '</div>');
-    document.getElementById('fa-new').addEventListener('click', function () { faNew(); });
-    document.getElementById('fa-rf').addEventListener('click', function () { ccHomeLoad('fa', true); });
-    document.getElementById('fa-cards').addEventListener('click', function (e) {
-      var c = e.target.closest ? e.target.closest('.ctc') : null; if (!c) return;
-      var s = FA.byId[c.dataset.sid]; if (!s) return;
-      FA.sess = { sid: s.sid, started: s.started, cname: s.cname, from: s.from, drop: s.drop, snotes: s.snotes, sby: s.sby };
-      CC.tgt = 'fa'; ccCount();
-    });
-    ccHomeLoad('fa', false);
-  }
   function faFmt(iso) {
     var d = new Date(iso); if (isNaN(d)) return String(iso || '');
     var mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
     var h = d.getHours(), ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
     return mo + ' ' + d.getDate() + ', ' + d.getFullYear() + ' \u00b7 ' + h + ':' + ('0' + d.getMinutes()).slice(-2) + ' ' + ap;
   }
-  function faCards() {
-    var el = document.getElementById('fa-cards'); if (!el) return;
-    var by = {}; FA.byId = {};
-    FA.rows.forEach(function (x) {
-      var s = by[x.sid];
-      if (!s) { s = by[x.sid] = { sid: x.sid, started: x.started, cname: x.cname, from: x.from, drop: x.drop, snotes: x.snotes, sby: x.sby, lines: 0, units: 0, last: '' }; FA.byId[x.sid] = s; }
-      s.lines++; s.units += (+x.qty || 0);
-      if (String(x.ts) > String(s.last)) s.last = x.ts;
-    });
-    var arr = Object.keys(by).map(function (k) { return by[k]; });
-    arr.sort(function (a, b) { return String(b.started).localeCompare(String(a.started)); });
-    if (!arr.length) { el.innerHTML = '<div class="cc-empty">No counts yet \u2014 start the first one above.</div>'; return; }
-    el.innerHTML = arr.map(function (s) {
-      return '<div class="ctc" data-sid="' + esc(s.sid) + '">' +
-        '<div class="ctc-main"><div class="ctc-t">' + esc(s.cname || faFmt(s.started)) + '</div>' +
-        (s.cname ? '<div class="ctc-l">' + esc(faFmt(s.started)) + '</div>' : '') +
-        '<div class="ctc-l">' + esc(s.from || '?') + ' \u2192 ' + esc(s.drop || '?') + '</div>' +
-        (s.snotes ? '<div class="ctc-n">' + esc(s.snotes) + '</div>' : '') +
-        '<div class="ctc-n">Started by ' + esc(s.sby || '?') + '</div></div>' +
-        '<div class="ctc-r">' + s.lines + ' lines<br>' + s.units + ' units</div>' +
-      '</div>';
-    }).join('');
-  }
-  function faNew() {
-    CC.view = 'fanew';
-    var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    var dv = d.toISOString().slice(0, 16);
-    render(
-      '<div class="card cc-card">' +
-        '<h2 class="cc-h">Start a count</h2>' +
-        '<div class="cc-sub">Device: <b>' + esc(CC.dev) + '</b></div>' +
-        '<label class="cc-lab" for="fa-dt">Date &amp; time</label>' +
-        '<input id="fa-dt" class="cc-in" type="datetime-local" value="' + dv + '">' +
-        '<input id="fa-name" class="cc-in" type="text" autocomplete="off" placeholder="Count name (e.g. Hartford drop)">' +
-        '<input id="fa-from" class="cc-in" type="text" autocomplete="off" placeholder="From location (e.g. Nate\u2019s trunk)">' +
-        '<input id="fa-drop" class="cc-in" type="text" autocomplete="off" placeholder="Dropped location (e.g. F&amp;A rep \u2014 Hartford)">' +
-        '<input id="fa-notes" class="cc-in" type="text" autocomplete="off" placeholder="Notes (optional)">' +
-        '<button id="fa-go" class="cc-btn">Start Scanning</button>' +
-        '<div class="cc-sub2">The count appears for the whole team once it syncs.</div>' +
-      '</div>');
-    document.getElementById('fa-go').addEventListener('click', function () {
-      var cname = document.getElementById('fa-name').value.trim();
-      var from = document.getElementById('fa-from').value.trim();
-      var drop = document.getElementById('fa-drop').value.trim();
-      if (!cname) { document.getElementById('fa-name').focus(); return; }
-      if (!from) { document.getElementById('fa-from').focus(); return; }
-      if (!drop) { document.getElementById('fa-drop').focus(); return; }
-      var dt = document.getElementById('fa-dt').value;
-      var iso; try { iso = dt ? new Date(dt).toISOString() : new Date().toISOString(); } catch (e) { iso = new Date().toISOString(); }
-      FA.sess = { sid: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), started: iso, cname: cname, from: from, drop: drop, snotes: document.getElementById('fa-notes').value.trim(), sby: CC.dev };
-      CC.tgt = 'fa'; ccCount();
-    });
-  }
 
   // ---- home cache + refresh (instant paint from last-known rows, background sync) ----
   function ccHomeLoad(t, manual) {
-    var fa = t === 'fa';
-    var sy = document.getElementById(fa ? 'fa-sync' : 'cc-sync');
-    var rf = document.getElementById(fa ? 'fa-rf' : 'cc-rf');
+    var sy = document.getElementById('cc-sync');
+    var rf = document.getElementById('cc-rf');
     ccDerive(t);
-    var rows = fa ? FA.rows : CC.rows;
-    var paint = fa ? faCards : ccHomeCards;
+    var rows = CC.rows;
+    var paint = ccHomeCards;
     if (rows.length) { paint(); if (sy) sy.textContent = manual ? 'Refreshing\u2026' : 'Updating\u2026'; }
     else if (sy && manual) { sy.textContent = 'Refreshing\u2026'; }
     if (rf) { rf.classList.add('spin'); rf.disabled = true; }
-    function done() { var r2 = document.getElementById(fa ? 'fa-rf' : 'cc-rf'); if (r2) { r2.classList.remove('spin'); r2.disabled = false; } }
+    function done() { var r2 = document.getElementById('cc-rf'); if (r2) { r2.classList.remove('spin'); r2.disabled = false; } }
     function syncLine() {
       var st = ccSyncSt(t);
-      var s2 = document.getElementById(fa ? 'fa-sync' : 'cc-sync');
+      var s2 = document.getElementById('cc-sync');
       if (s2) s2.textContent = st.ops.length ? (st.ops.length + ' scan' + (st.ops.length > 1 ? 's' : '') + ' still syncing \u2014 sends automatically.') : '';
     }
     ccFlushSoon(t, 250);
     return ccPull(t).then(function () {
       paint(); syncLine(); done();
     }).catch(function () {
-      var e2 = document.getElementById(fa ? 'fa-cards' : 'cc-cards');
-      var s2 = document.getElementById(fa ? 'fa-sync' : 'cc-sync');
-      if (!(fa ? FA.rows : CC.rows).length && e2) { e2.innerHTML = '<div class="cc-empty">Sheet unreachable \u2014 working offline. Scans still save on this phone and sync later.</div>'; }
+      var e2 = document.getElementById('cc-cards');
+      var s2 = document.getElementById('cc-sync');
+      if (!CC.rows.length && e2) { e2.innerHTML = '<div class="cc-empty">Sheet unreachable \u2014 working offline. Scans still save on this phone and sync later.</div>'; }
       else if (s2) { s2.textContent = 'Offline \u2014 showing this phone\u2019s saved counts.'; }
       done();
     });
@@ -3050,6 +2951,18 @@ var GLOSS = {
   }
   // ---- F&A Inventory v2 (fa2) — live event-sourced stock via the TBX FA Hub ----
   var FA2 = { creds: null, cache: null, form: null, adminPw: '', pend: 0, gen: 0 };
+  // Master-tab columns by name. The hub sends masterCols with every read; these
+  // defaults only matter for an older hub reply. Nothing below indexes r[N] directly.
+  var MC = { ref: 0, desc: 1, lot: 2, exp: 3, qty: 4, status: 5, loc: 6, act: 7 };
+  var MC_NAMES = { ref: 'ref', description: 'desc', desc: 'desc', lot: 'lot', exp: 'exp', expiry: 'exp', expiration: 'exp', qty: 'qty', quantity: 'qty', status: 'status', lastlocation: 'loc', location: 'loc', lastactivity: 'act' };
+  function fa2ColsApply(d) {
+    var cols = d && d.masterCols;
+    if (!cols || !cols.length) return;
+    var m = {};
+    cols.forEach(function (c, i) { var k = MC_NAMES[String(c).toLowerCase().replace(/[^a-z]/g, '')]; if (k && m[k] === undefined) m[k] = i; });
+    if (m.ref === undefined || m.lot === undefined || m.qty === undefined) return; // unrecognised header row: keep defaults
+    for (var k in MC) if (m[k] !== undefined) MC[k] = m[k];
+  }
   function fa2Save(c) { FA2.creds = c; try { localStorage.setItem('tbx_fa2', JSON.stringify(c)); } catch (e) {} }
   function fa2Creds() {
     if (FA2.creds) return FA2.creds;
@@ -3135,7 +3048,7 @@ var GLOSS = {
   // A read that comes back ok:true but without a master array (seen when the
   // server is mid-rebuild) must never be cached or rendered — one bad payload
   // would otherwise blank every screen until the cache expired.
-  function fa2Sane(d) { return !!(d && d.ok && d.master && typeof d.master.length === 'number' && d.ledgerCols); }
+  function fa2Sane(d) { var ok = !!(d && d.ok && d.master && typeof d.master.length === 'number' && d.ledgerCols); if (ok) fa2ColsApply(d); return ok; }
   function fa2CacheKill() { FA2.cache = null; try { localStorage.removeItem('tbx_fa2_cache'); } catch (e) {} }
   function fa2Load(force) {
     var c = fa2CacheGet();
@@ -3164,12 +3077,6 @@ var GLOSS = {
   }
   function fa2Today() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function fa2Uuid() { try { return crypto.randomUUID(); } catch (e) { return 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10); } }
-  function fa2PillClass(s) {
-    if (s === 'EXPIRED') return 'bad';
-    if (s && s.indexOf('SEND BACK') === 0) return 'wait';
-    if (s === '\u22643 MO') return 'busy';
-    return 'ok';
-  }
   // A cycle-count device is registered as "Mia's iPhone"; the person is "Mia".
   // Used for the From chips and for who-did-it on sports-side events.
   function fa2PersonName(n) {
@@ -3446,7 +3353,7 @@ var GLOSS = {
       if (CC.view !== 'fa2home' || g !== FA2.gen) return;
       var units = 0, soon = 0, sb = 0, exp = 0;
       (d.master || []).forEach(function (r) {
-        var q = fa2Num(r[4]); if (q <= 0) return; units += q;
+        var q = fa2Num(r[MC.qty]); if (q <= 0) return; units += q;
         var b = fa2RowBand(r);
         if (b === 0) exp += q; else if (b === 1) sb += q; else if (b === 2) soon += q;
       });
@@ -3473,60 +3380,11 @@ var GLOSS = {
   }
 
   /* ---------- v2.1 shared kit ---------- */
-  function fa2KitCss() {
-    if (document.getElementById('fa2k')) return;
-    var st = document.createElement('style'); st.id = 'fa2k';
-    st.textContent =
-      '.k-scroll{max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:4px}' +
-      '.f2c{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px 12px;margin:8px 0}' +
-      '.f2top{display:flex;justify-content:space-between;align-items:center;gap:8px}' +
-      '.f2top b{font-size:15px}' +
-      '.f2chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}' +
-      '.f2chip.ok{background:rgba(90,200,120,.18);color:#7ed99b}' +
-      '.f2chip.soon{background:rgba(90,150,220,.2);color:#8fb9ea}' +
-      '.f2chip.sb{background:rgba(240,180,60,.22);color:#f0c060}' +
-      '.a2held{display:flex;align-items:center;gap:8px;margin:-4px 0 8px}' +
-      '.f2chip.exp{background:rgba(240,90,90,.22);color:#f28b8b}' +
-      '.f2desc{margin-top:2px;font-size:13px;color:#d8d8d8}' +
-      '.f2sub{margin-top:2px;font-size:12px;color:#9a9a9a}' +
-      '.f2qty{margin-top:4px;font-size:13px;color:#cfcfcf}.f2qty b{font-size:15px;color:#fff}' +
-      '.k-ban{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;background:rgba(90,200,120,.16);border:1px solid rgba(90,200,120,.4);color:#bfe9cc;border-radius:12px;padding:8px 12px;margin:0 0 10px}' +
-      '.k-ban button{margin-left:auto;background:none;border:0;color:inherit;font-size:16px;padding:0 2px}' +
-      '@keyframes kshake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}' +
-      '.k-shake{animation:kshake .35s}' +
-      '.k-red{color:#f28b8b !important}' +
-      '.k-trow{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:8px 10px;margin:6px 0;touch-action:pan-y}' +
-      '.k-trow.k-lift{opacity:.92;transform:scale(1.02);box-shadow:0 6px 18px rgba(0,0,0,.5);position:relative;z-index:9}' +
-      '.k-handle{cursor:grab;touch-action:none;padding:4px 6px;color:#9a9a9a;font-size:16px;line-height:1;user-select:none}' +
-      '.k-tmain{flex:1;min-width:0}.k-tt{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.k-ts{font-size:11px;color:#9a9a9a}' +
-      '.k-step{display:flex;align-items:center;gap:6px}.k-step button{width:26px;height:26px;border-radius:8px;border:0;background:rgba(255,255,255,.12);color:#fff;font-size:15px}' +
-      '.k-step b{min-width:16px;text-align:center}' +
-      '.k-x{background:none;border:0;color:#f28b8b;font-size:16px;padding:2px 6px}' +
-      '.k-arrows{display:none}.k-arrows button{width:24px;height:22px;border:0;border-radius:6px;background:rgba(255,255,255,.1);color:#ccc}' +
-      '.f2bub{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(120,160,255,.18);color:#9db8ff;white-space:nowrap}' +
-      '.k-bar{position:sticky;bottom:0;padding-top:8px;z-index:6}' +
-      '.cc-in[type=date]{min-width:0;max-width:100%;box-sizing:border-box}' +
-      '#fa2-more{margin:10px 0 14px}' +
-      '.a2man{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px 12px;margin:8px 0}' +
-      '.h-ev{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:10px 12px;margin:8px 0;cursor:pointer}' +
-      '.h-ev.open{background:rgba(255,255,255,.07)}' +
-      '.h-top{display:flex;justify-content:space-between;align-items:center;gap:8px}' +
-      '.h-ty{font-size:15px;font-weight:700}' +
-      '.h-sub{margin-top:3px;font-size:12px;color:#9a9a9a}' +
-      '.h-cnt{font-size:12px;color:#cfcfcf;white-space:nowrap}' +
-      '.h-lines{margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px}' +
-      '.h-ln{display:flex;justify-content:space-between;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,.05)}' +
-      '.h-ln:last-child{border-bottom:0}' +
-      '.h-lref{min-width:0}.h-lref b{display:block}.h-lref span{font-size:11px;color:#9a9a9a}' +
-      '.h-act{margin-top:2px}' +
-      '.h-dim{opacity:.5}' +
-      '.a-busy{background:rgba(90,200,120,.25) !important;border-color:rgba(90,200,120,.6) !important;color:#bfe9cc !important}';
-    document.head.appendChild(st);
-  }
+  function fa2KitCss() { /* styles live in index.html (.k-*, .f2*, .h-*, .a2*) */ }
   var FA2_MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
   // Accepts what people and labels actually write; always answers YYYY-MM-DD (or ''
   // when it can't be read). Month-only means good through the end of that month.
-  function fa2ExpParse(v) {
+  function expIso(v) {
     var t = String(v == null ? '' : v).trim().replace(/\s+/g, ' ');
     if (!t) return '';
     var y, mo, d = 0, m;
@@ -3544,24 +3402,23 @@ var GLOSS = {
     if (d < 1 || d > last) return '';
     return y + '-' + ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2);
   }
-  function expNorm(e) { return fa2ExpParse(e) || String(e == null ? '' : e).trim(); }
-  function expBand(e) { var n = expNorm(e); if (!/^\d{4}-\d{2}-\d{2}$/.test(n)) return 2; var d = new Date(n + 'T12:00:00'); var now = new Date(); now.setHours(0, 0, 0, 0); if (d < now) return 0; var soon = new Date(now); soon.setMonth(soon.getMonth() + 3); return d <= soon ? 1 : 2; }
+  function expNorm(e) { return expIso(e) || String(e == null ? '' : e).trim(); }
   // 0 expired \u00b7 1 send back (\u22642 mo) \u00b7 2 expiring (\u22643 mo) \u00b7 3 ok. The sheet's own status
   // column wins (same bands the weekly email uses); the date math only fills in when it is missing.
   function expBand4(e) {
-    var n = expNorm(e); if (!/^\d{4}-\d{2}-\d{2}$/.test(n)) return 3;
+    var n = expIso(e); if (!n) return 3;
     var d = new Date(n + 'T12:00:00'), now = new Date(); now.setHours(0, 0, 0, 0);
     if (d < now) return 0;
     var m2 = new Date(now); m2.setMonth(m2.getMonth() + 2); if (d <= m2) return 1;
     var m3 = new Date(now); m3.setMonth(m3.getMonth() + 3); return d <= m3 ? 2 : 3;
   }
   function fa2RowBand(r) {
-    var st = String(r[5] || '');
+    var st = String(r[MC.status] || '');
     if (st === 'EXPIRED') return 0;
     if (st.indexOf('SEND BACK') === 0) return 1;
     if (st === '\u22643 MO') return 2;
     if (st === 'OK') return 3;
-    return expBand4(r[3]);
+    return expBand4(r[MC.exp]);
   }
   var FA2_BAND_NAMES = ['Expired', 'Send back \u22642 mo', 'Expiring \u22643 mo', 'OK'], FA2_BAND_CLS = ['bad', 'warn', 'soon', 'ok'];
   function fa2RowChip(r) { var b = fa2RowBand(r); return '<span class="f2chip ' + ['exp">Expired', 'sb">Send back', 'soon">\u22643 mo', 'ok">OK'][b] + '</span>'; }
@@ -3685,7 +3542,7 @@ var GLOSS = {
   function fa2OnHandDraw() {
     var el = document.getElementById('fa2-list'); if (!el || !FA2.ohD) return;
     var q = (document.getElementById('fa2-q') || {}).value || '';
-    var rows = (FA2.ohD.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+    var rows = (FA2.ohD.master || []).filter(function (r) { return fa2Num(r[MC.qty]) > 0 && kitMatch(q, [r[MC.ref], r[MC.desc], r[MC.lot]]); });
     if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand \u2014 all clear.') + '</div>'; return; }
     rows = fa2BandSort(rows);
     var html = '', last = -1;
@@ -3694,10 +3551,10 @@ var GLOSS = {
       if (b !== last) { html += '<div class="fa2-eyebrow ' + FA2_BAND_CLS[b] + '">' + FA2_BAND_NAMES[b] + '</div>'; last = b; }
       html +=
           '<div class="f2c">' +
-            '<div class="f2top"><b>' + esc(r[0]) + '</b>' + fa2RowChip(r) + '</div>' +
-            (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
-            '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + (r[6] ? ' \u00b7 ' + esc(r[6]) : '') + '</div>' +
-            '<div class="f2qty"><b>' + fa2Num(r[4]) + '</b> on hand</div>' +
+            '<div class="f2top"><b>' + esc(r[MC.ref]) + '</b>' + fa2RowChip(r) + '</div>' +
+            (r[MC.desc] ? '<div class="f2desc">' + esc(r[MC.desc]) + '</div>' : '') +
+            '<div class="f2sub">' + (r[MC.lot] ? 'Lot ' + esc(r[MC.lot]) : 'No lot') + (r[MC.exp] ? ' \u00b7 Exp ' + esc(r[MC.exp]) : '') + (r[MC.loc] ? ' \u00b7 ' + esc(r[MC.loc]) : '') + '</div>' +
+            '<div class="f2qty"><b>' + fa2Num(r[MC.qty]) + '</b> on hand</div>' +
           '</div>';
     });
     el.innerHTML = html;
@@ -3926,7 +3783,7 @@ var GLOSS = {
           '<label class="a2f" for="fc-ref"><span class="a2fl">REF</span><input id="fc-ref" class="cc-in" value="' + esc(row.ref) + '"></label>' +
           '<label class="a2f" for="fc-lot"><span class="a2fl">LOT</span><input id="fc-lot" class="cc-in" value="' + esc(row.lot) + '"></label>' +
           '<div class="fa2-2col">' +
-            '<label class="a2f" for="fc-exp"><span class="a2fl">Expiration</span><input id="fc-exp" class="cc-in" inputmode="numeric" value="' + esc(fa2ExpParse(row.exp) || row.exp || '') + '"></label>' +
+            '<label class="a2f" for="fc-exp"><span class="a2fl">Expiration</span><input id="fc-exp" class="cc-in" inputmode="numeric" value="' + esc(expIso(row.exp) || row.exp || '') + '"></label>' +
             '<label class="a2f" for="fc-qty"><span class="a2fl">QTY</span><input id="fc-qty" class="cc-in" type="number" min="1" inputmode="numeric" value="' + Math.abs(row.qty) + '"></label>' +
           '</div>' +
           '<div id="fc-warn" class="cc-sub2" hidden></div>' +
@@ -3949,7 +3806,7 @@ var GLOSS = {
       var ref = document.getElementById('fc-ref').value.trim().toUpperCase();
       var lot = document.getElementById('fc-lot').value.trim().toUpperCase();
       ((d && d.master) || []).forEach(function (r) {
-        if (String(r[0]).toUpperCase() === ref && String(r[2]).toUpperCase() === lot) onhand += fa2Num(r[4]);
+        if (String(r[MC.ref]).toUpperCase() === ref && String(r[MC.lot]).toUpperCase() === lot) onhand += fa2Num(r[MC.qty]);
       });
       var q = +document.getElementById('fc-qty').value || 0;
       var avail = onhand + Math.abs(row.qty);
@@ -3959,7 +3816,7 @@ var GLOSS = {
     ['fc-ref', 'fc-lot', 'fc-qty'].forEach(function (id) { document.getElementById(id).addEventListener('input', fcWarn); });
     // whatever they type, it settles into the standard as soon as they leave the field
     document.getElementById('fc-exp').addEventListener('change', function (e) {
-      var p = fa2ExpParse(e.target.value); if (p) e.target.value = p;
+      var p = expIso(e.target.value); if (p) e.target.value = p;
     });
     fcWarn();
     document.getElementById('fc-cancel').addEventListener('click', function () { wrap.remove(); });
@@ -3972,7 +3829,7 @@ var GLOSS = {
         var lot = document.getElementById('fc-lot').value.trim();
         var qty = +document.getElementById('fc-qty').value || 0;
         var expRaw = document.getElementById('fc-exp').value.trim();
-        var exp = fa2ExpParse(expRaw);
+        var exp = expIso(expRaw);
         if (!ref) return fa2Err('fc-err', 'REF is required.');
         if (!lot) return fa2Err('fc-err', 'LOT is required.');
         if (qty < 1) return fa2Err('fc-err', 'Qty must be at least 1.');
@@ -4024,7 +3881,7 @@ var GLOSS = {
       var v = el.value;
       el.classList.remove('x-bad', 'x-warn', 'x-ok');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
-      el.classList.add(v <= fa2Today() ? 'x-bad' : expBand(v) === 1 ? 'x-warn' : 'x-ok');
+      el.classList.add(v <= fa2Today() ? 'x-bad' : expBand4(v) <= 2 ? 'x-warn' : 'x-ok');
     }
     function touched() { delete el.dataset.def; delete el.dataset.ack; chk(); }
     if (!el.dataset.wired) { el.dataset.wired = '1'; el.addEventListener('input', touched); el.addEventListener('change', touched); }
@@ -4044,20 +3901,6 @@ var GLOSS = {
     var el = document.getElementById(expId); if (!el) return;
     el.value = fa2Today(); el.dataset.def = '1'; delete el.dataset.ack;
     fa2ExpWire(expId);
-  }
-  function fa2ItemRows(items, needLot) {
-    return items.map(function (it, i) {
-      return '<div class="fa2-item" data-i="' + i + '">' +
-        '<div class="fa2-itop"><b>Item ' + (i + 1) + '</b>' + (items.length > 1 ? '<button type="button" class="fa2-x" data-i="' + i + '">\u00d7</button>' : '') + '</div>' +
-        '<input class="cc-in fa2-f" data-f="ref" data-i="' + i + '" placeholder="REF (part number)" value="' + esc(it.ref || '') + '">' +
-        '<input class="cc-in fa2-f" data-f="desc" data-i="' + i + '" placeholder="Description" value="' + esc(it.desc || '') + '">' +
-        '<input class="cc-in fa2-f" data-f="lot" data-i="' + i + '" placeholder="Lot' + (needLot ? '' : ' (optional)') + '" value="' + esc(it.lot || '') + '">' +
-        '<div class="fa2-2col">' +
-          '<input class="cc-in fa2-f" data-f="exp" data-i="' + i + '" placeholder="Exp (YYYY-MM)" value="' + esc(it.exp || '') + '">' +
-          '<input class="cc-in fa2-f" data-f="qty" data-i="' + i + '" type="number" min="1" placeholder="Qty" value="' + esc(it.qty || '') + '">' +
-        '</div>' +
-      '</div>';
-    }).join('');
   }
   function fa2Add() {
     setTitle('Add inventory', ''); backBtn.hidden = false;
@@ -4120,7 +3963,7 @@ var GLOSS = {
     if (e === undefined) e = BYPN[nrm(ref).replace(/^0+/, '')];
     if (e === undefined) return '';
     var it = (typeof e === 'object' && e.kind)
-      ? (e.kind === 'item' ? D.items[e.idx] : e.kind === 'probe' ? D.probes[e.idx] : D.shavers[e.idx])
+      ? (recOf(e))
       : D.items[e];
     return it ? (it.t || it.name || '') : '';
   }
@@ -4234,11 +4077,11 @@ var GLOSS = {
     var miss = function (msg) { ccBeep('warn'); return msg; };
     var ref = String(cands[0][0]), m = null;
     if (lot) {
-      m = cands.filter(function (r) { return String(r[2]).toUpperCase() === String(lot).toUpperCase(); })[0];
+      m = cands.filter(function (r) { return String(r[MC.lot]).toUpperCase() === String(lot).toUpperCase(); })[0];
       if (!m) return miss(ref + ' Lot ' + lot + ' isn\u2019t on hand');
     } else if (cands.length === 1) { m = cands[0]; }
-    function have(r) { var k = r[0] + '\u0001' + r[2]; return tray.items[k] ? tray.items[k].qty : 0; }
-    function left(r) { return fa2Num(r[4]) - have(r); }
+    function have(r) { var k = r[MC.ref] + '\u0001' + r[MC.lot]; return tray.items[k] ? tray.items[k].qty : 0; }
+    function left(r) { return fa2Num(r[MC.qty]) - have(r); }
     if (m && left(m) <= 0) return miss(ref + ' \u2014 all ' + fa2Num(m[4]) + ' already selected');
     var opts = cands.filter(function (r) { return left(r) > 0; });
     if (!m && !opts.length) return miss(ref + ' \u2014 everything on hand is already selected');
@@ -4246,21 +4089,21 @@ var GLOSS = {
     ccFlashGreen();
     ccBeep(fa2RowBand(cur) === 0 ? 'expired' : 'ok');
     try { navigator.vibrate && navigator.vibrate(35); } catch (e) {}
-    function subFor(r) { return (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + ' \u00b7 ' + fa2Num(r[4]) + ' on hand' + (have(r) ? ' \u00b7 ' + have(r) + ' already selected' : ''); }
+    function subFor(r) { return (r[MC.lot] ? 'Lot ' + esc(r[MC.lot]) : 'No lot') + (r[MC.exp] ? ' \u00b7 Exp ' + esc(r[MC.exp]) : '') + ' \u00b7 ' + fa2Num(r[MC.qty]) + ' on hand' + (have(r) ? ' \u00b7 ' + have(r) + ' already selected' : ''); }
     fa2ScanSheet({
-      title: esc(ref) + (cur[1] ? ' \u2014 ' + esc(cur[1]) : ''),
+      title: esc(ref) + (cur[MC.desc] ? ' \u2014 ' + esc(cur[MC.desc]) : ''),
       sub: subFor(cur),
       expired: fa2RowBand(cur) === 0,
-      fields: pick ? '<div class="cc-sub2">Which lot?</div>' + fa2Chips('cc-lots', opts.map(function (r) { return String(r[2]); }), String(cur[2])) : '',
+      fields: pick ? '<div class="cc-sub2">Which lot?</div>' + fa2Chips('cc-lots', opts.map(function (r) { return String(r[MC.lot]); }), String(cur[MC.lot])) : '',
       max: left(cur),
       onOk: function (q) {
-        var k = cur[0] + '\u0001' + cur[2];
+        var k = cur[MC.ref] + '\u0001' + cur[MC.lot];
         if (!addToTray(k, q)) return false;
-        ccStatus('Added ' + cur[0] + (q > 1 ? ' \u00d7' + q : '') + (cur[2] ? ' \u00b7 Lot ' + cur[2] : ''));
+        ccStatus('Added ' + cur[MC.ref] + (q > 1 ? ' \u00d7' + q : '') + (cur[MC.lot] ? ' \u00b7 Lot ' + cur[MC.lot] : ''));
       }
     });
     if (pick) fa2ChipWire('cc-lots', function (v) {
-      cur = opts.filter(function (r) { return String(r[2]) === v; })[0] || cur;
+      cur = opts.filter(function (r) { return String(r[MC.lot]) === v; })[0] || cur;
       var sb = document.querySelector('#cc-sheet .cc-sub'); if (sb) sb.innerHTML = subFor(cur);
       var xt = document.querySelector('#cc-sheet .cc-exptag'); if (xt) xt.remove();
       if (fa2RowBand(cur) === 0 && sb) sb.insertAdjacentHTML('afterend', '<div class="cc-exptag">EXPIRED</div>');
@@ -4456,11 +4299,11 @@ var GLOSS = {
 
   /* ---------- shared on-hand card picker: tap a card → stepper → Add ---------- */
   function fa2PickCardHtml(r, key, have, open, pend) {
-    var oh = fa2Num(r[4]);
+    var oh = fa2Num(r[MC.qty]);
     return '<div class="f2c fa2-pk' + (open ? ' pk-open' : '') + '" data-k="' + esc(key) + '">' +
-      '<div class="f2top"><b>' + esc(r[0]) + '</b><span class="f2bub">' + (have ? have + ' of ' + oh + ' selected' : oh + ' on hand') + '</span></div>' +
-      (r[1] ? '<div class="f2desc">' + esc(r[1]) + '</div>' : '') +
-      '<div class="f2sub">' + (r[2] ? 'Lot ' + esc(r[2]) : 'No lot') + (r[3] ? ' \u00b7 Exp ' + esc(r[3]) : '') + '</div>' +
+      '<div class="f2top"><b>' + esc(r[MC.ref]) + '</b><span class="f2bub">' + (have ? have + ' of ' + oh + ' selected' : oh + ' on hand') + '</span></div>' +
+      (r[MC.desc] ? '<div class="f2desc">' + esc(r[MC.desc]) + '</div>' : '') +
+      '<div class="f2sub">' + (r[MC.lot] ? 'Lot ' + esc(r[MC.lot]) : 'No lot') + (r[MC.exp] ? ' \u00b7 Exp ' + esc(r[MC.exp]) : '') + '</div>' +
       (open ? '<div class="pk-qty">' +
           '<span class="pk-step">' +
             '<button type="button" class="pk-m" aria-label="Less"' + (pend <= 1 ? ' disabled' : '') + '>\u2212</button>' +
@@ -4476,8 +4319,8 @@ var GLOSS = {
     rows.forEach(function (r) {
       var b = fa2RowBand(r);
       if (b !== last) { html += '<div class="fa2-eyebrow ' + FA2_BAND_CLS[b] + '">' + FA2_BAND_NAMES[b] + '</div>'; last = b; }
-      var key = r[0] + '\u0001' + r[2];
-      var oh = fa2Num(r[4]), hv = have(key);
+      var key = r[MC.ref] + '\u0001' + r[MC.lot];
+      var oh = fa2Num(r[MC.qty]), hv = have(key);
       html += fa2PickCardHtml(r, key, hv, st.openKey === key, Math.min(st.pickN, Math.max(1, oh - hv)));
     });
     return html;
@@ -4564,7 +4407,7 @@ var GLOSS = {
     }
     fa2ChipWire('fa2-rty', function (v) { sel.type = v; drawFields(); });
     document.getElementById('fa2-q').addEventListener('input', function () { st.openKey = ''; drawPick(); });
-    function rowFor(k) { var m = null; ((OH && OH.master) || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; }); return m; }
+    function rowFor(k) { var m = null; ((OH && OH.master) || []).forEach(function (r) { if (r[MC.ref] + '\u0001' + r[MC.lot] === k) m = r; }); return m; }
     function cardFor(k) { var c = null; [].forEach.call(document.querySelectorAll('#fa2-pick .fa2-pk'), function (x) { if (x.getAttribute('data-k') === k) c = x; }); return c; }
     function addToTray(k, n) {
       var m = rowFor(k); if (!m) return false;
@@ -4579,7 +4422,7 @@ var GLOSS = {
     function drawPick() {
       var el = document.getElementById('fa2-pick'); if (!el || !OH) return;
       var q = (document.getElementById('fa2-q') || {}).value || '';
-      var rows = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+      var rows = (OH.master || []).filter(function (r) { return fa2Num(r[MC.qty]) > 0 && kitMatch(q, [r[MC.ref], r[MC.desc], r[MC.lot]]); });
       if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
       el.innerHTML = fa2PickListHtml(fa2BandSort(rows), function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, st);
     }
@@ -4588,7 +4431,7 @@ var GLOSS = {
     FA2.retScan = function (ref, lot) {
       if (!OH) return 'Still loading stock\u2026';
       var nref = nrm(ref);
-      var cands = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && nrm(String(r[0])) === nref; });
+      var cands = (OH.master || []).filter(function (r) { return fa2Num(r[MC.qty]) > 0 && nrm(String(r[MC.ref])) === nref; });
       if (!cands.length) { ccBeep('warn'); return ref + ' isn\u2019t in F&A stock'; }
       return fa2ScanPick(cands, lot, tray, addToTray);
     };
@@ -4659,7 +4502,7 @@ var GLOSS = {
     document.getElementById('fa2-trk').addEventListener('input', function (e) { trk.v = e.target.value; gate(); });
     var trayApi = kitTray(document.getElementById('fa2-tray'), tray, { empty: 'Nothing selected yet \u2014 scan a barcode or tap an item below.', onChange: function () { drawPick(); gate(); } });
     document.getElementById('fa2-q').addEventListener('input', function () { st.openKey = ''; drawPick(); });
-    function rowFor(k) { var m = null; ((OH && OH.master) || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; }); return m; }
+    function rowFor(k) { var m = null; ((OH && OH.master) || []).forEach(function (r) { if (r[MC.ref] + '\u0001' + r[MC.lot] === k) m = r; }); return m; }
     function cardFor(k) { var c = null; [].forEach.call(document.querySelectorAll('#fa2-pick .fa2-pk'), function (x) { if (x.getAttribute('data-k') === k) c = x; }); return c; }
     function addToTray(k, n) {
       var m = rowFor(k); if (!m) return false;
@@ -4674,7 +4517,7 @@ var GLOSS = {
     function drawPick() {
       var el = document.getElementById('fa2-pick'); if (!el || !OH) return;
       var q = (document.getElementById('fa2-q') || {}).value || '';
-      var rows = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+      var rows = (OH.master || []).filter(function (r) { return fa2Num(r[MC.qty]) > 0 && kitMatch(q, [r[MC.ref], r[MC.desc], r[MC.lot]]); });
       if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
       el.innerHTML = fa2PickListHtml(fa2BandSort(rows), function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, st);
     }
@@ -4683,7 +4526,7 @@ var GLOSS = {
     FA2.retScan = function (ref, lot) {
       if (!OH) return 'Still loading stock\u2026';
       var nref = nrm(ref);
-      var cands = (OH.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && nrm(String(r[0])) === nref; });
+      var cands = (OH.master || []).filter(function (r) { return fa2Num(r[MC.qty]) > 0 && nrm(String(r[MC.ref])) === nref; });
       if (!cands.length) { ccBeep('warn'); return ref + ' isn\u2019t in F&A stock'; }
       return fa2ScanPick(cands, lot, tray, addToTray);
     };
@@ -4771,7 +4614,7 @@ var GLOSS = {
       allowOver: function () { return true; }
     });
     document.getElementById('fa2-q').addEventListener('input', function () { st.openKey = ''; drawPick(); });
-    function rowFor(k) { var m = null; ((D2 && D2.master) || []).forEach(function (r) { if (r[0] + '\u0001' + r[2] === k) m = r; }); return m; }
+    function rowFor(k) { var m = null; ((D2 && D2.master) || []).forEach(function (r) { if (r[MC.ref] + '\u0001' + r[MC.lot] === k) m = r; }); return m; }
     function cardFor(k) { var c = null; [].forEach.call(document.querySelectorAll('#fa2-pick .fa2-pk'), function (x) { if (x.getAttribute('data-k') === k) c = x; }); return c; }
     function addToTray(k, n) {
       var m = rowFor(k); if (!m) return false;
@@ -4805,7 +4648,7 @@ var GLOSS = {
       var er = document.getElementById('fa2-err'); if (er) er.hidden = true;
       // If this ref+lot is actually on hand, use that row so the overdraft math stays right.
       var m = null;
-      ((D2 && D2.master) || []).forEach(function (r) { if (String(r[0]).toUpperCase() === ref.toUpperCase() && String(r[2]).toUpperCase() === lot.toUpperCase()) m = r; });
+      ((D2 && D2.master) || []).forEach(function (r) { if (String(r[MC.ref]).toUpperCase() === ref.toUpperCase() && String(r[MC.lot]).toUpperCase() === lot.toUpperCase()) m = r; });
       var k = m ? (m[0] + '\u0001' + m[2]) : (ref + '\u0001' + lot);
       if (tray.items[k]) tray.items[k].qty += qty;
       else if (m) { tray.items[k] = { ref: m[0], desc: m[1], lot: m[2], exp: m[3], onhand: fa2Num(m[4]), qty: qty }; tray.order.push(k); }
@@ -4819,7 +4662,7 @@ var GLOSS = {
     function drawPick() {
       var el = document.getElementById('fa2-pick'); if (!el || !D2) return;
       var q = (document.getElementById('fa2-q') || {}).value || '';
-      var rows = (D2.master || []).filter(function (r) { return fa2Num(r[4]) > 0 && kitMatch(q, [r[0], r[1], r[2]]); });
+      var rows = (D2.master || []).filter(function (r) { return fa2Num(r[MC.qty]) > 0 && kitMatch(q, [r[MC.ref], r[MC.desc], r[MC.lot]]); });
       if (!rows.length) { el.innerHTML = '<div class="cc-empty">' + (q ? 'No matches.' : 'Nothing on hand.') + '</div>'; return; }
       el.innerHTML = fa2PickListHtml(fa2BandSort(rows), function (k) { return tray.items[k] ? tray.items[k].qty : 0; }, st);
     }
@@ -5364,6 +5207,7 @@ var GLOSS = {
   });
   function tbxStart() {
     window.addEventListener('hashchange', route); route();
+    window.__tbxRouted = true; // boot succeeded: later errors are bugs, not cache corruption (see heal)
     setTimeout(showTour, 700);
   }
   if (document.documentElement.classList.contains('authed')) { tbxStart(); }
@@ -5466,11 +5310,6 @@ var GLOSS = {
         teachList = document.getElementById('scan-teach-list');
     var stream = null, running = false, canvas = document.createElement('canvas'), zxPrepared = false, teachKey = '';
     function learned() { try { return JSON.parse(localStorage.getItem('tbx_learned') || '{}'); } catch (e) { return {}; } }
-    function skuOf(entry) {
-      if (!entry) return null;
-      var pool = entry.kind === 'item' ? D.items : entry.kind === 'probe' ? D.probes : D.shavers;
-      return (pool[entry.idx] || {}).sku || null;
-    }
     function parseGS1(txt) {
       var out = { raw: txt, gtin: '', lot: '', exp: '' };
       var t = String(txt).replace(/^\][A-Za-z]\d/, '');
@@ -5497,6 +5336,12 @@ var GLOSS = {
       }
       return out;
     }
+    function julianExp(yyjjj) {
+      var y = 2000 + +yyjjj.slice(0, 2), j = +yyjjj.slice(2);
+      var d = new Date(y, 0, j);
+      if (!j || d.getFullYear() !== y) return '';
+      return String(y).slice(2) + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+    }
     function parseHIBC(t) {
       // HIBC LIC: '+' LIC(4) product-code UOM-digit [/secondary...] check-char
       var out = { cats: [], lot: '', exp: '' };
@@ -5521,19 +5366,18 @@ var GLOSS = {
         if (sec.slice(0, 2) === '$$') {
           var r = sec.slice(2), f = r.charAt(0), rest;
           if (f >= '2' && f <= '7') { rest = r.slice(1); } else { f = ''; rest = r; }
+          // HIBC date flags: (none)=MMYY, 2=MMDDYY, 3=YYMMDD, 4=YYMMDDHH, 5=YYJJJ, 6=YYJJJHH, 7=no date
           if (f === '3' && /^\d{6}/.test(rest)) { out.exp = rest.slice(0, 6); out.lot = rest.slice(6); }
+          else if (f === '4' && /^\d{8}/.test(rest)) { out.exp = rest.slice(0, 6); out.lot = rest.slice(8); }
           else if (f === '2' && /^\d{6}/.test(rest)) { out.exp = rest.slice(4, 6) + rest.slice(0, 4); out.lot = rest.slice(6); }
+          else if ((f === '5' || f === '6') && /^\d{5}/.test(rest)) { out.exp = julianExp(rest.slice(0, 5)); out.lot = rest.slice(f === '5' ? 5 : 7); }
           else if (f === '' && /^\d{4}/.test(rest)) { out.exp = rest.slice(2, 4) + rest.slice(0, 2) + '00'; out.lot = rest.slice(4); }
           else { out.lot = rest; }
         } else if (sec.charAt(0) === '$') { out.lot = sec.slice(1).replace(/^\+/, ''); }
       }
       return out;
     }
-    function fmtExp(e6) {
-      if (!e6 || e6.length !== 6) return '';
-      var mm = e6.slice(2, 4), dd = e6.slice(4);
-      return '20' + e6.slice(0, 2) + '-' + mm + (dd !== '00' ? '-' + dd : '');
-    }
+    var fmtExp = expDisp;
     function resolveCode(txt) {
       var p = parseGS1(txt), sku = null, key = '';
       if (p.gtin && p.gtin.length === 14) {
@@ -5578,6 +5422,7 @@ var GLOSS = {
       running = false;
       if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
       video.srcObject = null;
+      if (CC.wake) { try { CC.wake.release(); } catch (e) {} CC.wake = null; }
       ov.hidden = true; teach.hidden = true; teachList.innerHTML = ''; teachQ.value = '';
     }
     function onCode(txt) {
@@ -5585,7 +5430,7 @@ var GLOSS = {
       var r = resolveCode(txt);
       if (r.sku) {
         var entry = BYPN[nrm(r.sku)];
-        var it = entry ? (entry.kind === 'item' ? D.items[entry.idx] : entry.kind === 'probe' ? D.probes[entry.idx] : D.shavers[entry.idx]) : null;
+        var it = entry ? (recOf(entry)) : null;
         stopScan();
         location.hash = pnRoute(r.sku);
         foundToast(r.p, it && (it.t || it.name));
@@ -5642,10 +5487,9 @@ var GLOSS = {
           tickN++;
           var imgData = grabRegion();
           done = true;
-          ZXingWASM.readBarcodes(imgData, {
-            formats: ['DataMatrix', 'Code128', 'QRCode', 'EAN-13', 'UPC-A', 'PDF417'],
-            maxNumberOfSymbols: 1, tryHarder: true
-          }).then(function (res) {
+          // Same worker/fallback path as the count scanner, so decode never
+          // stalls the preview on the main thread.
+          ccDecode(imgData, CC_FULL).then(function (res) {
             if (!running) return;
             if (res && res.length && res[0].text) { onCode(res[0].text); }
             else { setTimeout(tick, 140); }
@@ -5654,12 +5498,28 @@ var GLOSS = {
       } catch (e) {}
       if (!done) setTimeout(tick, 250);
     }
-    function startScan() {
+    var camBusy = false;
+    function camAlive() { var t = stream && stream.getVideoTracks()[0]; return !!(t && t.readyState === 'live' && !t.muted); }
+    // iOS ends or mutes the track after a lock or app switch; restart it rather
+    // than leaving a frozen preview.
+    function recover() {
+      if (ov.hidden || !running || camBusy || camAlive()) return;
+      camBusy = true;
+      statusEl.textContent = 'Restarting camera…';
+      if (stream) { try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} stream = null; }
+      running = false;
+      setTimeout(function () { camBusy = false; if (!ov.hidden) startScan(true); }, 300);
+    }
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && !ov.hidden) { ccWake(); setTimeout(recover, 500); }
+    });
+    function startScan(again) {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         toastMsg('Camera not available in this browser', 2600); return;
       }
-      ov.hidden = false; teach.hidden = true;
+      ov.hidden = false; if (!again) teach.hidden = true;
       statusEl.textContent = 'Starting camera…';
+      ccWorkerInit(); ccWake();
       try {
         if (!zxPrepared && window.ZXingWASM && ZXingWASM.prepareZXingModule) {
           ZXingWASM.prepareZXingModule({ overrides: { locateFile: function (path, prefix) { return 'lib/' + path; } } });
@@ -5674,6 +5534,10 @@ var GLOSS = {
           stream = s; video.srcObject = s; running = true;
           try {
             var track = s.getVideoTracks()[0];
+            try {
+              track.addEventListener('ended', function () { recover(); });
+              track.addEventListener('mute', function () { setTimeout(recover, 1500); });
+            } catch (e0) {}
             if (track && track.applyConstraints) track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
             // flashlight toggle when the camera supports it (dim OR corners)
             var torchBtn = document.getElementById('scan-torch');
@@ -5709,14 +5573,15 @@ var GLOSS = {
         }
       } catch (e) {}
     };
-    btn.addEventListener('click', startScan);
+    btn.addEventListener('click', function () { startScan(false); });
     closeB.addEventListener('click', stopScan);
     teachQ.addEventListener('input', function () {
       var q = nrm(teachQ.value);
       if (!q || q.length < 2) { teachList.innerHTML = ''; return; }
-      var hits = [];
-      for (var i = 0; i < D.items.length && hits.length < 8; i++) {
-        var it = D.items[i];
+      var hits = [], pool = D.items.concat(D.probes, D.shavers);
+      for (var i = 0; i < pool.length && hits.length < 8; i++) {
+        var it = pool[i];
+        if (it.hidden) continue;
         if (nrm(it.sku).indexOf(q) > -1 || nrm(it.name).indexOf(q) > -1) hits.push(it);
       }
       teachList.innerHTML = hits.map(function (it) {
@@ -5759,7 +5624,11 @@ var GLOSS = {
         var nw = reg.installing;
         if (!nw) return;
         nw.addEventListener('statechange', function () {
-          if (nw.state === 'installed' && navigator.serviceWorker.controller) offer(reg.waiting || nw);
+          if (nw.state !== 'installed' || !navigator.serviceWorker.controller) return;
+          // A manual "Check for updates" installs straight away; a background
+          // find just shows the banner.
+          if (AUTO_UPD) { AUTO_UPD = false; (reg.waiting || nw).postMessage('SKIP_WAITING'); }
+          else offer(reg.waiting || nw);
         });
       });
       document.addEventListener('visibilitychange', function () {
@@ -5767,6 +5636,7 @@ var GLOSS = {
       });
     });
   }
+  var AUTO_UPD = false;
   function checkForUpdate() {
     if (!('serviceWorker' in navigator) || !TBX_REG) {
       toastMsg('Updates are handled by your browser here', 2400);
@@ -5781,14 +5651,7 @@ var GLOSS = {
           reg.waiting.postMessage('SKIP_WAITING');
           return;
         }
-        var nw = reg.installing;
-        if (nw) {
-          toastMsg('Downloading update…', 2600);
-          nw.addEventListener('statechange', function () {
-            if (nw.state === 'installed' && reg.waiting) reg.waiting.postMessage('SKIP_WAITING');
-          });
-          return;
-        }
+        if (reg.installing) { AUTO_UPD = true; toastMsg('Downloading update…', 2600); return; }
         toastMsg('You’re up to date — v' + APPVER + ' · ' + D.built, 2800);
       }, 900);
     }).catch(function () {
@@ -5830,15 +5693,21 @@ var GLOSS = {
     document.addEventListener('focusout', function () { setTimeout(queue, 80); });
   })();
 
+  try { window.TBX_FEEDBACK_INIT(D.fb); } catch (eFb) {}
   // dev/test hooks (harmless in production)
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG };
 };
 
-/* ---- Feedback: screenshot + silent send (mailto fallback) ---- */
-(function () {
-  var EMAIL = 'ngmerrell@gmail.com';
-  var FEEDBACK_URL = 'https://script.google.com/macros/s/AKfycbw6KHN9bBKviBe8siMrsdDkKCq7s_iLUqGA6K4jUog3vIQ1nqP8Q-E6lHcY8nVM49i96A/exec';
-  var TOKEN = 'tbx-fb-7391';
+/* ---- Feedback: screenshot + silent send (mailto fallback) ----
+   Relay URL, token and address live in the encrypted payload (TOOLBOX.fb), not
+   in this public bundle. Wired from TBX_BOOT once the data has been unlocked. */
+window.TBX_FEEDBACK_INIT = function (cfg) {
+  if (window.__tbxFbInit) return; window.__tbxFbInit = true;
+  cfg = cfg || {};
+  var EMAIL = cfg.email || '';
+  var FEEDBACK_URL = cfg.url || '';
+  var TOKEN = cfg.token || '';
+  if (!EMAIL && !FEEDBACK_URL) return; // nowhere to send: no bubble
   var SHOT = null;
 
   var fab = document.createElement('button');
@@ -5907,6 +5776,7 @@ var GLOSS = {
   ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
 
   function viaMail(name, note, c) {
+    if (!EMAIL) { $('fb-hint').textContent = 'Couldn\u2019t send \u2014 try again when you have signal.'; return; }
     var subject = 'Toolbox feedback \u2014 ' + c.t;
     var body = note + '\n\n\u2014 ' + (name || 'Anonymous') + '\nScreen: ' + c.t + '\nRoute: ' + c.h;
     location.href = 'mailto:' + EMAIL + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
@@ -5937,4 +5807,4 @@ var GLOSS = {
       }
     }).catch(function () { fail('network'); });
   });
-})();
+};
