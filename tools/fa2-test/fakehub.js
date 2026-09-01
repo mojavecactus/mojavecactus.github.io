@@ -11,7 +11,7 @@ const COLKEY = { Timestamp: 'timestamp', EventId: 'eventId', OpId: 'opId', Type:
 const NEG = ['Used in case', 'Returned to rep', 'Sent back to Stryker', 'Returned to Stryker', 'External Transfer', 'Written Off', 'Returned to CT SM'];
 const TYPES = ['Received', 'Adjustment', 'Void'].concat(NEG);
 const TOKENS = { sports: process.env.FA_TOKEN_SPORTS, fa: process.env.FA_TOKEN_FA };
-const ADMIN_PW = 'SMFA2026!';
+const ADMIN_PW = 'NGM';
 
 let seq = 0;
 function uuid() { seq++; return 'ev-' + String(seq).padStart(4, '0') + '-' + Math.random().toString(16).slice(2, 8); }

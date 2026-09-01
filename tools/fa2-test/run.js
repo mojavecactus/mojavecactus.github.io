@@ -638,7 +638,7 @@ async function pickChip(page, wrapId, label) { await page.locator('#' + wrapId +
     await page.fill('#a-pw', 'nope'); await page.click('#a-go');
     await page.waitForFunction(() => /Wrong password/.test((document.getElementById('fa2-err') || {}).textContent || ''), null, { timeout: 5000 });
     check('S9a Admin wrong password message', true);
-    await page.fill('#a-pw', 'SMFA2026!'); await page.click('#a-go');
+    await page.fill('#a-pw', 'NGM'); await page.click('#a-go');
     await page.waitForSelector('.a-add', { timeout: 10000 });
     await page.fill('.a-nm[data-r="fa"]', 'New Person'); await page.fill('.a-em[data-r="fa"]', 'new@example.com');
     await page.locator('.a-add[data-r="fa"]').click();

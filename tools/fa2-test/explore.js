@@ -167,7 +167,7 @@ const dstr = days => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(
       check('X1h Drop-details modal with Account fields open: primary button reachable (in view or by scrolling the card)', f && f.top >= 0 && (gfGo.bottom <= f.vh || f.scrollable), JSON.stringify(f));
       await page.click('#gf-cancel'); await sleep(200);
       // Admin confirm + Transactions deny confirm
-      await go(page, '#/fa2/admin', '#a-pw'); await page.fill('#a-pw', 'SMFA2026!'); await page.click('#a-go'); await page.waitForSelector('.a-del', { timeout: 10000 });
+      await go(page, '#/fa2/admin', '#a-pw'); await page.fill('#a-pw', 'NGM'); await page.click('#a-go'); await page.waitForSelector('.a-del', { timeout: 10000 });
       await page.locator('.a-del').first().click(); await page.waitForSelector('#cf-yes', { timeout: 5000 });
       f = await modalFit(page);
       check('X1i Confirm modal fits on 375x667', okFit(f), JSON.stringify(f));
