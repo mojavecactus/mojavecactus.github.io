@@ -11,7 +11,7 @@ the device and the readable data never touches the server.
 1. `node tools/decrypt-data.mjs <team-password>` — writes data.js / gtin.js / whatsnew.js
    locally. These files are **gitignored**; they must never be committed.
 2. Edit them as before.
-3. `node tools/encrypt-data.mjs <team-password>` — regenerates `payload.enc.json`.
+3. `node tools/encrypt-data.mjs <team-password> [extra-password ...]` — regenerates `payload.enc.json`.
 4. Bump the CACHE version on line 1 of `sw.js`.
 5. Commit `payload.enc.json` (+ sw.js) and push.
 

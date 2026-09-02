@@ -878,6 +878,18 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
     return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(P.iv) }, key, b64d(P.ct))
       .then(function (buf) { return new TextDecoder().decode(buf); });
   }
+  // A password that isn't the primary one may still hold the content key in a wrap
+  // (same salt, so one PBKDF2 covers every attempt). Resolves the content key or rejects.
+  function unwrapWith(key, P) {
+    var wraps = P.wraps || [], i = 0;
+    function next() {
+      if (i >= wraps.length) return Promise.reject(new Error('nowrap'));
+      var w = wraps[i++];
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(w.iv) }, key, b64d(w.ct))
+        .then(function (raw) { return crypto.subtle.importKey('raw', raw, 'AES-GCM', true, ['decrypt']); }, next);
+    }
+    return next();
+  }
   function bootWith(js) {
     (0, eval)(js);
     document.documentElement.classList.add('authed');
@@ -933,7 +945,9 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
       return keyFromPassword(v, P);
     }).then(function (key) {
       K0 = key;
-      return decryptWith(key, P0);
+      return decryptWith(key, P0).catch(function () {
+        return unwrapWith(key, P0).then(function (k2) { K0 = k2; return decryptWith(k2, P0); });
+      });
     }).then(function (js) {
       return crypto.subtle.exportKey('raw', K0).then(function (raw) {
         var kb = b64e(raw);

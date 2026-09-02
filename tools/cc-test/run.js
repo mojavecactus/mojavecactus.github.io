@@ -11,7 +11,19 @@ function decryptPayload(pw) {
   const P = JSON.parse(fs.readFileSync(R + '/payload.enc.json', 'utf8'));
   const key = crypto.pbkdf2Sync(pw, Buffer.from(P.salt, 'base64'), P.it, 32, 'sha256');
   const ct = Buffer.from(P.ct, 'base64'); const d = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(P.iv, 'base64'));
-  d.setAuthTag(ct.slice(-16)); return Buffer.concat([d.update(ct.slice(0, -16)), d.final()]).toString();
+  d.setAuthTag(ct.slice(-16));
+  try { return Buffer.concat([d.update(ct.slice(0, -16)), d.final()]).toString(); }
+  catch (e) {
+    for (const w of (P.wraps || [])) {
+      try {
+        const wct = Buffer.from(w.ct, 'base64'); const dw = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(w.iv, 'base64')); dw.setAuthTag(wct.slice(-16));
+        const raw = Buffer.concat([dw.update(wct.slice(0, -16)), dw.final()]);
+        const d2 = crypto.createDecipheriv('aes-256-gcm', raw, Buffer.from(P.iv, 'base64')); d2.setAuthTag(ct.slice(-16));
+        return Buffer.concat([d2.update(ct.slice(0, -16)), d2.final()]).toString();
+      } catch (e2) {}
+    }
+    throw new Error('wrong password');
+  }
 }
 
 // Fake sheet endpoint (mirrors the CT bound script's contract): batch dedups by opId, pull returns rows.
