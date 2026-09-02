@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.117';
+  var APPVER = '4.118';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1805,8 +1805,12 @@ var GLOSS = {
     var batch = [], cap = keep ? 25 : 150;
     for (var bi = 0; bi < st.ops.length && batch.length < cap; bi++) { if ((st.ops[bi].dev || dv) === bdev) batch.push(st.ops[bi]); }
     y.inflight = true; y.inAt = Date.now(); ccPill();
+    // After a failed or timed-out attempt the sheet may already hold some of these scans (the request
+    // can land after the phone gave up). A retry asks for the rows back so the base is replaced with
+    // the sheet's truth instead of being rebuilt from only the ops the sheet calls fresh.
+    var wantRows = y.retry > 0;
     var tmo = ccFetchTimeout(20000);
-    fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: bdev, ops: batch, norows: 1 }), keepalive: !!keep, signal: tmo.signal })
+    fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: bdev, ops: batch, norows: wantRows ? 0 : 1 }), keepalive: !!keep, signal: tmo.signal })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         tmo.clear();
@@ -1831,6 +1835,9 @@ var GLOSS = {
         var done = {}; j.applied.forEach(function (id) { done[id] = 1; });
         var fresh = {}; (j.fresh || j.applied).forEach(function (id) { fresh[id] = 1; });
         var settled = st2.ops.filter(function (o) { return fresh[o.opId]; });
+        // Ops the sheet had already applied on an earlier attempt: they are not "fresh", so folding
+        // only the fresh ones would drop them from this phone until the next pull.
+        var dup = j.applied.some(function (id) { return !fresh[id]; });
         st2.ops = st2.ops.filter(function (o) { return !done[o.opId]; });
         if (j.rows) st2.base = j.rows;
         else if (settled.length) {
@@ -1838,6 +1845,7 @@ var GLOSS = {
         }
         y.retry = 0; y.lastOk = Date.now();
         ccSyncSave(t, true); ccDerive(t); ccRenderList();
+        if (!j.rows && dup) ccPull(t).then(function () { ccRenderList(); if (CC.view === 'cchome' && t === CC.tgt) ccHomeCards(); }).catch(function () {});
         if (CC.view === 'cchome' && t === CC.tgt) ccHomeCards();
         ccPill(); ccSyncLine(t);
         if (st2.ops.length) ccFlushSoon(t, 400);
@@ -1928,8 +1936,8 @@ var GLOSS = {
         '<button id="cc-new" class="cc-btn">Start new count</button>' +
         '<div id="cc-sync" class="cc-sync"></div>' +
         sheetLinkHTML(ccSheetUrl()) +
-        '<div id="cc-fops" class="fops-wrap" hidden></div>' +
         '<div id="cc-cards" class="ctc-wrap">' + skel(3) + '</div>' +
+        '<div id="cc-fops" class="fops-wrap" hidden></div>' +
       '</div>');
     document.getElementById('cc-new').addEventListener('click', function () { ccSession(); });
     fopsCard();
@@ -3503,42 +3511,24 @@ var GLOSS = {
   function fopsNum(n) { return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function fopsRoute() { return CC.terr === 'ct' ? '#/cc/fops' : '#/team/' + CC.terr + '/cc/fops'; }
 
-  // -- the card on the Cycle Count home screen --
-  function fopsCard(err) {
+  // -- the Cycle Count home: one clearly separate row under the counts; everything else lives on the Field Ops screen --
+  function fopsCard() {
     var el = document.getElementById('cc-fops'); if (!el) return;
     var t = CC.tgt, s = fopsSt(t);
     if (!s.cap) { el.innerHTML = ''; el.hidden = true; return; }
     el.hidden = false;
-    var errHTML = err ? '<div class="cc-err fops-err">' + esc(err) + '</div>' : '';
+    var body;
     if (!s.list && !s.meta) {
-      el.innerHTML = '<div class="fops-card"><div class="fops-t">Field Ops count sheet</div>' +
-        '<div class="fops-sub">Upload the <b>empty</b> count sheet Field Ops sent you (.xlsx or .csv). Quantities fill in from the team\u2019s scans and the sheet gets a <b>Field Ops</b> tab \u2014 confirmed, additional and missing inventory, ready to send back.</div>' +
-        '<button id="fops-up" class="cc-btn fops-btn">Upload count sheet</button>' + errHTML + '</div>';
-      document.getElementById('fops-up').addEventListener('click', function () { fopsPick(t); });
-      return;
+      body = '<div class="ctc-main"><div class="ctc-t">Field Ops count sheet</div><div class="ctc-n">Upload the empty sheet Field Ops sent \u2014 see what\u2019s found, missing and additional</div></div>';
+    } else {
+      var p = fopsProgress(t) || { n: 0, confirmed: 0, missing: 0, additional: 0 };
+      var title = (s.list && s.list.title) || (s.meta && s.meta.title) || 'Field Ops count sheet';
+      body = '<div class="ctc-main"><div class="ctc-t">' + esc(title) + '</div>' +
+        '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div></div>';
+      if (s.list && (!s.status || s.status.ver !== s.list.ver || Date.now() - (s.status.at || 0) > 60000)) fopsStatus(t).catch(function () {});
     }
-    var p = fopsProgress(t) || { n: 0, confirmed: 0, missing: 0, additional: 0, units: 0 };
-    var title = (s.list && s.list.title) || (s.meta && s.meta.title) || 'Field Ops count sheet';
-    var by = (s.list && s.list.by) || (s.meta && s.meta.by) || '', at = (s.list && s.list.at) || (s.meta && s.meta.at) || '';
-    var pct = p.n ? Math.round(100 * p.confirmed / p.n) : 0;
-    el.innerHTML = '<div class="fops-card"><div class="fops-t">' + esc(title) + '</div>' +
-      '<div class="fops-sub">' + fopsNum(p.n) + ' lines' + (by ? ' \u00b7 uploaded by ' + esc(by) : '') + (at ? ' ' + esc(faFmt(at)) : '') + (s.list ? '' : ' \u00b7 <span class="fops-dim">syncing list\u2026</span>') + '</div>' +
-      '<div class="fops-bar"><div class="fops-fill" style="width:' + pct + '%"></div></div>' +
-      '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div>' +
-      '<div class="fops-row"><button id="fops-view" class="cc-btn fops-btn">View list</button><button id="fops-rep" class="fops-lnk">Replace</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
-    if (s.list && (!s.status || s.status.ver !== s.list.ver || Date.now() - (s.status.at || 0) > 60000)) fopsStatus(t).catch(function () {});
-    document.getElementById('fops-view').addEventListener('click', function () { location.hash = fopsRoute(); });
-    document.getElementById('fops-rep').addEventListener('click', function () { fopsPick(t); });
-    document.getElementById('fops-rm').addEventListener('click', function () {
-      tbxAsk({ title: 'Remove the Field Ops sheet?', body: 'The Field Ops tab comes off the team sheet for everyone. Scans are not touched \u2014 upload a sheet again any time.', ok: 'Remove', danger: true }).then(function (yes) {
-        if (!yes) return;
-        el.innerHTML = '<div class="fops-card"><div class="fops-sub">Removing\u2026</div></div>';
-        fopsPost(t, { action: 'fops_clear' }).then(function (j) {
-          if (!j || !j.ok) throw new Error('clear');
-          var s2 = fopsSt(t); s2.list = null; s2.meta = null; s2.status = null; s2.idx = null; fopsSave(t); fopsCard();
-        }).catch(function () { fopsCard('Couldn\u2019t reach the sheet \u2014 check signal and try again.'); });
-      });
-    });
+    el.innerHTML = '<div class="fops-lab">Field Ops</div><div class="fops-home" role="button" tabindex="0"><div class="fops-ic">\uD83D\uDCCB</div>' + body + '<div class="fops-chev">\u203A</div></div>';
+    el.querySelector('.fops-home').addEventListener('click', function () { location.hash = fopsRoute(); });
   }
   function fopsPick(t) {
     var inp = document.createElement('input'); inp.type = 'file';
@@ -3547,24 +3537,24 @@ var GLOSS = {
     inp.addEventListener('change', function () {
       var f = inp.files && inp.files[0]; try { document.body.removeChild(inp); } catch (e) {}
       if (!f) return;
-      var el = document.getElementById('cc-fops'); if (el) el.innerHTML = '<div class="fops-card"><div class="fops-sub">Reading ' + esc(f.name) + '\u2026</div></div>';
-      fopsParseFile(f).then(function (res) { fopsPreview(t, res); }).catch(function (e) { fopsCard(fopsErrText(e)); });
+      var el = document.getElementById('fops-act'); if (el) el.innerHTML = '<div class="fops-sub">Reading ' + esc(f.name) + '\u2026</div>';
+      fopsParseFile(f).then(function (res) { fopsPreview(t, res); }).catch(function (e) { fopsHead(fopsErrText(e)); });
     });
     inp.click();
   }
   function fopsPreview(t, res) {
-    var el = document.getElementById('cc-fops'); if (!el) return;
+    var el = document.getElementById('fops-act'); if (!el) return;
     var s = fopsSt(t), same = s.list && s.list.ver === res.ver;
     if (!FO.catIdx) { FO.catIdx = {}; for (var pk in BYPN) FO.catIdx[fopsKeyMat(pk)] = 1; }
     var catN = 0; for (var i = 0; i < res.lines.length; i++) { if (fopsHas(FO.catIdx, fopsKeyMat(res.lines[i].m))) catN++; }
-    el.innerHTML = '<div class="fops-card"><div class="fops-t">' + esc(res.title || res.src || 'Count sheet') + '</div>' +
+    el.innerHTML = '<div class="fops-t">' + esc(res.title || res.src || 'Count sheet') + '</div>' +
       '<div class="fops-sub">' + fopsNum(res.stats.lines) + ' lines \u00b7 ' + fopsNum(res.stats.materials) + ' materials \u00b7 ' + fopsNum(catN) + ' lines match the catalog' + (res.stats.traps.length ? '<br>Kept as text: ' + esc(res.stats.traps.join(', ')) : '') + '</div>' +
       (res.warnings.length ? '<div class="fops-warn">' + res.warnings.map(function (w) { return '<div>\u26a0 ' + esc(w) + '</div>'; }).join('') + '</div>' : '') +
       (same ? '<div class="fops-sub">This is the sheet already loaded.</div>' : '') +
       (s.list && !same ? '<div class="fops-sub">Replaces the sheet loaded now for the whole team.</div>' : '') +
       '<div class="fops-row"><button id="fops-use" class="cc-btn fops-btn"' + (same ? ' disabled' : '') + '>Use this sheet</button><button id="fops-cx" class="fops-lnk">Cancel</button></div>' +
-      '<div id="fops-err" class="cc-err" hidden></div></div>';
-    document.getElementById('fops-cx').addEventListener('click', function () { fopsCard(); });
+      '<div id="fops-err" class="cc-err" hidden></div>';
+    document.getElementById('fops-cx').addEventListener('click', function () { fopsHead(); });
     document.getElementById('fops-use').addEventListener('click', function () {
       var b = document.getElementById('fops-use'); b.disabled = true; b.textContent = 'Sending to the sheet\u2026';
       fopsPost(t, { action: 'fops_put', title: res.title, src: res.src, ver: res.ver, lines: res.lines.map(function (L) { return [L.d, L.m, L.b]; }) }).then(function (j) {
@@ -3572,45 +3562,98 @@ var GLOSS = {
         var s2 = fopsSt(t);
         s2.cap = true; s2.list = { ver: j.ver || res.ver, title: res.title, by: (j.meta && j.meta.by) || ccDevFor(t) || '', at: (j.meta && j.meta.at) || new Date().toISOString(), lines: res.lines }; s2.meta = j.meta || null; s2.idx = null; s2.status = null;
         fopsSave(t);
-        if (j.status) fopsStatusSet(t, j.status); else fopsCard();
+        if (j.status) fopsStatusSet(t, j.status); else fopsScreenPaint();
       }).catch(function (e) {
         b.disabled = false; b.textContent = 'Use this sheet';
         var er = document.getElementById('fops-err'); if (er) { er.textContent = (e && e.message === 'dev') ? 'This phone isn\u2019t on the roster \u2014 re-pick the device.' : 'Couldn\u2019t reach the sheet \u2014 check signal and try again.'; er.hidden = false; }
       });
     });
   }
+  function fopsRemove(t) {
+    tbxAsk({ title: 'Remove the Field Ops sheet?', body: 'The Field Ops tab comes off the team sheet for everyone. Scans are not touched \u2014 upload a sheet again any time.', ok: 'Remove', danger: true }).then(function (yes) {
+      if (!yes) return;
+      var el = document.getElementById('fops-act'); if (el) el.innerHTML = '<div class="fops-sub">Removing\u2026</div>';
+      fopsPost(t, { action: 'fops_clear' }).then(function (j) {
+        if (!j || !j.ok) throw new Error('clear');
+        var s2 = fopsSt(t); s2.list = null; s2.meta = null; s2.status = null; s2.idx = null; fopsSave(t); fopsScreenPaint();
+      }).catch(function () { fopsHead('Couldn\u2019t reach the sheet \u2014 check signal and try again.'); });
+    });
+  }
 
-  // -- the list screen (Missing / Found / Additional) --
+  // -- the Field Ops screen: sheet status + actions on top, Missing / Found / Additional below --
   var FOV = { chip: 'missing', q: '' };
   function fopsScreen() {
     setTitle('Field Ops', ''); backBtn.hidden = false; ccStop();
     if (!ctEnsure(fopsScreen)) return;
     CC.tgt = terrTgt(); CC.view = 'fops'; FOV.q = '';
-    render('<div class="card cc-card fops-screen"><div id="fops-head"></div><input id="fops-q" class="cc-in" type="search" autocomplete="off" placeholder="Search material, batch or description"><div id="fops-list" class="ctc-wrap"></div></div>');
-    document.getElementById('fops-q').addEventListener('input', function (e) { FOV.q = e.target.value; fopsScreenPaint(); });
+    render('<div class="card cc-card fops-screen"><div id="fops-head"></div><div id="fops-body"></div></div>');
     CURREFRESH = function () { var t = CC.tgt; return ccPull(t).then(function () { return fopsStatus(t); }).then(function () { fopsScreenPaint(); }); };
     fopsScreenPaint();
     var t0 = CC.tgt;
     ccPull(t0).then(function () { return fopsStatus(t0); }).then(function () { fopsScreenPaint(); }).catch(function () { fopsScreenPaint(); });
   }
-  function fopsScreenPaint() {
-    var head = document.getElementById('fops-head'), list = document.getElementById('fops-list'); if (!head || !list) return;
+  // Sheet status + buttons. `err` shows an inline message under the buttons.
+  function fopsHead(err) {
+    var head = document.getElementById('fops-head'); if (!head) return;
     var t = CC.tgt, s = fopsSt(t);
-    if (!s.list) { head.innerHTML = '<h2 class="cc-h">Field Ops</h2>'; list.innerHTML = emptyHTML('\uD83D\uDCCB', s.meta ? 'Syncing the list\u2026' : 'No count sheet loaded', s.meta ? 'Pull down to refresh.' : 'Upload the empty sheet Field Ops sent on the Cycle Count screen.'); return; }
+    var errHTML = err ? '<div class="cc-err fops-err">' + esc(err) + '</div>' : '';
+    if (!s.list && !s.meta) {
+      head.innerHTML = '<h2 class="cc-h">Field Ops count sheet</h2>' +
+        '<div class="fops-sub">Upload the <b>empty</b> count sheet Field Ops sent you (.xlsx or .csv). Quantities fill in from the team\u2019s scans, and the team sheet gets a <b>Field Ops</b> tab \u2014 confirmed, additional and missing inventory, ready to send back.</div>' +
+        '<div id="fops-act"><button id="fops-up" class="cc-btn fops-btn">Upload count sheet</button>' + errHTML + '</div>';
+      document.getElementById('fops-up').addEventListener('click', function () { fopsPick(t); });
+      return;
+    }
+    var p = fopsProgress(t) || { n: 0, confirmed: 0, missing: 0, additional: 0, units: 0 };
+    var title = (s.list && s.list.title) || (s.meta && s.meta.title) || 'Field Ops count sheet';
+    var by = (s.list && s.list.by) || (s.meta && s.meta.by) || '', at = (s.list && s.list.at) || (s.meta && s.meta.at) || '';
+    var pct = p.n ? Math.round(100 * p.confirmed / p.n) : 0;
+    head.innerHTML = '<h2 class="cc-h">' + esc(title) + '</h2>' +
+      '<div class="fops-sub">' + fopsNum(p.n) + ' lines' + (by ? ' \u00b7 uploaded by ' + esc(by) : '') + (at ? ' ' + esc(faFmt(at)) : '') + (s.list ? '' : ' \u00b7 <span class="fops-dim">syncing list\u2026</span>') + '</div>' +
+      '<div class="fops-bar"><div class="fops-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div>' +
+      '<div id="fops-act"><div class="fops-row"><button id="fops-rep" class="fops-lnk">Replace sheet</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
+    document.getElementById('fops-rep').addEventListener('click', function () { fopsPick(t); });
+    document.getElementById('fops-rm').addEventListener('click', function () { fopsRemove(t); });
+    if (s.list && (!s.status || s.status.ver !== s.list.ver || Date.now() - (s.status.at || 0) > 60000)) fopsStatus(t).catch(function () {});
+  }
+  function fopsScreenPaint() {
+    var body = document.getElementById('fops-body'); if (!body) return;
+    fopsHead();
+    var t = CC.tgt, s = fopsSt(t);
+    if (!s.list) { body.innerHTML = s.meta ? '<div class="cc-empty">Syncing the list\u2026 pull down to refresh.</div>' : ''; return; }
     var R = fopsLocal(t), teamOk = s.status && s.status.ver === s.list.ver;
     var sets = { missing: R.missing, found: R.confirmed, additional: R.additional };
-    head.innerHTML = '<h2 class="cc-h">' + esc(s.list.title || 'Field Ops') + '</h2>' +
-      (teamOk ? '' : '<div class="fops-sub">Showing this phone\u2019s scans \u2014 the team picture loads when the sheet is reachable.</div>') +
-      '<div class="chips fops-chips">' + ['missing', 'found', 'additional'].map(function (c) { return '<button class="chip' + (FOV.chip === c ? '' : ' dim') + '" data-chip="' + c + '">' + c.charAt(0).toUpperCase() + c.slice(1) + ' ' + fopsNum(sets[c].length) + '</button>'; }).join('') + '</div>';
-    head.querySelectorAll('[data-chip]').forEach(function (b) { b.addEventListener('click', function () { FOV.chip = b.dataset.chip; fopsScreenPaint(); }); });
     var q = nrm(FOV.q), arr = sets[FOV.chip] || [];
     if (q) arr = arr.filter(function (L) { return nrm(L.m).indexOf(q) > -1 || nrm(L.b).indexOf(q) > -1 || nrm(L.d).indexOf(q) > -1; });
-    if (!arr.length) { list.innerHTML = '<div class="cc-empty">' + (q ? 'Nothing matches.' : (FOV.chip === 'missing' ? 'Nothing missing \u2014 every line on the list has been counted.' : FOV.chip === 'found' ? 'Nothing counted yet.' : 'Nothing extra \u2014 every scan is on the list.')) + '</div>'; return; }
     var cap = 300, shown = arr.slice(0, cap);
-    list.innerHTML = shown.map(function (L) {
-      return '<div class="ctc fops-row2"><div class="ctc-main"><div class="ctc-t">' + esc(L.m) + ' <span class="fops-lot">' + esc(L.b) + '</span></div><div class="ctc-n">' + esc(L.d || '') + '</div></div>' +
-        (L.q != null ? '<div class="ctc-r">' + fopsNum(L.q) + '</div>' : '') + '</div>';
-    }).join('') + (arr.length > cap ? '<div class="cc-empty">Showing ' + cap + ' of ' + fopsNum(arr.length) + ' \u2014 search to narrow.</div>' : '');
+    body.innerHTML = (teamOk ? '' : '<div class="fops-sub">Showing this phone\u2019s scans \u2014 the team picture loads when the sheet is reachable.</div>') +
+      '<div class="chips fops-chips">' + ['missing', 'found', 'additional'].map(function (c) { return '<button class="chip' + (FOV.chip === c ? '' : ' dim') + '" data-chip="' + c + '">' + c.charAt(0).toUpperCase() + c.slice(1) + ' ' + fopsNum(sets[c].length) + '</button>'; }).join('') + '</div>' +
+      '<input id="fops-q" class="cc-in" type="search" autocomplete="off" placeholder="Search material, batch or description" value="' + esc(FOV.q) + '">' +
+      '<div id="fops-list" class="ctc-wrap">' +
+      (!arr.length ? '<div class="cc-empty">' + (q ? 'Nothing matches.' : (FOV.chip === 'missing' ? 'Nothing missing \u2014 every line on the list has been counted.' : FOV.chip === 'found' ? 'Nothing counted yet.' : 'Nothing extra \u2014 every scan is on the list.')) + '</div>' :
+        shown.map(function (L) {
+          return '<div class="ctc fops-row2"><div class="ctc-main"><div class="ctc-t">' + esc(L.m) + ' <span class="fops-lot">' + esc(L.b) + '</span></div><div class="ctc-n">' + esc(L.d || '') + '</div></div>' +
+            (L.q != null ? '<div class="ctc-r">' + fopsNum(L.q) + '</div>' : '') + '</div>';
+        }).join('') + (arr.length > cap ? '<div class="cc-empty">Showing ' + cap + ' of ' + fopsNum(arr.length) + ' \u2014 search to narrow.</div>' : '')) +
+      '</div>';
+    body.querySelectorAll('[data-chip]').forEach(function (b) { b.addEventListener('click', function () { FOV.chip = b.dataset.chip; fopsScreenPaint(); }); });
+    var qi = document.getElementById('fops-q');
+    qi.addEventListener('input', function (e) { FOV.q = e.target.value; fopsListPaint(); });
+  }
+  // Re-render only the rows while typing (keeps the search box focused).
+  function fopsListPaint() {
+    var list = document.getElementById('fops-list'); if (!list) return;
+    var t = CC.tgt, s = fopsSt(t); if (!s.list) return;
+    var R = fopsLocal(t), sets = { missing: R.missing, found: R.confirmed, additional: R.additional };
+    var q = nrm(FOV.q), arr = sets[FOV.chip] || [];
+    if (q) arr = arr.filter(function (L) { return nrm(L.m).indexOf(q) > -1 || nrm(L.b).indexOf(q) > -1 || nrm(L.d).indexOf(q) > -1; });
+    var cap = 300, shown = arr.slice(0, cap);
+    list.innerHTML = !arr.length ? '<div class="cc-empty">' + (q ? 'Nothing matches.' : 'Nothing here.') + '</div>' :
+      shown.map(function (L) {
+        return '<div class="ctc fops-row2"><div class="ctc-main"><div class="ctc-t">' + esc(L.m) + ' <span class="fops-lot">' + esc(L.b) + '</span></div><div class="ctc-n">' + esc(L.d || '') + '</div></div>' +
+          (L.q != null ? '<div class="ctc-r">' + fopsNum(L.q) + '</div>' : '') + '</div>';
+      }).join('') + (arr.length > cap ? '<div class="cc-empty">Showing ' + cap + ' of ' + fopsNum(arr.length) + ' \u2014 search to narrow.</div>' : '');
   }
 
   // ---- pull-to-refresh: screens register CURREFRESH (a function returning a promise) ----
@@ -6611,7 +6654,7 @@ var GLOSS = {
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
-    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, TORDER: TORDER, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, progress: fopsProgress, preview: fopsPreview, FO: FO } } };
+    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, TORDER: TORDER, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, head: fopsHead, remove: fopsRemove, progress: fopsProgress, preview: fopsPreview, FO: FO } } };
 };
 
 /* ---- Feedback: screenshot + silent send (mailto fallback) ----

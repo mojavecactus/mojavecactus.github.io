@@ -37,7 +37,7 @@ function fopsStatusOf(s) { if (!s.fops) return { ok: true, ver: '', built: '', f
 
 // Fake sheet endpoint (mirrors the CT bound script's contract): batch dedups by opId, pull returns rows.
 function FakeSheet() {
-  const s = { rows: [], seen: {}, calls: [], fail: 0, busy: 0, devOk: true, holdMs: 0, fopsCap: false, fops: null };
+  const s = { rows: [], seen: {}, calls: [], fail: 0, busy: 0, devOk: true, holdMs: 0, fopsCap: false, fops: null, applyThenDrop: 0 };
   s.handle = async (url, body) => {
     s.calls.push({ url, body });
     if (s.holdMs) await sleep(s.holdMs);
@@ -61,7 +61,10 @@ function FakeSheet() {
         else if (op.t === 'set') { if (row) row.qty = op.qty; else s.rows.push({ id: 'r' + s.rows.length, ts: op.ts, dev: body.dev, ref: op.ref, lot: op.lot, qty: op.qty, loc: op.loc }); }
         else if (op.t === 'del') { s.rows = s.rows.filter(r => key(r) !== k); }
       });
-      return { ok: true, applied, fresh, rows: s.rows.map(r => ({ ...r })) };
+      if (s.applyThenDrop > 0) { s.applyThenDrop--; throw new Error('net'); }   // the sheet applied the batch but the phone never heard back
+      const resp = { ok: true, applied, fresh };
+      if (body.norows) resp.n = s.rows.length; else resp.rows = s.rows.map(r => ({ ...r }));
+      return resp;
     }
     return { ok: true };
   };
@@ -373,26 +376,31 @@ async function boot(sheet, storage) {
     const box = () => w.document.getElementById('cc-fops');
     check('gate: old server (no fops key) -> no card', box() && box().hidden === true && box().innerHTML === '');
     sheet.fopsCap = true; await dev.pull('cc'); await sleep(50);
-    check('gate: server that knows the feature -> upload prompt with the Empty instruction', box().hidden === false && /Upload count sheet/.test(box().textContent) && /<b>empty<\/b>/.test(box().innerHTML));
+    check('gate: server that knows the feature -> a separate Field Ops row under the counts, after the tiles', box().hidden === false && /Field Ops count sheet/.test(box().textContent) && /Upload the empty sheet/.test(box().textContent) && box().previousElementSibling && box().previousElementSibling.id === 'cc-cards' && !!box().querySelector('.fops-lab'));
+    w.document.querySelector('.fops-home').click(); await sleep(300);
+    const head = () => w.document.getElementById('fops-head');
+    check('screen: upload prompt with the bold Empty instruction and an Upload button', w.location.hash === '#/cc/fops' && /<b>empty<\/b>/.test(head().innerHTML) && !!w.document.getElementById('fops-up'));
     const res = F.fromGrid(F.readXlsx(new Uint8Array(makeXlsx(FIX)).buffer)[0].grid, 4); res.src = 'Field_ops_count_sheet.xlsx'; res.ver = F.ver(res.lines);
     F.preview('cc', res);
-    check('preview: counts + catalog matches + warnings shown', /10 lines/.test(box().textContent) && /lines match the catalog/.test(box().textContent) && /already had a quantity/.test(box().textContent));
+    check('preview: counts + catalog matches + warnings shown on the screen', /10 lines/.test(head().textContent) && /lines match the catalog/.test(head().textContent) && /already had a quantity/.test(head().textContent));
     w.document.getElementById('fops-use').click(); await sleep(200);
     const put = sheet.calls.find(c => c.body && c.body.action === 'fops_put');
     check('put: sent as text triples with device, title, ver', put && put.body.dev === "Nate's iPhone" && put.body.title === 'IT9999 SM SANDBOX SPLIT' && put.body.ver === res.ver && put.body.lines.length === 10 && put.body.lines[2][2] === '24E01', JSON.stringify(put && put.body.lines[2]));
-    check('put: card shows progress from the status in the put reply', /0 found/.test(box().textContent) && /10 missing/.test(box().textContent) && /0 additional/.test(box().textContent) && /IT9999 SM SANDBOX SPLIT/.test(box().textContent), box().textContent);
+    check('put: screen shows progress from the status in the put reply, with Replace / Remove', /0 found/.test(head().textContent) && /10 missing/.test(head().textContent) && /0 additional/.test(head().textContent) && /IT9999 SM SANDBOX SPLIT/.test(head().textContent) && !!w.document.getElementById('fops-rm'), head().textContent);
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+    check('home: row shows the sheet title + counts and never renders as a nested card', /IT9999 SM SANDBOX SPLIT/.test(box().textContent) && /10 missing/.test(box().textContent) && !box().querySelector('.fops-card') && !box().querySelector('button'));
     check('put: status cached', JSON.parse(w.localStorage.getItem('tbx_cc_fops_status')).ver === res.ver);
     check('put: list cached on this phone as text', JSON.parse(w.localStorage.getItem('tbx_cc_fops')).lines[2][2] === '24E01');
     dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
     dev.enqueue('cc', { t: 'add', ref: '0234100001', lot: '24E01', qty: 2, loc: 'Trunk', notes: '' });
     dev.enqueue('cc', { t: 'add', ref: '3910947022', lot: 'L9', qty: 1, loc: 'Trunk', notes: '', desc: 'AlphaVent | 4.75mm' });
     await sleep(100); F.card();
-    check('progress: own scans move lines instantly, before any sync (overlay on the team status)', /1 found/.test(box().textContent) && /9 missing/.test(box().textContent) && /1 additional/.test(box().textContent), box().textContent);
+    check('progress: own scans move lines instantly on the home row, before any sync', /1 found/.test(box().textContent) && /9 missing/.test(box().textContent) && /1 additional/.test(box().textContent), box().textContent);
     const st1 = sheet.statusCalls || 0;
     check('hint: on / lot off / off', F.hint('cc', '234-100-001', '24e01') === 'on' && F.hint('cc', '0234100001', 'OTHER') === 'lotoff' && F.hint('cc', '3910947022', 'L9') === 'off' && /On the Field Ops list/.test(F.hintHTML('cc', '0234100001', '24E01')));
     await sleep(1700);
     F.card(); await sleep(50);
-    check('progress: after the flush the card still shows the scan (no flicker while the team status catches up)', /1 found/.test(box().textContent) && /1 additional/.test(box().textContent) && (sheet.statusCalls || 0) === st1, box().textContent + ' statusCalls=' + sheet.statusCalls);
+    check('progress: after the flush the row still shows the scan (no flicker while the team status catches up)', /1 found/.test(box().textContent) && /1 additional/.test(box().textContent) && (sheet.statusCalls || 0) === st1, box().textContent + ' statusCalls=' + sheet.statusCalls);
     // the sheet rebuilt (built changes) -> next pull refreshes the team status
     sheet.fops.meta.built = 'b2'; await dev.pull('cc'); await sleep(80);
     check('status: pull sees a new build stamp and refetches the team picture', (sheet.statusCalls || 0) === st1 + 1 && F.st('cc').status.built === 'b2' && F.st('cc').status.found['234100001|24E01'] === 2, 'statusCalls=' + sheet.statusCalls);
@@ -407,25 +415,50 @@ async function boot(sheet, storage) {
     const box2 = () => two.w.document.getElementById('cc-fops');
     check('sync: second phone got the list through pull -> fops_get', sheet.calls.some(c => /action=fops_get/.test(c.url)) && two.dev.fops.st('cc').list && two.dev.fops.st('cc').list.lines.length === 10 && two.dev.fops.st('cc').list.lines[2].b === '24E01');
     await sleep(100);
-    check('sync: second phone card shows the team progress via fops_status', /2 found/.test(box2().textContent) && /8 missing/.test(box2().textContent) && /1 additional/.test(box2().textContent), box2().textContent);
+    check('sync: second phone row shows the team progress via fops_status', /2 found/.test(box2().textContent) && /8 missing/.test(box2().textContent) && /1 additional/.test(box2().textContent), box2().textContent);
     check('hint: second phone hints without ever uploading', two.dev.fops.hint('cc', '0130', '091024-05') === 'on');
     // list screen
     two.w.location.hash = '#/cc/fops'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(300);
-    const scr = two.w.document.getElementById('fops-list');
-    check('screen: Missing chip first with 8 rows, chips carry team counts', scr && scr.querySelectorAll('.fops-row2').length === 8 && /Missing 8/.test(two.w.document.getElementById('fops-head').textContent) && /Found 2/.test(two.w.document.getElementById('fops-head').textContent) && /Additional 1/.test(two.w.document.getElementById('fops-head').textContent), two.w.document.getElementById('fops-head').textContent);
+    const scr = () => two.w.document.getElementById('fops-list'), body2 = () => two.w.document.getElementById('fops-body');
+    check('screen: Missing chip first with 8 rows, chips carry team counts', scr() && scr().querySelectorAll('.fops-row2').length === 8 && /Missing 8/.test(body2().textContent) && /Found 2/.test(body2().textContent) && /Additional 1/.test(body2().textContent), body2().textContent.slice(0, 200));
     const qin = two.w.document.getElementById('fops-q'); qin.value = '3911-514'; qin.dispatchEvent(new two.w.Event('input'));
-    check('screen: dash-insensitive search narrows', scr.querySelectorAll('.fops-row2').length === 1 && /3911-514-620HA/.test(scr.textContent));
+    check('screen: dash-insensitive search narrows without re-rendering the box', scr().querySelectorAll('.fops-row2').length === 1 && /3911-514-620HA/.test(scr().textContent) && two.w.document.getElementById('fops-q') === qin);
     two.w.document.querySelector('[data-chip="additional"]').click();
-    qin.value = ''; qin.dispatchEvent(new two.w.Event('input'));
-    check('screen: Additional shows the unlisted scan with Field Ops dashes and qty', scr.querySelectorAll('.fops-row2').length === 1 && /3910-947-022/.test(scr.textContent) && /AlphaVent/.test(scr.textContent));
-    // remove from phone one
-    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+    const qin2 = two.w.document.getElementById('fops-q'); qin2.value = ''; qin2.dispatchEvent(new two.w.Event('input'));
+    check('screen: Additional shows the unlisted scan with Field Ops dashes and qty', scr().querySelectorAll('.fops-row2').length === 1 && /3910-947-022/.test(scr().textContent) && /AlphaVent/.test(scr().textContent));
+    // remove from phone one (on its Field Ops screen)
+    w.location.hash = '#/cc/fops'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
     w.document.getElementById('fops-rm').click(); await sleep(50);
     w.document.querySelector('.ask-ok').click(); await sleep(200);
-    check('remove: server cleared, card back to upload prompt, caches dropped', sheet.fops === null && /Upload count sheet/.test(box().textContent) && w.localStorage.getItem('tbx_cc_fops') === null && w.localStorage.getItem('tbx_cc_fops_status') === null, box().textContent);
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+    check('remove: server cleared, home row back to the upload prompt, caches dropped', sheet.fops === null && /Upload the empty sheet/.test(box().textContent) && w.localStorage.getItem('tbx_cc_fops') === null && w.localStorage.getItem('tbx_cc_fops_status') === null, box().textContent);
     two.w.location.hash = '#/cc'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(400);
-    check('remove: second phone drops the list on its next pull', two.dev.fops.st('cc').list === null && /Upload count sheet/.test(box2().textContent), box2().textContent);
+    check('remove: second phone drops the list on its next pull', two.dev.fops.st('cc').list === null && /Upload the empty sheet/.test(box2().textContent), box2().textContent);
     check('fops sync: no page errors', errs.length === 0 && two.errs.length === 0, errs.concat(two.errs).join(' | ')); }
+
+  // ---- 16. 4.118: a batch the sheet applied but the phone never heard back for must not vanish on the retry ----
+  { const sheet = FakeSheet(); sheet.applyThenDrop = 1; const { w, dev, errs } = await boot(sheet, creds);
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange'));
+    dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
+    dev.enqueue('cc', { t: 'add', ref: '3910500471', lot: '25022AG2', qty: 1, loc: 'Trunk', notes: '', desc: 'Omega' });
+    dev.enqueue('cc', { t: 'add', ref: '4727', lot: '1008624', qty: 2, loc: 'Trunk', notes: '', desc: 'VersiPass' });
+    await sleep(1700);
+    check('dedup: first attempt applied on the sheet, phone saw a failure', sheet.rows.length === 2 && dev.syncSt('cc').ops.length === 2 && dev.SY.cc.retry === 1);
+    await sleep(4300);
+    const batches = sheet.calls.filter(c => c.body && c.body.action === 'batch');
+    check('dedup: retry asked for rows (norows off) and the sheet answered applied-but-not-fresh', batches.length === 2 && batches[1].body.norows === 0);
+    check('dedup: queue drained and both scans still on this phone (not dropped)', dev.syncSt('cc').ops.length === 0 && dev.CC.rows.length === 2 && dev.CC.rows.some(r => r.ref === '4727' && r.qty === 2), JSON.stringify(dev.CC.rows.map(r => [r.ref, r.qty, r.pending])));
+    check('dedup: no page errors', errs.length === 0, errs.join(' | ')); }
+
+  // ---- 17. 4.118: same, when the server answers without rows -> a pull reconciles ----
+  { const sheet = FakeSheet(); sheet.applyThenDrop = 1; const { w, dev, errs } = await boot(sheet, creds);
+    const h0 = sheet.handle; sheet.handle = async (url, body) => { if (body && body.action === 'batch') body.norows = 1; return h0(url, body); }; // an old script that ignores the rows request
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange'));
+    dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
+    dev.enqueue('cc', { t: 'add', ref: 'A1', lot: 'L1', qty: 1, loc: 'Trunk', notes: '' });
+    await sleep(1700); await sleep(4300); await sleep(300);
+    check('dedup/no rows: pull after the retry brings the scan back', dev.syncSt('cc').ops.length === 0 && dev.CC.rows.length === 1 && dev.CC.rows[0].ref === 'A1' && sheet.calls.some(c => /action=pull/.test(c.url)), JSON.stringify(dev.CC.rows));
+    check('dedup/no rows: no page errors', errs.length === 0, errs.join(' | ')); }
 
   const fails = results.filter(r => !r.ok).length;
   console.log('\n' + (results.length - fails) + '/' + results.length + ' passed');

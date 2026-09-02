@@ -541,22 +541,28 @@ input[type="datetime-local"].cc-in::-webkit-date-and-time-value{text-align:left;
 .cc-cancel{border:1px solid rgba(255,255,255,.34); background:rgba(255,255,255,.05); color:var(--bone);
   font-weight:800; cursor:pointer;}
 /* Field Ops count sheet (cycle count) */
-.fops-card{margin-top:12px; text-align:left; padding:12px 12px 10px; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.03);}
+.fops-wrap{margin-top:18px; text-align:left;}
+.fops-lab{font-size:11.5px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); padding:0 2px 6px; border-bottom:1px solid var(--line); margin-bottom:8px;}
+.fops-home{display:flex; align-items:center; gap:10px; padding:11px 12px; border:1px dashed var(--amber); border-radius:12px; background:rgba(253,181,21,.07); cursor:pointer;}
+.fops-home:active{background:rgba(253,181,21,.14);}
+.fops-ic{font-size:22px; line-height:1; flex:0 0 auto;}
+.fops-chev{color:var(--muted); font-size:22px; line-height:1; flex:0 0 auto;}
 .fops-t{font-weight:800; font-size:14.5px;}
 .fops-sub{color:var(--muted); font-size:var(--fs-sm); margin-top:4px; line-height:1.4;}
 .fops-sub b{color:var(--bone);}
 .fops-dim{color:var(--muted);}
 .fops-bar{height:6px; border-radius:999px; background:#2a3340; margin:10px 0 6px; overflow:hidden;}
 .fops-fill{height:100%; background:var(--green); border-radius:999px; transition:width .3s;}
-.fops-nums{display:flex; gap:12px; font-size:var(--fs-sm); font-weight:700; font-variant-numeric:tabular-nums;}
+.fops-nums{display:flex; gap:12px; font-size:var(--fs-sm); font-weight:700; font-variant-numeric:tabular-nums; margin-top:2px;}
 .fops-nums .ok{color:#5fd6a4;} .fops-nums .miss{color:var(--amber);} .fops-nums .add{color:#8fb9ea;}
-.fops-row{display:flex; gap:14px; align-items:center; margin-top:8px; flex-wrap:wrap;}
+.fops-row{display:flex; gap:16px; align-items:center; margin-top:8px; flex-wrap:wrap;}
 .fops-btn{margin-top:4px; padding:10px 18px; font-size:14px;}
 .fops-lnk{background:none; border:0; color:var(--muted); font:inherit; font-size:13px; font-weight:700; text-decoration:underline; cursor:pointer; padding:6px 0;}
 .fops-lnk.danger{color:#FFB3AE;}
 .fops-warn{margin-top:8px; padding:8px 10px; border-radius:10px; background:rgba(253,181,21,.12); color:var(--bone); font-size:var(--fs-sm); line-height:1.4;}
 .fops-hint{margin:6px 0 2px; font-size:13px; font-weight:700;} .fops-hint.on{color:#5fd6a4;} .fops-hint.off{color:var(--amber);}
-.fops-screen{text-align:left;} .fops-chips{margin:8px 0 6px;} .fops-chips .chip{cursor:pointer; font:inherit; font-size:13px; font-weight:700;}
+.fops-screen{text-align:left;} .fops-screen .cc-h{text-align:left;} .fops-screen #fops-head{padding-bottom:12px; border-bottom:1px solid var(--line);}
+.fops-chips{margin:14px 0 6px;} .fops-chips .chip{cursor:pointer; font:inherit; font-size:13px; font-weight:700;}
 .fops-lot{color:var(--muted); font-weight:600; font-size:13px; margin-left:6px;}
 .cc-note{margin:12px 0 2px; padding:9px 12px; border-radius:12px; background:rgba(253,181,21,.12);
   border:1px solid rgba(253,181,21,.42); color:var(--bone); font-size:13.5px; line-height:1.4;}
@@ -999,7 +1005,7 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.117.js"></script>
+<script src="app-4.118.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
 </body>
 </html>
