@@ -782,8 +782,13 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 .hf{margin:6px 0 10px} .hf .cc-in{margin:6px 0 8px} .hf .fa2-chips{margin-bottom:6px}
 .h-day{margin:14px 0 4px; font-size:var(--fs-xs); font-weight:800; color:var(--muted); letter-spacing:.1em; text-transform:uppercase}
 .h-day:first-child{margin-top:4px}
-::view-transition-old(root), ::view-transition-new(root){animation-duration:.18s}
-::view-transition-old(tbx-title), ::view-transition-new(tbx-title){animation-duration:.24s; height:100%; object-fit:none}
+/* Root swaps instantly (a crossfade dips to the dark backdrop mid-way = visible flicker);
+   only the tapped title morphs into the card heading. */
+::view-transition-old(root){animation:none; mix-blend-mode:normal; opacity:0}
+::view-transition-new(root){animation:none; mix-blend-mode:normal}
+::view-transition-group(tbx-title){animation-duration:.22s; animation-timing-function:cubic-bezier(.2,.8,.2,1)}
+::view-transition-old(tbx-title){animation:none; opacity:0}
+::view-transition-new(tbx-title){animation:none; height:100%; object-fit:none}
 html.vt-on #content.vt{animation:none}
 </style>
 </head>
