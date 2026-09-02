@@ -1,6 +1,7 @@
 // Cycle-count sync engine tests: the real bundle in jsdom with the sheet endpoint faked.
 // Covers ccDeriveCore (add/set/del + key normalisation), enqueue -> flush -> prune,
-// the pull-vs-flush race, retry/backoff, roster rejection, offline persistence, expiry.
+// the pull-vs-flush race, retry/backoff, roster rejection, offline persistence, expiry,
+// and the Field Ops count sheet (xlsx/csv readers, reconcile, capability gate, cross-phone sync).
 //   cd tools/cc-test && npm i jsdom@24 && APP_PW=<catalog pw> node run.js
 const { JSDOM } = require('jsdom'); const fs = require('fs'); const path = require('path'); const crypto = require('crypto');
 const R = path.resolve(__dirname, '../..');
@@ -28,12 +29,15 @@ function decryptPayload(pw) {
 
 // Fake sheet endpoint (mirrors the CT bound script's contract): batch dedups by opId, pull returns rows.
 function FakeSheet() {
-  const s = { rows: [], seen: {}, calls: [], fail: 0, busy: 0, devOk: true, holdMs: 0 };
+  const s = { rows: [], seen: {}, calls: [], fail: 0, busy: 0, devOk: true, holdMs: 0, fopsCap: false, fops: null };
   s.handle = async (url, body) => {
     s.calls.push({ url, body });
     if (s.holdMs) await sleep(s.holdMs);
     if (s.fail > 0) { s.fail--; throw new Error('net'); }
-    if (/action=pull/.test(url)) return { ok: true, rows: s.rows.map(r => ({ ...r })) };
+    if (/action=pull/.test(url)) { const resp = { ok: true, rows: s.rows.map(r => ({ ...r })) }; if (s.fopsCap) resp.fops = s.fops ? s.fops.meta : null; return resp; }
+    if (/action=fops_get/.test(url)) return s.fops ? { ok: true, ver: s.fops.ver, title: s.fops.title, meta: s.fops.meta, lines: s.fops.lines } : { ok: true, ver: '', title: '', meta: null, lines: [] };
+    if (body && body.action === 'fops_put') { if (!s.devOk) return { ok: false, err: 'dev' }; s.fops = { ver: body.ver, title: body.title, lines: body.lines, meta: { ver: body.ver, title: body.title, n: body.lines.length, confirmed: 0, missing: body.lines.length, additional: 0, units: 0, at: new Date().toISOString(), by: body.dev } }; return { ok: true, ver: body.ver, meta: s.fops.meta }; }
+    if (body && body.action === 'fops_clear') { s.fops = null; return { ok: true }; }
     if (/action=roster/.test(url)) return { devices: ["Nate's iPhone", "Mia's iPhone"] };
     if (body && body.action === 'batch') {
       if (!s.devOk) return { ok: false, err: 'dev' };
@@ -66,6 +70,7 @@ async function boot(sheet, storage) {
     return sheet.handle(String(url), body).then(j => ({ ok: true, json: () => Promise.resolve(j), text: () => Promise.resolve(JSON.stringify(j)) })); };
   w.ZXingWASM = { readBarcodes: () => Promise.resolve([]), prepareZXingModule() {} }; w.scrollTo = () => {};
   w.eval(decryptPayload(process.env.APP_PW));
+  w.eval(fs.readFileSync(R + '/lib/inflate.js', 'utf8'));
   w.document.documentElement.classList.add('authed');
   w.eval(fs.readFileSync(R + '/' + APP, 'utf8')); w.TBX_BOOT();
   await sleep(50); // let the boot tick (deferred queue drain) run before the test acts
@@ -245,6 +250,160 @@ async function boot(sheet, storage) {
     dev.histPrune();
     check('hist: prune drops history for lines no longer on the count', !dev.CC.hist['trunk|ZZZ|old'] && !!dev.CC.hist['trunk|A|L']);
     check('4.116: no page errors', errs.length === 0, errs.join(' | ')); }
+
+  // ---- 13. Field Ops: .xlsx / .csv readers never make numbers, header found by name, list extracted ----
+  const zlib = require('zlib');
+  function makeZip(files) { // minimal zip writer: deflate-raw entries + central directory + EOCD
+    const parts = [], cd = []; let off = 0;
+    for (const [name, text] of Object.entries(files)) {
+      const raw = Buffer.from(text, 'utf8'), def = zlib.deflateRawSync(raw), nm = Buffer.from(name, 'utf8'), crc = zlib.crc32(raw);
+      const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0, 6); lh.writeUInt16LE(8, 8); lh.writeUInt16LE(0, 10); lh.writeUInt16LE(0, 12); lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(def.length, 18); lh.writeUInt32LE(raw.length, 22); lh.writeUInt16LE(nm.length, 26); lh.writeUInt16LE(0, 28);
+      parts.push(lh, nm, def);
+      const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(0, 8); ch.writeUInt16LE(8, 10); ch.writeUInt16LE(0, 12); ch.writeUInt16LE(0, 14); ch.writeUInt32LE(crc, 16); ch.writeUInt32LE(def.length, 20); ch.writeUInt32LE(raw.length, 24); ch.writeUInt16LE(nm.length, 28); ch.writeUInt16LE(0, 30); ch.writeUInt16LE(0, 32); ch.writeUInt16LE(0, 34); ch.writeUInt16LE(0, 36); ch.writeUInt32LE(0, 38); ch.writeUInt32LE(off, 42);
+      cd.push(ch, nm); off += lh.length + nm.length + def.length;
+    }
+    const cdBuf = Buffer.concat(cd), eocd = Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(0, 4); eocd.writeUInt16LE(0, 6); eocd.writeUInt16LE(cd.length / 2, 8); eocd.writeUInt16LE(cd.length / 2, 10); eocd.writeUInt32LE(cdBuf.length, 12); eocd.writeUInt32LE(off, 16); eocd.writeUInt16LE(0, 20);
+    return Buffer.concat([...parts, cdBuf, eocd]);
+  }
+  const X = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  function makeXlsx(rows) { // rows: [{r, cells:[{c:'A', s:'shared text'} | {c:'B', n:'130'} | {c:'C', is:'inline'} | {c:'D', rich:['a','b']}]}]
+    const shared = []; const sidx = (t) => { let i = shared.indexOf(t); if (i < 0) { shared.push(t); i = shared.length - 1; } return i; };
+    const sheetRows = rows.map(row => '<row r="' + row.r + '">' + row.cells.map(c => {
+      const ref = c.c + row.r;
+      if (c.n !== undefined) return '<c r="' + ref + '"><v>' + X(c.n) + '</v></c>';
+      if (c.is !== undefined) return '<c r="' + ref + '" t="inlineStr"><is><t>' + X(c.is) + '</t></is></c>';
+      if (c.rich !== undefined) { const i = shared.push('\u0000RICH' + shared.length) - 1; shared[i] = { rich: c.rich }; return '<c r="' + ref + '" t="s"><v>' + i + '</v></c>'; }
+      return '<c r="' + ref + '" t="s"><v>' + sidx(c.s) + '</v></c>';
+    }).join('') + '</row>').join('');
+    const sst = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' + shared.length + '" uniqueCount="' + shared.length + '">' +
+      shared.map(t => t && t.rich ? '<si>' + t.rich.map(p => '<r><rPr><b/></rPr><t xml:space="preserve">' + X(p) + '</t></r>').join('') + '</si>' : '<si><t xml:space="preserve">' + X(t) + '</t></si>').join('') + '</sst>';
+    return makeZip({
+      '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>',
+      '_rels/.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+      'xl/workbook.xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>',
+      'xl/_rels/workbook.xml.rels': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>',
+      'xl/worksheets/sheet1.xml': '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>' + sheetRows + '</sheetData></worksheet>',
+      'xl/sharedStrings.xml': sst
+    });
+  }
+  const FIX = [
+    { r: 1, cells: [{ c: 'A', s: 'IT9999 SM SANDBOX SPLIT' }, { c: 'F', s: 'Additional Inventory' }, { c: 'K', s: 'to add leading zeroes, include an apostrophe before the first value of 0' }] },
+    { r: 2, cells: [{ c: 'A', s: 'Material Description' }, { c: 'B', s: 'Material' }, { c: 'C', s: 'Batch' }, { c: 'D', s: 'Quantity' }, { c: 'G', s: 'Material' }, { c: 'H', s: 'Batch' }, { c: 'I', s: 'Quantity' }] },
+    { r: 3, cells: [{ c: 'A', s: 'Low Dense PE HipCheck Drape 25X65' }, { c: 'B', s: '0103-0400' }, { c: 'C', s: '30296C3260' }] },
+    { r: 4, cells: [{ c: 'A', s: 'InSpace US Small' }, { c: 'B', s: '0130' }, { c: 'C', s: '091024-05' }] },
+    { r: 5, cells: [{ c: 'A', s: 'PROCINCH, SLT BUTTON, CONCAVE RND 11MM' }, { c: 'B', s: '0234100001' }, { c: 'C', s: '24E01' }] },
+    { r: 6, cells: [{ c: 'A', s: 'ICONIX HA 1.4MM 1 STND 2 XB S' }, { c: 'B', s: '3911-514-620HA' }, { c: 'C', s: '25J17' }] },
+    { r: 7, cells: [{ c: 'A', s: 'OMEGA 3.9MM KNOTLESS' }, { c: 'B', s: '3910-500-471' }, { c: 'C', s: '22K01' }, { c: 'D', n: '3' }, { c: 'G', s: '3910-500-393' }, { c: 'H', s: 'Z1' }, { c: 'I', n: '1' }] },
+    { r: 8, cells: [{ c: 'A', s: 'PKG. S.J. CUTTER FULL RADIUS - 2.5MM' }, { c: 'B', s: '0275-627-000' }, { c: 'C', s: '21027CG2' }] },
+    { r: 9, cells: [{ c: 'A', s: 'PROCINCH, SLT BUTTON, CONCAVE RND 11MM' }, { c: 'B', s: '0234100001' }, { c: 'C', s: '24E01' }] }, // duplicate
+    { r: 11, cells: [{ c: 'A', s: 'Numeric material cell' }, { c: 'B', n: '4700' }, { c: 'C', s: 'X1' }] },                                    // Excel already coerced this one
+    { r: 12, cells: [{ c: 'A', s: 'ANCHOR INSTRUMENT KIT 3.5MM' }, { c: 'B', is: '86IN0035' }, { c: 'C', is: 'AB12' }] },
+    { r: 13, cells: [{ c: 'A', rich: ['TRANSPORT ', 'CANNULA 8MM'] }, { c: 'B', s: 'CAT00222' }, { c: 'C', s: '22F02' }] },
+    { r: 14, cells: [{ c: 'A', s: 'No batch here' }, { c: 'B', s: '3910-500-999' }] },
+    { r: 16, cells: [{ c: 'A', s: 'Sci-notation trap' }, { c: 'B', s: '234-020-280' }, { c: 'C', n: '2.4E+2' }] } ];
+  const FIX_LINES = [
+    ['Low Dense PE HipCheck Drape 25X65', '0103-0400', '30296C3260'], ['InSpace US Small', '0130', '091024-05'], ['PROCINCH, SLT BUTTON, CONCAVE RND 11MM', '0234100001', '24E01'],
+    ['ICONIX HA 1.4MM 1 STND 2 XB S', '3911-514-620HA', '25J17'], ['OMEGA 3.9MM KNOTLESS', '3910-500-471', '22K01'], ['PKG. S.J. CUTTER FULL RADIUS - 2.5MM', '0275-627-000', '21027CG2'],
+    ['Numeric material cell', '4700', 'X1'], ['ANCHOR INSTRUMENT KIT 3.5MM', '86IN0035', 'AB12'], ['TRANSPORT CANNULA 8MM', 'CAT00222', '22F02'], ['Sci-notation trap', '234-020-280', '240'] ];
+  { const sheet = FakeSheet(); const { w, dev, errs } = await boot(sheet, creds); const F = dev.fops;
+    const xbuf = makeXlsx(FIX);
+    const sheets = F.readXlsx(new Uint8Array(xbuf).buffer);
+    check('xlsx: one sheet read, numeric cells counted', sheets.length === 1 && sheets[0].numeric === 4, JSON.stringify(sheets[0] && sheets[0].numeric));
+    const res = F.fromGrid(sheets[0].grid, sheets[0].numeric);
+    check('xlsx: title from A1, header found on row 2', res.title === 'IT9999 SM SANDBOX SPLIT' && res.lines.length === FIX_LINES.length, res.title + ' / ' + res.lines.length);
+    check('xlsx: every line byte-exact (shared, inline, rich, numeric-as-digits, no exponent)', JSON.stringify(res.lines.map(L => [L.d, L.m, L.b])) === JSON.stringify(FIX_LINES), JSON.stringify(res.lines.map(L => [L.d, L.m, L.b])));
+    check('xlsx: traps kept as text and surfaced', res.stats.traps.indexOf('0234100001 / 24E01') > -1 && res.stats.traps.indexOf('0103-0400 / 30296C3260') > -1, res.stats.traps.join(' | '));
+    const W = res.warnings.join(' ');
+    check('xlsx: warnings — prefilled qty, additional block, duplicate, no-batch, numeric cells', /1 line already had a quantity/.test(W) && /1 additional-inventory line/.test(W) && /1 duplicate line dropped/.test(W) && /1 line had no batch/.test(W) && /4 cells arrived as numbers/.test(W), W);
+    check('xlsx: stats', res.stats.lines === 10 && res.stats.materials === 10);
+    const csv = 'IT9999 SM SANDBOX SPLIT,,,,,Additional Inventory\r\nMaterial Description,Material,Batch,Quantity,,,Material,Batch,Quantity\r\n"PROCINCH, SLT BUTTON, CONCAVE RND 11MM",0234100001,24E01,\r\nInSpace US Small,0130,091024-05,\r\n"Quoted ""desc""",3910-500-471,22K01,\r\n';
+    const cres = F.fromGrid(F.readCsv(csv)[0].grid, 0);
+    check('csv: quotes, commas in quotes, CRLF, doubled quotes', cres.title === 'IT9999 SM SANDBOX SPLIT' && cres.lines.length === 3 && cres.lines[0].d === 'PROCINCH, SLT BUTTON, CONCAVE RND 11MM' && cres.lines[0].b === '24E01' && cres.lines[2].d === 'Quoted "desc"', JSON.stringify(cres.lines));
+    const file = new w.File([xbuf], 'Field_ops_count_sheet.xlsx');
+    const pres = await F.parseFile(file);
+    check('parseFile: xlsx by magic bytes, ver + src attached', pres.lines.length === 10 && pres.src === 'Field_ops_count_sheet.xlsx' && /^[0-9a-f]{16}$/.test(pres.ver), pres.ver);
+    let xlsErr = ''; try { await F.parseFile(new w.File([Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0])], 'old.xls')); } catch (e) { xlsErr = e.message; }
+    check('parseFile: legacy .xls refused with a clear code', xlsErr === 'xls');
+    let hdrErr = ''; try { F.fromGrid([['a', 'b'], ['c', 'd']], 0); } catch (e) { hdrErr = e.message; }
+    check('fromGrid: no Material/Batch header -> noheader', hdrErr === 'noheader');
+    // the real Field Ops file, when it is on this machine (never committed)
+    const real = '/mnt/user-data/uploads/Field_ops_count_sheet.xlsx';
+    if (fs.existsSync(real)) {
+      const rr = F.fromGrid(F.readXlsx(new Uint8Array(fs.readFileSync(real)).buffer)[0].grid, 0);
+      check('real file: 1,298 lines, title, no warnings, 24E01 kept', rr.lines.length === 1298 && rr.title === 'IT1223 SM CONNECTICUT SPLIT' && rr.warnings.length === 0 && rr.lines.some(L => L.b === '24E01') && rr.lines.some(L => L.m === '0130'), rr.lines.length + ' ' + rr.warnings.join(';'));
+    }
+    check('fops parse: no page errors', errs.length === 0, errs.join(' | ')); }
+
+  // ---- 14. Field Ops: keys, reconcile, spelling, version ----
+  { const sheet = FakeSheet(); const { dev } = await boot(sheet, creds); const F = dev.fops;
+    check('keyMat: dashes + leading zeros ignored, letters kept', F.keyMat('0275-627-000') === '275627000' && F.keyMat('275627000') === '275627000' && F.keyMat(' 3911-514-620ha ') === '3911514620HA' && F.keyMat('0130') === '130' && F.keyMat('CAT00222') === 'CAT00222' && F.keyMat('86IN0035') === '86IN0035');
+    check('keyMat: trailing zeros kept (4751 is not the CrossFire console)', F.keyMat('4751') !== F.keyMat('0475100000') && F.keyMat('0000') === '0');
+    check('keyLot: dashes + leading zeros ignored, case folded', F.keyLot('091024-05') === '9102405' && F.keyLot('09102405') === '9102405' && F.keyLot('24e01') === '24E01' && F.keyLot(' 22K01 ') === '22K01');
+    check('dash: Field Ops convention for unlisted materials', F.dash('3910947022') === '3910-947-022' && F.dash('275627000') === '275-627-000' && F.dash('3911514620HA') === '3911-514-620HA' && F.dash('CAT02854') === 'CAT02854' && F.dash('0130') === '0130' && F.dash('3910-500-471') === '3910-500-471');
+    const list = FIX_LINES.map(a => ({ d: a[0], m: a[1], b: a[2] }));
+    const rows = [
+      { ref: '0103-0400', lot: '30296c3260', qty: 2, loc: 'Trunk', desc: 'Drape' }, { ref: '01030400', lot: '30296C3260', qty: 3, loc: 'Storage', desc: 'Drape' },
+      { ref: '0130', lot: '09102405', qty: 1, loc: 'Trunk' },
+      { ref: '234100001', lot: '24E01', qty: 1, loc: 'Trunk' },
+      { ref: '3910500471', lot: '22K01', qty: 0, loc: 'Trunk' },
+      { ref: '275627000', lot: 'NEWLOT', qty: 4, loc: 'Trunk', desc: '2.5mm Full radius shaver blade' },
+      { ref: '3910947022', lot: 'L9', qty: 2, loc: 'Trunk', desc: 'AlphaVent' }, { ref: '3910947022', lot: 'L9', qty: 1, loc: 'Storage', desc: 'AlphaVent' },
+      { ref: 'CAT02854', lot: 'Z', qty: 1, loc: 'Trunk', desc: 'Champion SlingShot' } ];
+    const R = F.reconcile(list, rows);
+    check('reconcile: confirmed sums across locations/spellings, list order kept', R.confirmed.length === 3 && R.confirmed[0].m === '0103-0400' && R.confirmed[0].q === 5 && R.confirmed[1].m === '0130' && R.confirmed[2].m === '0234100001', JSON.stringify(R.confirmed));
+    check('reconcile: qty 0 counts as missing; missing keeps Field Ops order + spelling', R.missing.length === 7 && R.missing[0].m === '3911-514-620HA' && R.missing[1].m === '3910-500-471' && R.missing[1].b === '22K01');
+    check('reconcile: additional aggregated, list spelling reused for known material, dashes for unknown, sorted', R.additional.length === 3 && R.additional[0].m === '0275-627-000' && R.additional[0].onList === true && R.additional[0].q === 4 && R.additional[1].m === '3910-947-022' && R.additional[1].q === 3 && R.additional[1].d === 'AlphaVent' && R.additional[2].m === 'CAT02854', JSON.stringify(R.additional));
+    check('reconcile: meta', R.meta.n === 10 && R.meta.confirmed === 3 && R.meta.missing === 7 && R.meta.additional === 3 && R.meta.units === 7);
+    const v1 = F.ver(list), v2 = F.ver(list.map(L => ({ ...L }))), v3 = F.ver(list.slice(1));
+    check('ver: stable across copies, changes with content', v1 === v2 && v1 !== v3 && /^[0-9a-f]{16}$/.test(v1)); }
+
+  // ---- 15. Field Ops: capability gate, upload, progress, cross-phone list sync, hint, remove ----
+  { const sheet = FakeSheet(); const { w, dev, errs } = await boot(sheet, creds); const F = dev.fops;
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+    const box = () => w.document.getElementById('cc-fops');
+    check('gate: old server (no fops key) -> no card', box() && box().hidden === true && box().innerHTML === '');
+    sheet.fopsCap = true; await dev.pull('cc'); await sleep(50);
+    check('gate: server that knows the feature -> upload prompt with the Empty instruction', box().hidden === false && /Upload count sheet/.test(box().textContent) && /<b>empty<\/b>/.test(box().innerHTML));
+    const res = F.fromGrid(F.readXlsx(new Uint8Array(makeXlsx(FIX)).buffer)[0].grid, 4); res.src = 'Field_ops_count_sheet.xlsx'; res.ver = F.ver(res.lines);
+    F.preview('cc', res);
+    check('preview: counts + catalog matches + warnings shown', /10 lines/.test(box().textContent) && /lines match the catalog/.test(box().textContent) && /already had a quantity/.test(box().textContent));
+    w.document.getElementById('fops-use').click(); await sleep(200);
+    const put = sheet.calls.find(c => c.body && c.body.action === 'fops_put');
+    check('put: sent as text triples with device, title, ver', put && put.body.dev === "Nate's iPhone" && put.body.title === 'IT9999 SM SANDBOX SPLIT' && put.body.ver === res.ver && put.body.lines.length === 10 && put.body.lines[2][2] === '24E01', JSON.stringify(put && put.body.lines[2]));
+    check('put: card shows progress from local reconcile', /0 found/.test(box().textContent) && /10 missing/.test(box().textContent) && /0 additional/.test(box().textContent) && /IT9999 SM SANDBOX SPLIT/.test(box().textContent), box().textContent);
+    check('put: list cached on this phone as text', JSON.parse(w.localStorage.getItem('tbx_cc_fops')).lines[2][2] === '24E01');
+    dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
+    dev.enqueue('cc', { t: 'add', ref: '0234100001', lot: '24E01', qty: 2, loc: 'Trunk', notes: '' });
+    dev.enqueue('cc', { t: 'add', ref: '3910947022', lot: 'L9', qty: 1, loc: 'Trunk', notes: '', desc: 'AlphaVent | 4.75mm' });
+    await sleep(100); F.card();
+    check('progress: scans move lines instantly (pending included)', /1 found/.test(box().textContent) && /9 missing/.test(box().textContent) && /1 additional/.test(box().textContent), box().textContent);
+    check('hint: on / lot off / off', F.hint('cc', '234-100-001', '24e01') === 'on' && F.hint('cc', '0234100001', 'OTHER') === 'lotoff' && F.hint('cc', '3910947022', 'L9') === 'off' && /On the Field Ops list/.test(F.hintHTML('cc', '0234100001', '24E01')));
+    await sleep(1700);
+    // second phone: pull brings meta, list follows via fops_get
+    const saved = { 'tbx_cc': creds['tbx_cc'], 'tbx_cc_dev': "Mia's iPhone", 'tbx_cc_roster': creds['tbx_cc_roster'], 'tbx_tour_done': '1' };
+    const two = await boot(sheet, saved);
+    two.w.location.hash = '#/cc'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(400);
+    const box2 = () => two.w.document.getElementById('cc-fops');
+    check('sync: second phone got the list through pull -> fops_get', sheet.calls.some(c => /action=fops_get/.test(c.url)) && two.dev.fops.st('cc').list && two.dev.fops.st('cc').list.lines.length === 10 && two.dev.fops.st('cc').list.lines[2].b === '24E01');
+    check('sync: second phone card shows the same progress', /1 found/.test(box2().textContent) && /9 missing/.test(box2().textContent), box2().textContent);
+    check('hint: second phone hints without ever uploading', two.dev.fops.hint('cc', '0130', '091024-05') === 'on');
+    // list screen
+    two.w.location.hash = '#/cc/fops'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(300);
+    const scr = two.w.document.getElementById('fops-list');
+    check('screen: Missing chip first with 9 rows, chips carry counts', scr && scr.querySelectorAll('.fops-row2').length === 9 && /Missing 9/.test(two.w.document.getElementById('fops-head').textContent) && /Found 1/.test(two.w.document.getElementById('fops-head').textContent) && /Additional 1/.test(two.w.document.getElementById('fops-head').textContent));
+    const qin = two.w.document.getElementById('fops-q'); qin.value = '3911-514'; qin.dispatchEvent(new two.w.Event('input'));
+    check('screen: dash-insensitive search narrows', scr.querySelectorAll('.fops-row2').length === 1 && /3911-514-620HA/.test(scr.textContent));
+    two.w.document.querySelector('[data-chip="additional"]').click();
+    qin.value = ''; qin.dispatchEvent(new two.w.Event('input'));
+    check('screen: Additional shows the unlisted scan with Field Ops dashes and qty', scr.querySelectorAll('.fops-row2').length === 1 && /3910-947-022/.test(scr.textContent) && /AlphaVent/.test(scr.textContent));
+    // remove from phone one
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+    w.document.getElementById('fops-rm').click(); await sleep(50);
+    w.document.querySelector('.ask-ok').click(); await sleep(200);
+    check('remove: server cleared, card back to upload prompt', sheet.fops === null && /Upload count sheet/.test(box().textContent) && w.localStorage.getItem('tbx_cc_fops') === null, box().textContent);
+    two.w.location.hash = '#/cc'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(400);
+    check('remove: second phone drops the list on its next pull', two.dev.fops.st('cc').list === null && /Upload count sheet/.test(box2().textContent), box2().textContent);
+    check('fops sync: no page errors', errs.length === 0 && two.errs.length === 0, errs.concat(two.errs).join(' | ')); }
 
   const fails = results.filter(r => !r.ok).length;
   console.log('\n' + (results.length - fails) + '/' + results.length + ' passed');

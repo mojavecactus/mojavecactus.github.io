@@ -1859,6 +1859,7 @@ var GLOSS = {
           if (y.lastOk === startOk && !y.inflight) { ccSyncSt(t).base = j.rows; ccSyncSave(t, true); }
           y.lastPull = Date.now();
           ccDerive(t); ccPill();
+          try { fopsOnPull(t, j); } catch (eF) {}
           return j;
         }
         throw new Error('pull');
@@ -1926,9 +1927,11 @@ var GLOSS = {
         '<button id="cc-new" class="cc-btn">Start new count</button>' +
         '<div id="cc-sync" class="cc-sync"></div>' +
         sheetLinkHTML(ccSheetUrl()) +
+        '<div id="cc-fops" class="fops-wrap" hidden></div>' +
         '<div id="cc-cards" class="ctc-wrap">' + skel(3) + '</div>' +
       '</div>');
     document.getElementById('cc-new').addEventListener('click', function () { ccSession(); });
+    fopsCard();
     CURREFRESH = function () { return ccHomeLoad(terrTgt(), true); };
     document.getElementById('cc-cards').addEventListener('click', function (e) {
       var c = e.target.closest ? e.target.closest('.ctc') : null; if (!c) return;
@@ -2475,6 +2478,7 @@ var GLOSS = {
     sheet.innerHTML =
       '<div class="cc-sh-h">' + esc(ref) + (desc ? ' \u2014 ' + esc(desc) : '') + '</div>' +
       '<div class="cc-sub">' + (lot ? 'Lot ' + esc(lot) : 'No lot on this barcode') + (exp ? ' \u00b7 Exp ' + esc(exp) : '') + '</div>' +
+      (lot ? fopsHintHTML(CC.tgt, ref, lot) : '') +
       (ccIsExpired(exp) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
       (lot ? '' : '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box">') +
       (ex ? '<div class="cc-note">Already in list here: <b>' + (+ex.qty || 0) + '</b> \u00b7 this adds on top</div>' : '') +
@@ -3173,6 +3177,395 @@ var GLOSS = {
       else if (s2) { s2.innerHTML = 'Offline \u2014 showing this phone\u2019s saved counts. ' + sinceHTML(Math.max(ccSY(t).lastOk || 0, ccSY(t).lastPull || 0), 'Last synced'); }
       done();
     });
+  }
+
+  // ---- Field Ops count sheet (territory upload -> reconciled tab on the team sheet) ----
+  // Pure core below is shared verbatim with fops.gs on the Apps Script side. Keep them identical.
+  // ==== FOPS CORE BEGIN ====
+  function fopsHas(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  function fopsKeyMat(x) { var s = String(x == null ? '' : x).toUpperCase().replace(/[^A-Z0-9]/g, ''); if (/^\d/.test(s)) s = s.replace(/^0+(?=.)/, ''); return s; }
+  function fopsKeyLot(x) { var s = String(x == null ? '' : x).toUpperCase().replace(/[^A-Z0-9]/g, ''); return s.replace(/^0+(?=.)/, ''); }
+  function fopsKey(m, l) { return fopsKeyMat(m) + '|' + fopsKeyLot(l); }
+  // Field Ops' dashed convention for a scanned REF whose material is not on their list.
+  function fopsDash(ref) {
+    var s = String(ref == null ? '' : ref).trim().toUpperCase().replace(/\s+/g, '');
+    if (s.indexOf('-') > -1) return s;
+    var m = /^(\d{10})([A-Z]{0,2})$/.exec(s); if (m) return m[1].slice(0, 4) + '-' + m[1].slice(4, 7) + '-' + m[1].slice(7) + m[2];
+    var n = /^(\d{9})([A-Z]{0,2})$/.exec(s); if (n) return n[1].slice(0, 3) + '-' + n[1].slice(3, 6) + '-' + n[1].slice(6) + n[2];
+    return s;
+  }
+  // list: [{d, m, b}] in Field Ops order. rows: team rows [{ref, lot, qty, desc}] from every location and phone.
+  function fopsReconcile(list, rows) {
+    var spell = {}, listKeys = {}, sums = {}, order = [], i, L, k, km;
+    for (i = 0; i < list.length; i++) { L = list[i]; km = fopsKeyMat(L.m); if (!fopsHas(spell, km)) spell[km] = String(L.m); listKeys[fopsKey(L.m, L.b)] = 1; }
+    for (i = 0; i < rows.length; i++) {
+      var r = rows[i], q = Math.round(+r.qty || 0); if (q <= 0) continue;
+      k = fopsKey(r.ref, r.lot); var s = fopsHas(sums, k) ? sums[k] : null;
+      if (!s) { s = sums[k] = { q: 0, ref: r.ref, lot: r.lot, desc: '', km: fopsKeyMat(r.ref) }; order.push(k); }
+      s.q += q; if (!s.desc && r.desc) s.desc = String(r.desc);
+    }
+    var confirmed = [], missing = [], additional = [], units = 0;
+    for (i = 0; i < list.length; i++) {
+      L = list[i]; k = fopsKey(L.m, L.b);
+      if (fopsHas(sums, k)) { confirmed.push({ d: L.d, m: L.m, b: L.b, q: sums[k].q }); units += sums[k].q; }
+      else missing.push({ d: L.d, m: L.m, b: L.b });
+    }
+    for (i = 0; i < order.length; i++) {
+      k = order[i]; if (fopsHas(listKeys, k)) continue;
+      var a = sums[k], onList = fopsHas(spell, a.km);
+      additional.push({ d: a.desc, m: onList ? spell[a.km] : fopsDash(a.ref), b: String(a.lot == null ? '' : a.lot).trim(), q: a.q, onList: onList });
+    }
+    additional.sort(function (x, y) { return x.m < y.m ? -1 : x.m > y.m ? 1 : (x.b < y.b ? -1 : x.b > y.b ? 1 : 0); });
+    return { confirmed: confirmed, missing: missing, additional: additional, meta: { n: list.length, confirmed: confirmed.length, missing: missing.length, additional: additional.length, units: units } };
+  }
+  // Stable fingerprint of a list (dedupes identical re-uploads). Two FNV-1a passes, 16 hex chars.
+  function fopsVer(list) {
+    var s = JSON.stringify(list.map(function (L) { return [L.d, L.m, L.b]; }));
+    function fnv(seed) { var h = seed >>> 0; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return ('00000000' + h.toString(16)).slice(-8); }
+    return fnv(2166136261) + fnv(1215871187);
+  }
+  // ==== FOPS CORE END ====
+
+  // -- .xlsx / .csv reading on the phone (no numbers are ever created; every cell stays the text it was) --
+  function fopsUtf8(u8) { try { return new TextDecoder('utf-8').decode(u8); } catch (e) { var o = ''; for (var i = 0; i < u8.length; i++) o += String.fromCharCode(u8[i]); try { return decodeURIComponent(escape(o)); } catch (e2) { return o; } } }
+  function fopsUnzip(u8) {
+    var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), i = u8.length - 22;
+    while (i >= 0 && !(u8[i] === 0x50 && u8[i + 1] === 0x4b && u8[i + 2] === 0x05 && u8[i + 3] === 0x06)) i--;
+    if (i < 0) throw new Error('notzip');
+    var count = dv.getUint16(i + 10, true), p = dv.getUint32(i + 16, true), files = {};
+    for (var e = 0; e < count; e++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('zipdir');
+      var f = { method: dv.getUint16(p + 10, true), csize: dv.getUint32(p + 20, true), usize: dv.getUint32(p + 24, true), lho: dv.getUint32(p + 42, true) };
+      var nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+      files[fopsUtf8(u8.subarray(p + 46, p + 46 + nl))] = f;
+      p += 46 + nl + xl + cl;
+    }
+    return { has: function (n) { return fopsHas(files, n); }, names: Object.keys(files), read: function (n) {
+      if (!fopsHas(files, n)) return null;
+      var f = files[n], q = f.lho; if (dv.getUint32(q, true) !== 0x04034b50) throw new Error('ziplocal');
+      var start = q + 30 + dv.getUint16(q + 26, true) + dv.getUint16(q + 28, true), data = u8.subarray(start, start + f.csize);
+      if (f.method === 0) return data;
+      if (f.method === 8) { if (!window.TBX_INFLATE) throw new Error('noinflate'); return window.TBX_INFLATE(data, new Uint8Array(f.usize)); }
+      throw new Error('zipmethod');
+    } };
+  }
+  function fopsXml(text) { var d = new DOMParser().parseFromString(text, 'application/xml'); if (d.getElementsByTagName('parsererror').length) throw new Error('xml'); return d; }
+  function fopsTags(node, name) { return node.getElementsByTagNameNS ? node.getElementsByTagNameNS('*', name) : node.getElementsByTagName(name); }
+  function fopsText(node) { var ts = fopsTags(node, 't'), o = ''; for (var i = 0; i < ts.length; i++) o += ts[i].textContent; return o; }
+  function fopsCol(ref) { var m = /^([A-Z]+)/.exec(ref || ''); if (!m) return -1; var c = 0; for (var i = 0; i < m[1].length; i++) c = c * 26 + (m[1].charCodeAt(i) - 64); return c - 1; }
+  function fopsNumText(v) {
+    // A cell Excel already turned into a number: keep its digits, never an exponent.
+    var s = String(v == null ? '' : v).trim(); if (!/[eE]/.test(s)) return s;
+    var x = Number(s); if (!isFinite(x)) return s;
+    return (x === Math.floor(x) && Math.abs(x) < 1e21) ? x.toFixed(0) : String(x);
+  }
+  // -> { grid: [[cell,...],...], numeric: n, sheet: name }
+  function fopsReadXlsx(buf) {
+    var z = fopsUnzip(new Uint8Array(buf));
+    if (!z.has('xl/workbook.xml')) throw new Error('notxlsx');
+    var shared = [];
+    if (z.has('xl/sharedStrings.xml')) { var sis = fopsTags(fopsXml(fopsUtf8(z.read('xl/sharedStrings.xml'))), 'si'); for (var i = 0; i < sis.length; i++) shared.push(fopsText(sis[i])); }
+    var wb = fopsXml(fopsUtf8(z.read('xl/workbook.xml'))), sheets = fopsTags(wb, 'sheet'), rels = {};
+    if (z.has('xl/_rels/workbook.xml.rels')) { var rs = fopsTags(fopsXml(fopsUtf8(z.read('xl/_rels/workbook.xml.rels'))), 'Relationship'); for (var j = 0; j < rs.length; j++) rels[rs[j].getAttribute('Id')] = rs[j].getAttribute('Target'); }
+    var out = [];
+    for (var s = 0; s < sheets.length; s++) {
+      var rid = sheets[s].getAttribute('r:id') || sheets[s].getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+      var target = rels[rid] || ('worksheets/sheet' + (s + 1) + '.xml');
+      target = target.charAt(0) === '/' ? target.slice(1) : 'xl/' + target;
+      if (!z.has(target)) continue;
+      var doc = fopsXml(fopsUtf8(z.read(target))), cells = fopsTags(doc, 'c'), grid = [], numeric = 0, rowI = -1, colI = 0, lastRow = null;
+      for (var c = 0; c < cells.length; c++) {
+        var cell = cells[c], rowEl = cell.parentNode, ref = cell.getAttribute('r') || '', t = cell.getAttribute('t') || '';
+        if (rowEl !== lastRow) { lastRow = rowEl; var rn = parseInt(rowEl.getAttribute('r') || '0', 10); rowI = rn > 0 ? rn - 1 : rowI + 1; colI = 0; }
+        var ci = fopsCol(ref); if (ci < 0) ci = colI; colI = ci + 1;
+        var v = '', vEl = fopsTags(cell, 'v')[0];
+        if (t === 's') { v = vEl ? (shared[parseInt(vEl.textContent, 10)] || '') : ''; }
+        else if (t === 'inlineStr') { v = fopsText(cell); }
+        else if (t === 'str' || t === 'e') { v = vEl ? vEl.textContent : ''; if (t === 'e') v = ''; }
+        else if (t === 'b') { v = vEl && vEl.textContent === '1' ? 'TRUE' : 'FALSE'; }
+        else { v = vEl ? vEl.textContent : ''; if (v !== '') { numeric++; v = fopsNumText(v); } }
+        if (v === '') continue;
+        while (grid.length <= rowI) grid.push([]);
+        grid[rowI][ci] = v;
+      }
+      out.push({ grid: grid, numeric: numeric, sheet: sheets[s].getAttribute('name') || ('Sheet' + (s + 1)) });
+    }
+    if (!out.length) throw new Error('nosheet');
+    return out;
+  }
+  function fopsReadCsv(text) {
+    var grid = [], row = [], cell = '', q = false, i = 0, ch;
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    for (; i < text.length; i++) {
+      ch = text.charAt(i);
+      if (q) { if (ch === '"') { if (text.charAt(i + 1) === '"') { cell += '"'; i++; } else q = false; } else cell += ch; continue; }
+      if (ch === '"') q = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text.charAt(i + 1) === '\n') i++; row.push(cell); grid.push(row); row = []; cell = ''; }
+      else cell += ch;
+    }
+    if (cell !== '' || row.length) { row.push(cell); grid.push(row); }
+    return [{ grid: grid, numeric: 0, sheet: 'CSV' }];
+  }
+  function fopsIsHeader(row) {
+    var hasM = false, hasB = false;
+    for (var i = 0; i < (row || []).length; i++) { var v = String(row[i] || '').trim().toLowerCase(); if (v === 'material') hasM = true; if (v === 'batch') hasB = true; }
+    return hasM && hasB;
+  }
+  // Turn a grid into the list Field Ops sent: { title, lines:[{d,m,b}], warnings:[], stats:{} }
+  function fopsFromGrid(grid, numeric) {
+    var h = -1, r, i;
+    for (r = 0; r < Math.min(grid.length, 12); r++) if (fopsIsHeader(grid[r])) { h = r; break; }
+    if (h < 0) throw new Error('noheader');
+    var hdr = grid[h], dcol = -1, mcol = -1, bcol = -1, qcol = -1, addM = -1, addB = -1, addQ = -1;
+    for (i = 0; i < hdr.length; i++) {
+      var v = String(hdr[i] || '').trim().toLowerCase();
+      if (v === 'material description' && dcol < 0) dcol = i;
+      else if (v === 'material') { if (mcol < 0) mcol = i; else if (addM < 0) addM = i; }
+      else if (v === 'batch') { if (bcol < 0) bcol = i; else if (addB < 0) addB = i; }
+      else if (v === 'quantity') { if (qcol < 0) qcol = i; else if (addQ < 0) addQ = i; }
+    }
+    if (dcol < 0) dcol = mcol > 0 ? mcol - 1 : -1;
+    var title = '';
+    if (h > 0) { var t0 = String((grid[0] || [])[0] || '').trim(); if (t0 && !fopsIsHeader(grid[0]) && !/^additional inventory$/i.test(t0)) title = t0; }
+    var lines = [], seen = {}, dupes = 0, noBatch = 0, noMat = 0, prefilled = 0, extra = 0, traps = [];
+    function cell(row, c) { return c < 0 ? '' : String((row || [])[c] == null ? '' : row[c]).trim(); }
+    for (r = h + 1; r < grid.length; r++) {
+      var row = grid[r], m = cell(row, mcol), b = cell(row, bcol), d = cell(row, dcol);
+      if (cell(row, qcol)) prefilled++;
+      if (cell(row, addM) || cell(row, addB) || cell(row, addQ)) extra++;
+      if (!m && !b) continue;
+      if (!m) { noMat++; continue; }
+      if (!b) { noBatch++; continue; }
+      var k = fopsKey(m, b);
+      if (fopsHas(seen, k)) { dupes++; continue; }
+      seen[k] = 1; lines.push({ d: d, m: m, b: b });
+      if (traps.length < 4 && (/^\d+E\d+$/i.test(b) || /^0/.test(m) || /^0/.test(b) || /-/.test(b))) traps.push(m + ' / ' + b);
+    }
+    if (!lines.length) throw new Error('empty');
+    var warnings = [];
+    if (prefilled) warnings.push(prefilled + ' line' + (prefilled > 1 ? 's' : '') + ' already had a quantity \u2014 ignored; quantities come from scans. Field Ops should send the empty sheet.');
+    if (extra) warnings.push(extra + ' additional-inventory line' + (extra > 1 ? 's' : '') + ' in the file \u2014 ignored; additional inventory comes from scans.');
+    if (dupes) warnings.push(dupes + ' duplicate line' + (dupes > 1 ? 's' : '') + ' dropped.');
+    if (noBatch) warnings.push(noBatch + ' line' + (noBatch > 1 ? 's' : '') + ' had no batch \u2014 skipped.');
+    if (noMat) warnings.push(noMat + ' line' + (noMat > 1 ? 's' : '') + ' had no material \u2014 skipped.');
+    if (numeric) warnings.push(numeric + ' cell' + (numeric > 1 ? 's' : '') + ' arrived as numbers, not text \u2014 leading zeros or letters may already be lost. If a batch looks wrong, ask Field Ops for the original export.');
+    var mats = {}; for (i = 0; i < lines.length; i++) mats[fopsKeyMat(lines[i].m)] = 1;
+    return { title: title, lines: lines, warnings: warnings, stats: { lines: lines.length, materials: Object.keys(mats).length, traps: traps } };
+  }
+  function fopsParseFile(file) {
+    var name = String(file && file.name || '').toLowerCase();
+    function asBuf() { if (file.arrayBuffer) return file.arrayBuffer(); return new Promise(function (res, rej) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = function () { rej(fr.error); }; fr.readAsArrayBuffer(file); }); }
+    return asBuf().then(function (buf) {
+      var u8 = new Uint8Array(buf), sheets;
+      if (u8.length > 1 && u8[0] === 0x50 && u8[1] === 0x4b) sheets = fopsReadXlsx(buf);
+      else if (u8.length > 7 && u8[0] === 0xD0 && u8[1] === 0xCF) throw new Error('xls');
+      else sheets = fopsReadCsv(fopsUtf8(u8));
+      var picked = null; for (var i = 0; i < sheets.length; i++) { for (var r = 0; r < Math.min(sheets[i].grid.length, 12); r++) if (fopsIsHeader(sheets[i].grid[r])) { picked = sheets[i]; break; } if (picked) break; }
+      if (!picked) picked = sheets[0];
+      var res = fopsFromGrid(picked.grid, picked.numeric);
+      res.src = String(file && file.name || ''); res.ver = fopsVer(res.lines);
+      return res;
+    });
+  }
+  function fopsErrText(e) {
+    var c = e && e.message || '';
+    if (c === 'xls') return 'That\u2019s an old .xls file \u2014 open it in Excel or Numbers and save as .xlsx (or .csv), then upload again.';
+    if (c === 'noheader') return 'Couldn\u2019t find the Material / Batch columns. Upload the count sheet exactly as Field Ops sent it.';
+    if (c === 'empty') return 'No material/batch lines found on that sheet.';
+    if (c === 'noinflate') return 'Update the app first \u2014 tap Check for updates on the home screen.';
+    return 'Couldn\u2019t read that file. Upload the .xlsx (or .csv) Field Ops sent.';
+  }
+
+  // -- per-territory state (list cached on this phone, meta + capability from pull) --
+  var FO = { st: {}, fetching: {} };
+  function fopsSt(t) {
+    var s = FO.st[t]; if (s) return s;
+    s = FO.st[t] = { list: null, meta: null, cap: false, loaded: true };
+    try { var raw = localStorage.getItem('tbx_' + t + '_fops'); if (raw) { s.list = JSON.parse(raw); if (s.list && s.list.lines) s.list.lines = s.list.lines.map(function (a) { return Array.isArray(a) ? { d: a[0], m: a[1], b: a[2] } : a; }); } } catch (e) { s.list = null; }
+    try { var rm = localStorage.getItem('tbx_' + t + '_fops_meta'); if (rm) s.meta = JSON.parse(rm); } catch (e2) { s.meta = null; }
+    try { s.cap = localStorage.getItem('tbx_' + t + '_fops_cap') === '1'; } catch (e3) {}
+    return s;
+  }
+  function fopsSave(t) {
+    var s = fopsSt(t);
+    try {
+      if (s.list) localStorage.setItem('tbx_' + t + '_fops', JSON.stringify({ ver: s.list.ver, title: s.list.title, by: s.list.by || '', at: s.list.at || '', lines: s.list.lines.map(function (L) { return [L.d, L.m, L.b]; }) }));
+      else localStorage.removeItem('tbx_' + t + '_fops');
+      localStorage.setItem('tbx_' + t + '_fops_meta', JSON.stringify(s.meta || null));
+      localStorage.setItem('tbx_' + t + '_fops_cap', s.cap ? '1' : '0');
+    } catch (e) {}
+  }
+  function fopsOnPull(t, j) {
+    // Called with every successful pull. The presence of a `fops` key is the server saying it knows the feature.
+    var s = fopsSt(t);
+    if (!j || !('fops' in j)) { if (s.cap) { s.cap = false; fopsSave(t); if (CC.view === 'cchome' && t === CC.tgt) fopsCard(); } return; }
+    s.cap = true; s.meta = j.fops || null;
+    if (!s.meta) { if (s.list) s.list = null; fopsSave(t); }
+    else { fopsSave(t); if (!s.list || s.list.ver !== s.meta.ver) fopsFetch(t); }
+    if (CC.view === 'cchome' && t === CC.tgt) fopsCard();
+  }
+  function fopsFetch(t) {
+    if (FO.fetching[t]) return FO.fetching[t];
+    var ep = ccCredsFor(t); if (!ep) return Promise.reject(new Error('nocreds'));
+    var tmo = ccFetchTimeout(20000);
+    FO.fetching[t] = fetch(ep.url + '?token=' + encodeURIComponent(ep.token) + '&action=fops_get', { signal: tmo.signal })
+      .then(function (r) { tmo.clear(); return r.json(); }, function (e) { tmo.clear(); throw e; })
+      .then(function (j) {
+        delete FO.fetching[t];
+        if (!j || !j.ok) throw new Error('fops_get');
+        var s = fopsSt(t);
+        if (j.lines && j.lines.length) { s.list = { ver: j.ver, title: j.title || '', by: (j.meta && j.meta.by) || '', at: (j.meta && j.meta.at) || '', lines: j.lines.map(function (a) { return Array.isArray(a) ? { d: a[0], m: a[1], b: a[2] } : a; }) }; s.meta = j.meta || s.meta; }
+        else { s.list = null; s.meta = null; }
+        fopsSave(t);
+        if (CC.view === 'cchome' && t === CC.tgt) fopsCard();
+        if (CC.view === 'fops' && t === CC.tgt) fopsScreenPaint();
+        return j;
+      })
+      .catch(function (e) { delete FO.fetching[t]; throw e; });
+    return FO.fetching[t];
+  }
+  function fopsPost(t, body) {
+    var ep = ccCredsFor(t); if (!ep) return Promise.reject(new Error('nocreds'));
+    body.token = ep.token; body.dev = ccDevFor(t) || '';
+    var tmo = ccFetchTimeout(25000);
+    return fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body), signal: tmo.signal })
+      .then(function (r) { tmo.clear(); return r.json(); }, function (e) { tmo.clear(); throw e; });
+  }
+  function fopsProgress(t) {
+    // Local reconcile when the list is on this phone (instant, offline); server meta otherwise.
+    var s = fopsSt(t);
+    if (s.list) { ccDerive(t); return fopsReconcile(s.list.lines, ccSyncSt(t).rows).meta; }
+    return s.meta ? { n: s.meta.n, confirmed: s.meta.confirmed, missing: s.meta.missing, additional: s.meta.additional, units: s.meta.units } : null;
+  }
+  // 'on' | 'lotoff' | 'off' | null (no list on this phone)
+  function fopsHint(t, ref, lot) {
+    var s = fopsSt(t); if (!s.list) return null;
+    if (!s.idx || s.idx.ver !== s.list.ver) {
+      var idx = { ver: s.list.ver, keys: {}, mats: {} };
+      for (var i = 0; i < s.list.lines.length; i++) { idx.keys[fopsKey(s.list.lines[i].m, s.list.lines[i].b)] = 1; idx.mats[fopsKeyMat(s.list.lines[i].m)] = 1; }
+      s.idx = idx;
+    }
+    if (fopsHas(s.idx.keys, fopsKey(ref, lot))) return 'on';
+    if (fopsHas(s.idx.mats, fopsKeyMat(ref))) return 'lotoff';
+    return 'off';
+  }
+  function fopsHintHTML(t, ref, lot) {
+    var h = fopsHint(t, ref, lot); if (!h) return '';
+    if (h === 'on') return '<div class="fops-hint on">\u2713 On the Field Ops list</div>';
+    if (h === 'lotoff') return '<div class="fops-hint off">Material is on the Field Ops list \u2014 this lot isn\u2019t. Goes to Additional.</div>';
+    return '<div class="fops-hint off">Not on the Field Ops list \u2014 goes to Additional</div>';
+  }
+  function fopsNum(n) { return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function fopsRoute() { return CC.terr === 'ct' ? '#/cc/fops' : '#/team/' + CC.terr + '/cc/fops'; }
+
+  // -- the card on the Cycle Count home screen --
+  function fopsCard() {
+    var el = document.getElementById('cc-fops'); if (!el) return;
+    var t = CC.tgt, s = fopsSt(t);
+    if (!s.cap) { el.innerHTML = ''; el.hidden = true; return; }
+    el.hidden = false;
+    if (!s.list && !s.meta) {
+      el.innerHTML = '<div class="fops-card"><div class="fops-t">Field Ops count sheet</div>' +
+        '<div class="fops-sub">Upload the <b>empty</b> count sheet Field Ops sent you (.xlsx or .csv). Quantities fill in from the team\u2019s scans and the sheet gets a <b>Field Ops</b> tab \u2014 confirmed, additional and missing inventory, ready to send back.</div>' +
+        '<button id="fops-up" class="cc-btn fops-btn">Upload count sheet</button></div>';
+      document.getElementById('fops-up').addEventListener('click', function () { fopsPick(t); });
+      return;
+    }
+    var p = fopsProgress(t) || { n: 0, confirmed: 0, missing: 0, additional: 0, units: 0 };
+    var title = (s.list && s.list.title) || (s.meta && s.meta.title) || 'Field Ops count sheet';
+    var by = (s.list && s.list.by) || (s.meta && s.meta.by) || '', at = (s.list && s.list.at) || (s.meta && s.meta.at) || '';
+    var pct = p.n ? Math.round(100 * p.confirmed / p.n) : 0;
+    el.innerHTML = '<div class="fops-card"><div class="fops-t">' + esc(title) + '</div>' +
+      '<div class="fops-sub">' + fopsNum(p.n) + ' lines' + (by ? ' \u00b7 uploaded by ' + esc(by) : '') + (at ? ' ' + esc(faFmt(at)) : '') + (s.list ? '' : ' \u00b7 <span class="fops-dim">syncing list\u2026</span>') + '</div>' +
+      '<div class="fops-bar"><div class="fops-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div>' +
+      '<div class="fops-row"><button id="fops-view" class="cc-btn fops-btn">View list</button><button id="fops-rep" class="fops-lnk">Replace</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div></div>';
+    document.getElementById('fops-view').addEventListener('click', function () { location.hash = fopsRoute(); });
+    document.getElementById('fops-rep').addEventListener('click', function () { fopsPick(t); });
+    document.getElementById('fops-rm').addEventListener('click', function () {
+      tbxAsk({ title: 'Remove the Field Ops sheet?', body: 'The Field Ops tab comes off the team sheet for everyone. Scans are not touched \u2014 upload a sheet again any time.', ok: 'Remove', danger: true }).then(function (yes) {
+        if (!yes) return;
+        el.innerHTML = '<div class="fops-card"><div class="fops-sub">Removing\u2026</div></div>';
+        fopsPost(t, { action: 'fops_clear' }).then(function (j) {
+          if (!j || !j.ok) throw new Error('clear');
+          var s2 = fopsSt(t); s2.list = null; s2.meta = null; s2.idx = null; fopsSave(t); fopsCard();
+        }).catch(function () { fopsCard(); tbxAsk({ title: 'Couldn\u2019t reach the sheet', body: 'Check signal and try again.', ok: 'OK', cancel: 'Close' }); });
+      });
+    });
+  }
+  function fopsPick(t) {
+    var inp = document.createElement('input'); inp.type = 'file';
+    inp.accept = '.xlsx,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv';
+    inp.style.display = 'none'; document.body.appendChild(inp);
+    inp.addEventListener('change', function () {
+      var f = inp.files && inp.files[0]; try { document.body.removeChild(inp); } catch (e) {}
+      if (!f) return;
+      var el = document.getElementById('cc-fops'); if (el) el.innerHTML = '<div class="fops-card"><div class="fops-sub">Reading ' + esc(f.name) + '\u2026</div></div>';
+      fopsParseFile(f).then(function (res) { fopsPreview(t, res); }).catch(function (e) {
+        fopsCard();
+        tbxAsk({ title: 'Couldn\u2019t use that file', body: fopsErrText(e), ok: 'OK', cancel: 'Close' });
+      });
+    });
+    inp.click();
+  }
+  function fopsPreview(t, res) {
+    var el = document.getElementById('cc-fops'); if (!el) return;
+    var s = fopsSt(t), same = s.list && s.list.ver === res.ver;
+    if (!FO.catIdx) { FO.catIdx = {}; for (var pk in BYPN) FO.catIdx[fopsKeyMat(pk)] = 1; }
+    var catN = 0; for (var i = 0; i < res.lines.length; i++) { if (fopsHas(FO.catIdx, fopsKeyMat(res.lines[i].m))) catN++; }
+    el.innerHTML = '<div class="fops-card"><div class="fops-t">' + esc(res.title || res.src || 'Count sheet') + '</div>' +
+      '<div class="fops-sub">' + fopsNum(res.stats.lines) + ' lines \u00b7 ' + fopsNum(res.stats.materials) + ' materials \u00b7 ' + fopsNum(catN) + ' lines match the catalog' + (res.stats.traps.length ? '<br>Kept as text: ' + esc(res.stats.traps.join(', ')) : '') + '</div>' +
+      (res.warnings.length ? '<div class="fops-warn">' + res.warnings.map(function (w) { return '<div>\u26a0 ' + esc(w) + '</div>'; }).join('') + '</div>' : '') +
+      (same ? '<div class="fops-sub">This is the sheet already loaded.</div>' : '') +
+      (s.list && !same ? '<div class="fops-sub">Replaces the sheet loaded now for the whole team.</div>' : '') +
+      '<div class="fops-row"><button id="fops-use" class="cc-btn fops-btn"' + (same ? ' disabled' : '') + '>Use this sheet</button><button id="fops-cx" class="fops-lnk">Cancel</button></div>' +
+      '<div id="fops-err" class="cc-err" hidden></div></div>';
+    document.getElementById('fops-cx').addEventListener('click', function () { fopsCard(); });
+    document.getElementById('fops-use').addEventListener('click', function () {
+      var b = document.getElementById('fops-use'); b.disabled = true; b.textContent = 'Sending to the sheet\u2026';
+      fopsPost(t, { action: 'fops_put', title: res.title, src: res.src, ver: res.ver, lines: res.lines.map(function (L) { return [L.d, L.m, L.b]; }) }).then(function (j) {
+        if (!j || !j.ok) throw new Error(j && j.err ? j.err : 'put');
+        var s2 = fopsSt(t);
+        s2.cap = true; s2.list = { ver: j.ver || res.ver, title: res.title, by: (j.meta && j.meta.by) || ccDevFor(t) || '', at: (j.meta && j.meta.at) || new Date().toISOString(), lines: res.lines }; s2.meta = j.meta || null; s2.idx = null;
+        fopsSave(t); fopsCard();
+      }).catch(function (e) {
+        b.disabled = false; b.textContent = 'Use this sheet';
+        var er = document.getElementById('fops-err'); if (er) { er.textContent = (e && e.message === 'dev') ? 'This phone isn\u2019t on the roster \u2014 re-pick the device.' : 'Couldn\u2019t reach the sheet \u2014 check signal and try again.'; er.hidden = false; }
+      });
+    });
+  }
+
+  // -- the list screen (Missing / Found / Additional) --
+  var FOV = { chip: 'missing', q: '' };
+  function fopsScreen() {
+    setTitle('Field Ops', ''); backBtn.hidden = false; ccStop();
+    if (!ctEnsure(fopsScreen)) return;
+    CC.tgt = terrTgt(); CC.view = 'fops'; FOV.q = '';
+    render('<div class="card cc-card fops-screen"><div id="fops-head"></div><input id="fops-q" class="cc-in" type="search" autocomplete="off" placeholder="Search material, batch or description"><div id="fops-list" class="ctc-wrap"></div></div>');
+    document.getElementById('fops-q').addEventListener('input', function (e) { FOV.q = e.target.value; fopsScreenPaint(); });
+    CURREFRESH = function () { var t = CC.tgt; return ccPull(t).then(function () { fopsScreenPaint(); }); };
+    fopsScreenPaint();
+    ccPull(CC.tgt).then(function () { fopsScreenPaint(); }).catch(function () {});
+  }
+  function fopsScreenPaint() {
+    var head = document.getElementById('fops-head'), list = document.getElementById('fops-list'); if (!head || !list) return;
+    var t = CC.tgt, s = fopsSt(t);
+    if (!s.list) { head.innerHTML = '<h2 class="cc-h">Field Ops</h2>'; list.innerHTML = emptyHTML('\uD83D\uDCCB', s.meta ? 'Syncing the list\u2026' : 'No count sheet loaded', s.meta ? 'Pull down to refresh.' : 'Upload the empty sheet Field Ops sent on the Cycle Count screen.'); return; }
+    ccDerive(t);
+    var R = fopsReconcile(s.list.lines, ccSyncSt(t).rows);
+    var sets = { missing: R.missing, found: R.confirmed, additional: R.additional };
+    head.innerHTML = '<h2 class="cc-h">' + esc(s.list.title || 'Field Ops') + '</h2>' +
+      '<div class="chips fops-chips">' + ['missing', 'found', 'additional'].map(function (c) { return '<button class="chip' + (FOV.chip === c ? '' : ' dim') + '" data-chip="' + c + '">' + c.charAt(0).toUpperCase() + c.slice(1) + ' ' + fopsNum(sets[c].length) + '</button>'; }).join('') + '</div>';
+    head.querySelectorAll('[data-chip]').forEach(function (b) { b.addEventListener('click', function () { FOV.chip = b.dataset.chip; fopsScreenPaint(); }); });
+    var q = nrm(FOV.q), arr = sets[FOV.chip] || [];
+    if (q) arr = arr.filter(function (L) { return nrm(L.m).indexOf(q) > -1 || nrm(L.b).indexOf(q) > -1 || nrm(L.d).indexOf(q) > -1; });
+    if (!arr.length) { list.innerHTML = '<div class="cc-empty">' + (q ? 'Nothing matches.' : (FOV.chip === 'missing' ? 'Nothing missing \u2014 every line on the list has been counted.' : FOV.chip === 'found' ? 'Nothing counted yet.' : 'Nothing extra \u2014 every scan is on the list.')) + '</div>'; return; }
+    var cap = 300, shown = arr.slice(0, cap);
+    list.innerHTML = shown.map(function (L) {
+      return '<div class="ctc fops-row2"><div class="ctc-main"><div class="ctc-t">' + esc(L.m) + ' <span class="fops-lot">' + esc(L.b) + '</span></div><div class="ctc-n">' + esc(L.d || '') + '</div></div>' +
+        (L.q != null ? '<div class="ctc-r">' + fopsNum(L.q) + '</div>' : '') + '</div>';
+    }).join('') + (arr.length > cap ? '<div class="cc-empty">Showing ' + cap + ' of ' + fopsNum(arr.length) + ' \u2014 search to narrow.</div>' : '');
   }
 
   // ---- pull-to-refresh: screens register CURREFRESH (a function returning a promise) ----
@@ -5587,10 +5980,11 @@ var GLOSS = {
     FILT = {}; CURVIEW = null;
     var fpFilt = qparam(query, 'fp'); if (fpFilt) FILT.fp = fpFilt;
     var gp0 = document.getElementById('glosspanel'); if (gp0) gp0.hidden = true;
-    var inCT = (h === '#/cc' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0 || h.indexOf('#/fa2') === 0);
+    var inCT = (h === '#/cc' || h === '#/cc/fops' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0 || h.indexOf('#/fa2') === 0);
     if (!inCT) ccStop();
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
     if (h.indexOf('#/fa2') !== 0) fa2Wide(false);
+    if (h === '#/cc/fops') { terrSet('ct'); return fopsScreen(); }
     if (h === '#/cc') { terrSet('ct'); return ccScreen(); }
     if (h === '#/ct') { terrSet('ct'); return ctScreen(); }
     if (/^#\/fa2\/(add|add2|use|return|trans|admin)$/.test(h) && fa2IsFA()) { location.replace('#/fa2'); return; }
@@ -5610,6 +6004,7 @@ var GLOSS = {
     if (h === '#/teams') return teamsScreen();
     if (h === '#/signup') return signupScreen();
     if ((m = h.match(/^#\/team\/([a-z0-9]+)\/manage$/))) { if (!TERR[m[1]] || !TERR[m[1]].hub) return teamsScreen(); terrSet(m[1]); return manageScreen(); }
+    if ((m = h.match(/^#\/team\/([a-z0-9]+)\/cc\/fops$/))) { if (!TERR[m[1]]) return teamsScreen(); terrSet(m[1]); return fopsScreen(); }
     if ((m = h.match(/^#\/team\/([a-z0-9]+)(\/cc)?$/))) { if (!TERR[m[1]]) return teamsScreen(); terrSet(m[1]); return m[2] ? ccScreen() : ctScreen(); }
     if ((m = h.match(/^#\/top\/(implants|arthroscopy)$/))) return topScreen(m[1]);
     if ((m = h.match(/^#\/cat\/(.+)$/))) return catScreen(dec(m[1]));
@@ -6171,7 +6566,7 @@ var GLOSS = {
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
-    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount } };
+    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, progress: fopsProgress, preview: fopsPreview, FO: FO } } };
 };
 
 /* ---- Feedback: screenshot + silent send (mailto fallback) ----
