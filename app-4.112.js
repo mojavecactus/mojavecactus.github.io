@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.111';
+  var APPVER = '4.112';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -434,15 +434,14 @@ var GLOSS = {
     if (from && from.isConnected && vtOK()) {
       // Row -> card: the tapped title and the new h1 share a transition name for the morph.
       from.style.viewTransitionName = 'tbx-title';
-      document.documentElement.classList.add('vt-on');
+      content.classList.remove('vt'); // no fade-in on top of the morph (re-adding it later replays it = flash)
       var t = document.startViewTransition(function () {
         paint();
         var h = content.querySelector('.card h1'); if (h) h.style.viewTransitionName = 'tbx-title';
       });
       t.finished.then(function () {
         var h2 = content.querySelector('.card h1'); if (h2) h2.style.viewTransitionName = '';
-        document.documentElement.classList.remove('vt-on');
-      }, function () { document.documentElement.classList.remove('vt-on'); });
+      }, function () {});
       return;
     }
     paint();
@@ -1877,7 +1876,6 @@ var GLOSS = {
     CC.tgt = terrTgt(); CC.view = 'cchome';
     render(
       '<div class="card cc-card cc-home">' +
-        '<button id="cc-rf" class="cc-rfb" aria-label="Refresh counts">&#x21bb;</button>' +
         '<h2 class="cc-h">Cycle Count</h2>' +
         '<div class="cc-sub">Counts by location \u2014 open one to keep adding, or start fresh.</div>' +
         '<button id="cc-new" class="cc-btn">Start new count</button>' +
@@ -1886,7 +1884,6 @@ var GLOSS = {
         '<div id="cc-cards" class="ctc-wrap">' + skel(3) + '</div>' +
       '</div>');
     document.getElementById('cc-new').addEventListener('click', function () { ccSession(); });
-    document.getElementById('cc-rf').addEventListener('click', function () { ccHomeLoad(terrTgt(), true); });
     CURREFRESH = function () { return ccHomeLoad(terrTgt(), true); };
     document.getElementById('cc-cards').addEventListener('click', function (e) {
       var c = e.target.closest ? e.target.closest('.ctc') : null; if (!c) return;
@@ -3383,7 +3380,6 @@ var GLOSS = {
   function fa2Shell(title, sub, inner, onRefresh) {
     render(
       '<div class="card cc-card">' +
-        (onRefresh ? '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' : '') +
         '<h2 class="cc-h">' + title + '</h2>' +
         (sub ? '<div class="cc-sub">' + sub + '</div>' : '') +
         inner +
@@ -3603,7 +3599,6 @@ var GLOSS = {
     }
     render(
       '<div class="card cc-card">' +
-        '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<div id="fa2-flash" class="fa2-flash" hidden></div>' +
         '<h2 class="cc-h">F&amp;A Inventory <em class="fa2-em">beta</em></h2>' +
         '<div class="cc-sub">' + (fa ? 'F&amp;A view \u2014 send-backs only. Everything else is read-only.' : 'Live field stock \u2014 everything handed to the Foot &amp; Ankle team.') + '</div>' +
@@ -3795,7 +3790,6 @@ var GLOSS = {
     fa2KitCss();
     render(
       '<div class="card cc-card">' +
-        '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<h2 class="cc-h">On hand</h2>' +
         '<div class="cc-sub">First to expire on top. Usage and send-backs come off automatically.</div>' +
         '<input id="fa2-q" class="cc-in" placeholder="Search ref, lot, or description">' +
@@ -3847,7 +3841,6 @@ var GLOSS = {
     fa2KitCss();
     render(
       '<div class="card cc-card">' +
-        '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<h2 class="cc-h">History</h2>' +
         '<div class="cc-sub">Grouped by event \u2014 tap any card for line detail. Corrections are new events, never edits.</div>' +
         '<div id="fa2-hf" class="hf"></div>' +
@@ -5081,7 +5074,6 @@ var GLOSS = {
     CC.view = 'fa2trans';
     render(
       '<div class="card cc-card">' +
-        '<button id="fa2-rf" class="cc-rfb" aria-label="Refresh">&#x21bb;</button>' +
         '<h2 class="cc-h">Transactions</h2>' +
         '<div class="cc-sub">Bill-only imports \u2014 clean ones auto-apply, the rest wait here.</div>' +
         '<button id="fa2-poll" type="button" class="cc-mini">Check for new Bill Onlys</button>' +

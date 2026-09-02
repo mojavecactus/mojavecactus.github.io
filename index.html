@@ -466,7 +466,7 @@ body.cc-fixed #cclist{flex:1; min-height:0; overflow-y:auto; -webkit-overflow-sc
 @keyframes fa2pulse{0%,100%{opacity:.2} 50%{opacity:1}}
 .fa2-flash .fa2-fl-act{margin-left:auto; color:inherit; font-weight:800;}
 body.fa2-wide #content > .card.cc-card{max-width:none; margin:0; padding:0; background:transparent; border:0; text-align:left;}
-body.fa2-wide .cc-h{text-align:left; margin:2px 0 4px; padding-right:46px;}
+body.fa2-wide .cc-h{text-align:left; margin:2px 0 4px;}
 body.fa2-wide .cc-sub{text-align:left;}
 body.fa2-wide .cc-rfb{top:-4px; right:0;}
 body.fa2-wide .fa2-pills{justify-content:flex-start;}
@@ -773,7 +773,7 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 .emp span{display:block; font-size:var(--fs-sm); line-height:1.4}
 .emp .ea{margin-top:12px}
 body.fa2-wide .emp{text-align:left; padding:16px 2px}
-#ptr{position:fixed; top:calc(env(safe-area-inset-top) + 70px); left:50%; transform:translate(-50%,-40px); z-index:9; width:34px; height:34px; border-radius:50%; background:var(--panel); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--amber); font-size:18px; opacity:0; transition:opacity .15s; pointer-events:none;}
+#ptr{position:fixed; top:calc(env(safe-area-inset-top) + 92px); left:50%; transform:translate(-50%,-40px); z-index:9; width:34px; height:34px; border-radius:50%; background:var(--panel); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--amber); font-size:18px; opacity:0; transition:opacity .15s; pointer-events:none;}
 #ptr.spin{animation:ptrspin .8s linear infinite}
 @keyframes ptrspin{to{transform:translate(-50%,0) rotate(360deg)}}
 .since{font-variant-numeric:tabular-nums}
@@ -789,7 +789,6 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 ::view-transition-group(tbx-title){animation-duration:.22s; animation-timing-function:cubic-bezier(.2,.8,.2,1)}
 ::view-transition-old(tbx-title){animation:none; opacity:0}
 ::view-transition-new(tbx-title){animation:none; height:100%; object-fit:none}
-html.vt-on #content.vt{animation:none}
 </style>
 </head>
 <body>
@@ -967,7 +966,7 @@ html.vt-on #content.vt{animation:none}
 })();
 </script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.111.js"></script>
+<script src="app-4.112.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
 </body>
 </html>
