@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.113';
+  var APPVER = '4.114';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2688,7 +2688,7 @@ var GLOSS = {
         (TR.hub ? '<div class="cc-sub"><button id="ct-mg" class="cc-link" type="button">Manage this team</button></div>' : '') +
         (ccLearnCount() ? '<div class="cc-sub">' + ccLearnCount() + ' new barcode' + (ccLearnCount() > 1 ? 's' : '') + ' learned on this phone <button id="ct-learn" class="cc-link" type="button">copy</button></div>' : '') +
         '<button id="ct-cc" class="ct-big">Cycle Count<span>Trunk &amp; closet counts by location</span></button>' +
-        (TR.fa ? '<button id="ct-fa2" class="ct-big">F&amp;A Inventory <em class="fa2-em">beta</em><span>Live drops, usage, send-backs &amp; history</span></button>' : '') +
+        (TR.fa ? '<button id="ct-fa2" class="ct-big">F&amp;A Inventory<span>Live drops, usage, send-backs &amp; history</span></button>' : '') +
       '</div>');
     document.getElementById('ct-cc').addEventListener('click', function () { location.hash = TR.id === 'ct' ? '#/cc' : '#/team/' + TR.id + '/cc'; });
     var mg = document.getElementById('ct-mg');
@@ -3285,7 +3285,22 @@ var GLOSS = {
       return (j.ledger || []).some(function (r) { return String(r[ix]) === opId; });
     }).catch(function () { return null; });
   }
+  // Stock never enters the sheet without a part number, lot and expiration - this is the
+  // one gate every screen passes through, so a missed check upstream still cannot save.
+  function fa2StockGate(events) {
+    for (var i = 0; i < (events || []).length; i++) {
+      var e = events[i]; if (e.type !== 'Received') continue;
+      var miss = [];
+      if (!String(e.ref || '').trim()) miss.push('part number');
+      if (!String(e.lot || '').trim()) miss.push('lot');
+      if (!/^\d{4}-\d{2}(?:-\d{2})?$/.test(String(e.exp || ''))) miss.push('expiration');
+      if (miss.length) return (e.ref ? e.ref + ' ' : 'An item ') + 'is missing its ' + miss.join(', ') + ' \u2014 nothing was saved.';
+    }
+    return '';
+  }
   function fa2Submit(events, label, btn) {
+    var gateMsg = fa2StockGate(events);
+    if (gateMsg) { if (btn) { btn.disabled = false; } var eG = new Error(gateMsg); eG.hub = true; return Promise.reject(eG); }
     var p = fa2PendGet(), sig = fa2Sig(events);
     // Same screen + same content after a failed attempt = same opId (the hub dedups).
     // Same screen but edited content = check whether the earlier attempt landed first.
@@ -3577,7 +3592,7 @@ var GLOSS = {
   /* ---------- Home ---------- */
   function fa2Home() {
     var fa = fa2IsFA();
-    setTitle('F&A Inventory', 'beta', 'sup'); backBtn.hidden = false;
+    setTitle('F&A Inventory', ''); backBtn.hidden = false;
     ccStop();
     if (!fa2Ensure(fa2Home)) return; fa2Wide(true);
     CC.view = 'fa2home';
@@ -3600,7 +3615,7 @@ var GLOSS = {
     render(
       '<div class="card cc-card">' +
         '<div id="fa2-flash" class="fa2-flash" hidden></div>' +
-        '<h2 class="cc-h">F&amp;A Inventory <em class="fa2-em">beta</em></h2>' +
+        '<h2 class="cc-h">F&amp;A Inventory</h2>' +
         '<div class="cc-sub">' + (fa ? 'F&amp;A view \u2014 send-backs only. Everything else is read-only.' : 'Live field stock \u2014 everything handed to the Foot &amp; Ankle team.') + '</div>' +
         '<div id="fa2-pills" class="fa2-pills"></div>' +
         '<div id="fa2-trkpend"></div>' +
@@ -4285,6 +4300,11 @@ var GLOSS = {
     var lot = p.lot || '', exp = ccExp(p.exp), ref = r.sku || '', desc = '';
     if (!ref && !p.gtin && (lot || exp)) {
       ccFlashGreen();
+      if (FA2.pendRef && now - FA2.pendRef.t < FA2_HELD_MS) {
+        var pr = FA2.pendRef; FA2.pendRef = null; fa2HeldDraw();
+        fa2ScanConfirm(pr.ref, pr.desc, lot, exp);
+        return;
+      }
       if (fa2AttachLE(lot, exp)) { ccBeep('ok'); ccStatus((lot ? 'Lot ' + lot : 'Expiry') + ' attached to the last item'); ccSchedule(200); return; }
       FA2.pendLE = { lot: lot, exp: exp, t: now }; fa2HeldDraw();
       fa2LotEntry(lot, exp);
@@ -4297,7 +4317,7 @@ var GLOSS = {
     if (!ref) { ccBeep('warn'); ccStatus('Unknown barcode \u2014 use + Manual'); ccSchedule(300); return; }
     desc = fa2DescOf(ref);
     if (FA2.pendLE && now - FA2.pendLE.t < FA2_HELD_MS) { lot = lot || FA2.pendLE.lot; exp = exp || FA2.pendLE.exp; }
-    FA2.pendLE = null; fa2HeldDraw();
+    FA2.pendLE = null; FA2.pendRef = null; fa2HeldDraw();
     ccFlashGreen();
     fa2ScanConfirm(ref, desc, lot, exp);
   }
@@ -4342,21 +4362,33 @@ var GLOSS = {
     try { navigator.vibrate && navigator.vibrate(had ? [30, 60, 30] : 35); } catch (e) {}
     fa2ScanSheet({
       title: esc(ref) + (desc ? ' \u2014 ' + esc(desc) : ''),
-      sub: (lot ? 'Lot ' + esc(lot) : 'No lot on this barcode') + (exp ? ' \u00b7 Exp ' + esc(exp) : (lot ? ' \u00b7 no expiry on this barcode' : '')),
+      sub: (lot ? 'Lot ' + esc(lot) : '<b>No lot on this barcode</b>') + (exp ? ' \u00b7 Exp ' + esc(exp) : ' \u00b7 <b>no expiration on this barcode</b>') +
+           ((lot && exp) ? '' : '<br>Type what\u2019s on the box, or Cancel and scan the lot barcode first \u2014 it can\u2019t be added without both.'),
       expired: ccIsExpired(exp),
-      fields: (lot ? '' : '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box (or scan the lot barcode next)">') +
-              (exp ? '' : '<label class="a2f"><span class="a2fl">Expiration \u2014 optional here, needed before saving</span><input id="cc-cexp" class="cc-in" type="date"></label>'),
+      fields: (lot ? '' : '<input id="cc-clot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box (required)">') +
+              (exp ? '' : '<label class="a2f"><span class="a2fl">Expiration (required)</span><input id="cc-cexp" class="cc-in" type="date"></label>') +
+              ((lot && exp) ? '' : '<button type="button" id="cc-cscan" class="cc-mini">Scan the lot barcode instead</button><div id="cc-cerr" class="cc-err" hidden></div>'),
       note: had ? 'Already in list: <b>' + had.qty + '</b> \u00b7 this adds on top' : '',
       qtyLabel: had ? 'Add quantity' : 'Quantity',
       onOk: function (q) {
         var lv = document.getElementById('cc-clot'), xv = document.getElementById('cc-cexp');
         var useLot = lot || (lv ? lv.value.trim() : '');
-        var useExp = exp || ((xv && /^\d{4}-\d{2}-\d{2}$/.test(xv.value)) ? xv.value : '');
+        if (!useLot) { if (lv) { lv.classList.add('cc-need'); try { lv.focus(); } catch (e) {} } fa2Err('cc-cerr', 'Lot is required.'); return false; }
+        if (!exp && !fa2ExpGate('cc-cexp', 'cc-cerr', 'Confirm')) { if (xv) xv.classList.add('cc-need'); return false; }
+        var useExp = exp || xv.value;
         fa2AddItem({ ref: ref, desc: desc, lot: useLot, exp: useExp, qty: q }, true);
-        ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (useLot ? ' \u00b7 Lot ' + useLot : ' \u00b7 scan its lot barcode next'));
+        ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + ' \u00b7 Lot ' + useLot);
       }
     });
     if (document.getElementById('cc-cexp')) fa2ExpWire('cc-cexp');
+    var scb = document.getElementById('cc-cscan');
+    if (scb) scb.addEventListener('click', function () {
+      // hold the product for two minutes; the lot label scanned next completes it
+      FA2.pendRef = { ref: ref, desc: desc, t: Date.now() }; FA2.pendLE = null; fa2HeldDraw();
+      document.getElementById('cc-cx').click();
+      ccStatus(ref + ' held \u2014 now scan its lot barcode');
+    });
+    ['cc-clot', 'cc-cexp'].forEach(function (id) { var el = document.getElementById(id); if (el) el.addEventListener('input', function () { el.classList.remove('cc-need'); var er = document.getElementById('cc-cerr'); if (er) er.hidden = true; }); });
   }
   // Lot barcode before its product: the count screen's "Lot barcode" sheet. Type the
   // part number, or Cancel and scan the product barcode next - the lot stays held.
@@ -4367,19 +4399,26 @@ var GLOSS = {
       sub: (lot ? 'Lot ' + esc(lot) : 'No lot') + (exp ? ' \u00b7 Exp ' + esc(exp) : ''),
       expired: ccIsExpired(exp),
       fields: '<div class="cc-sub2">No part number on this barcode \u2014 scan the product barcode next, or type it from the box.</div>' +
-              '<input id="cc-lpn" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Part number">',
+              '<input id="cc-lpn" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Part number (required)">' +
+              (lot ? '' : '<input id="cc-llot" class="cc-in" type="text" autocomplete="off" autocapitalize="characters" placeholder="Lot from the box (required)">') +
+              (exp ? '' : '<label class="a2f"><span class="a2fl">Expiration (required)</span><input id="cc-lexp" class="cc-in" type="date"></label>') +
+              '<div id="cc-lerr" class="cc-err" hidden></div>',
       okLabel: 'Add',
       onOk: function (q) {
         var pn = document.getElementById('cc-lpn'), v = pn ? pn.value.trim() : '';
-        if (!v) { if (pn) { pn.classList.add('cc-need'); try { pn.focus(); } catch (e) {} } return false; }
+        if (!v) { if (pn) { pn.classList.add('cc-need'); try { pn.focus(); } catch (e) {} } fa2Err('cc-lerr', 'Part number is required.'); return false; }
+        var ll = document.getElementById('cc-llot'), useLot = lot || (ll ? ll.value.trim() : '');
+        if (!useLot) { if (ll) { ll.classList.add('cc-need'); try { ll.focus(); } catch (e2) {} } fa2Err('cc-lerr', 'Lot is required.'); return false; }
+        if (!exp && !fa2ExpGate('cc-lexp', 'cc-lerr', 'Add')) return false;
+        var useExp = exp || document.getElementById('cc-lexp').value;
         FA2.pendLE = null; fa2HeldDraw();
-        fa2AddItem({ ref: v, desc: fa2DescOf(v), lot: lot, exp: exp, qty: q }, true);
-        ccStatus('Added ' + v + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
+        fa2AddItem({ ref: v, desc: fa2DescOf(v), lot: useLot, exp: useExp, qty: q }, true);
+        ccStatus('Added ' + v + (q > 1 ? ' \u00d7' + q : '') + ' \u00b7 Lot ' + useLot);
       },
       onCancel: function () { ccStatus('Lot held \u2014 now scan the product barcode'); }
     });
-    var pn0 = document.getElementById('cc-lpn');
-    if (pn0) { pn0.addEventListener('input', function () { pn0.classList.remove('cc-need'); }); }
+    if (document.getElementById('cc-lexp')) fa2ExpWire('cc-lexp');
+    ['cc-lpn', 'cc-llot', 'cc-lexp'].forEach(function (id) { var el = document.getElementById(id); if (el) el.addEventListener('input', function () { el.classList.remove('cc-need'); var er = document.getElementById('cc-lerr'); if (er) er.hidden = true; }); });
   }
   // Remove / Send: the scanned product's stock rows -> the same sheet (a lot to pick when
   // the barcode had none and several are on hand, quantity capped at what is left).
@@ -4436,13 +4475,16 @@ var GLOSS = {
   function fa2HeldDraw() {
     var h = document.getElementById('a2-held'); if (!h) return;
     clearTimeout(FA2.heldTO);
-    var p = FA2.pendLE;
-    if (!p || Date.now() - p.t >= FA2_HELD_MS) { FA2.pendLE = null; h.hidden = true; h.innerHTML = ''; return; }
+    var p = FA2.pendLE, pr = FA2.pendRef;
+    if (pr && Date.now() - pr.t >= FA2_HELD_MS) { FA2.pendRef = pr = null; }
+    if (!p || Date.now() - p.t >= FA2_HELD_MS) { FA2.pendLE = p = null; }
+    if (!p && !pr) { h.hidden = true; h.innerHTML = ''; return; }
     h.hidden = false;
-    h.innerHTML = '<span class="f2bub">' + (p.lot ? 'Lot ' + esc(p.lot) : '') + (p.lot && p.exp ? ' \u00b7 ' : '') + (p.exp ? 'Exp ' + esc(p.exp) : '') + ' held for the next product</span>' +
-      '<button type="button" id="a2-heldx" class="k-x" aria-label="Forget held lot">\u00d7</button>';
-    document.getElementById('a2-heldx').addEventListener('click', function () { FA2.pendLE = null; fa2HeldDraw(); ccStatus('Held lot cleared'); });
-    FA2.heldTO = setTimeout(fa2HeldDraw, FA2_HELD_MS - (Date.now() - p.t) + 50);
+    h.innerHTML = '<span class="f2bub">' + (pr ? esc(pr.ref) + ' held \u2014 scan its lot barcode' :
+        (p.lot ? 'Lot ' + esc(p.lot) : '') + (p.lot && p.exp ? ' \u00b7 ' : '') + (p.exp ? 'Exp ' + esc(p.exp) : '') + ' held for the next product') + '</span>' +
+      '<button type="button" id="a2-heldx" class="k-x" aria-label="Forget held item">\u00d7</button>';
+    document.getElementById('a2-heldx').addEventListener('click', function () { FA2.pendLE = null; FA2.pendRef = null; fa2HeldDraw(); ccStatus('Cleared'); });
+    FA2.heldTO = setTimeout(fa2HeldDraw, FA2_HELD_MS - (Date.now() - (p || pr).t) + 50);
   }
   // A lot/expiry-only barcode scanned right after a product barcode belongs to
   // that item (two-barcode labels in either order). Returns true when attached.
@@ -4488,7 +4530,8 @@ var GLOSS = {
       var exp = document.getElementById('ie-exp').value;
       var qty = Math.round(+document.getElementById('ie-qty').value || 0);
       if (!ref) return fa2Err('ie-err', 'REF is required.');
-      if (exp && !fa2ExpGate('ie-exp', 'ie-err', 'Save changes')) return;
+      if (!lot) return fa2Err('ie-err', 'LOT is required \u2014 an item can\u2019t be saved without one.');
+      if (!fa2ExpGate('ie-exp', 'ie-err', 'Save changes')) return;
       if (qty < 1) return fa2Err('ie-err', 'Qty must be at least 1.');
       var changed = ref !== p.ref || lot !== (p.lot || '') || exp !== fa2DateVal(p.exp);
       var src = (p.src === 'scan' && changed) ? 'manual' : p.src;
@@ -4516,7 +4559,7 @@ var GLOSS = {
     t.order.forEach(function (k) { var p = t.items[k]; if (!p.ref || !p.lot || !p.exp || !(p.qty > 0)) bad++; });
     b.disabled = !t.order.length || bad > 0;
     var w = document.getElementById('a2-warn');
-    if (w) { w.hidden = !bad; w.textContent = bad ? bad + ' item' + (bad > 1 ? 's need' : ' needs') + ' a lot and expiration \u2014 scan its lot barcode next, or remove it and use + Manual.' : ''; }
+    if (w) { w.hidden = !bad; w.textContent = bad ? bad + ' item' + (bad > 1 ? 's need' : ' needs') + ' a lot and expiration \u2014 tap the line to fill them in, or remove it.' : ''; }
   }
   function fa2RetCode(txt, now) {
     if (txt === CC.cool.code && now - CC.cool.t < (CC.cool.ms || 2200)) { ccSchedule(160); return; }
@@ -4999,7 +5042,7 @@ var GLOSS = {
         var p = tray.items[k];
         var eid = fa2Uuid();
         if (over[k]) {
-          evs.push({ eventId: fa2Uuid(), type: 'Received', ref: p.ref, desc: p.desc, lot: p.lot, exp: p.exp || over[k].exp || '2099-12',
+          evs.push({ eventId: fa2Uuid(), type: 'Received', ref: p.ref, desc: p.desc, lot: p.lot, exp: p.exp || over[k].exp || '',
             qty: p.qty - p.onhand, from: over[k].src, eventDate: over[k].date, note: over[k].notes,
             flags: 'Late entry', linkedTo: eid, entryMethod: 'manual', enteredBy: fa2Who() });
         }
@@ -5035,19 +5078,22 @@ var GLOSS = {
         '<label class="fa2-chk"><input id="od-chk" type="checkbox"> This inventory was already transferred \u2014 it just never got entered</label>' +
         '<div id="od-more" hidden>' +
           '<input id="od-src" class="cc-in" placeholder="Where it came from (required)">' +
+          (p.exp ? '' : '<label class="a2f"><span class="a2fl">Expiration of this lot (required)</span><input id="od-exp" class="cc-in" type="date"></label>') +
           '<input id="od-date" class="cc-in" type="date">' +
           '<input id="od-notes" class="cc-in" placeholder="Notes">' +
         '</div>' +
         '<div class="fa2-mrow"><button id="od-cancel" type="button" class="cc-mini">Cancel</button><button id="od-go" type="button" class="cc-btn" disabled>Record &amp; continue</button></div>' +
       '</div>';
     document.body.appendChild(wrap);
-    var chk = wrap.querySelector('#od-chk'), more = wrap.querySelector('#od-more'), go = wrap.querySelector('#od-go'), src = wrap.querySelector('#od-src');
-    function gate() { go.disabled = !(chk.checked && src.value.trim()); }
+    var chk = wrap.querySelector('#od-chk'), more = wrap.querySelector('#od-more'), go = wrap.querySelector('#od-go'), src = wrap.querySelector('#od-src'), oxp = wrap.querySelector('#od-exp');
+    if (oxp) fa2ExpWire('od-exp');
+    function gate() { go.disabled = !(chk.checked && src.value.trim() && (!oxp || /^\d{4}-\d{2}-\d{2}$/.test(oxp.value))); }
     chk.addEventListener('change', function () { more.hidden = !chk.checked; gate(); });
     src.addEventListener('input', gate);
+    if (oxp) ['input', 'change'].forEach(function (ev) { oxp.addEventListener(ev, gate); });
     wrap.querySelector('#od-cancel').addEventListener('click', function () { wrap.remove(); });
     go.addEventListener('click', function () {
-      over[key] = { src: src.value.trim(), date: wrap.querySelector('#od-date').value, notes: wrap.querySelector('#od-notes').value.trim() };
+      over[key] = { src: src.value.trim(), date: wrap.querySelector('#od-date').value, notes: wrap.querySelector('#od-notes').value.trim(), exp: oxp ? oxp.value : '' };
       wrap.remove(); done();
     });
   }
@@ -6033,6 +6079,7 @@ var GLOSS = {
   // dev/test hooks (harmless in production)
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
     // sync engine, for tools/cc-test
+    fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
     cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expIso: expIso, expDisp: expDisp, catCount: catCount } };
 };
 
