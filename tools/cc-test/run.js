@@ -252,6 +252,7 @@ async function boot(sheet, storage) {
     check('reserved: hub team cannot rename a built-in territory', dev.TERR.buf.name === bufName && dev.TERR.buf.enc === 'cc-buf.enc.json');
     dev.hubTerrAdd({ slug: 'bos', name: 'Boston' }, false);
     check('reserved: normal hub team still added', dev.TERR.bos && dev.TERR.bos.hub === true);
+    check('sandbox: built-in staging territory exists but is never listed', dev.TERR.sbx && dev.TERR.sbx.enc === 'cc-sbx.enc.json' && dev.TERR.sbx.tgt === 'sbx_cc' && dev.TORDER.indexOf('sbx') === -1);
     w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange'));
     dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
     dev.CC.hist = { 'trunk|ZZZ|old': [1, 2], 'trunk|A|L': [2] };

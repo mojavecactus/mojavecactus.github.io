@@ -1591,9 +1591,10 @@ var GLOSS = {
     la:  { id: 'la',  name: 'Los Angeles', enc: 'cc-la.enc.json',  tgt: 'la_cc',  gate: 'Los Angeles team access \u2014 enter the password.', fa: false },
     syr: { id: 'syr', name: 'Syracuse',    enc: 'cc-syr.enc.json', tgt: 'syr_cc', gate: 'Syracuse team access \u2014 enter the password.', fa: false },
     ri:  { id: 'ri',  name: 'Rhode Island', enc: 'cc-ri.enc.json',  tgt: 'ri_cc',  gate: 'Rhode Island team access \u2014 enter the password.', fa: false },
-    wm:  { id: 'wm',  name: 'Western Mass', enc: 'cc-wm.enc.json',  tgt: 'wm_cc',  gate: 'Western Mass team access \u2014 enter the password.', fa: false }
+    wm:  { id: 'wm',  name: 'Western Mass', enc: 'cc-wm.enc.json',  tgt: 'wm_cc',  gate: 'Western Mass team access \u2014 enter the password.', fa: false },
+    sbx: { id: 'sbx', name: 'Sandbox',      enc: 'cc-sbx.enc.json', tgt: 'sbx_cc', gate: 'Sandbox \u2014 staging territory for testing. Enter the password.', fa: false }
   };
-  var TORDER = ['buf', 'la', 'ri', 'syr', 'wm'];
+  var TORDER = ['buf', 'la', 'ri', 'syr', 'wm']; // sbx is deliberately not listed: reachable only at #/team/sbx
   // ---- Hub: self-serve territories (served by the syksmtoolbox Apps Script) ----
   var HUB = { url: '', key: '' };
   try { if (window.TOOLBOX && window.TOOLBOX.hub && window.TOOLBOX.hub.url) HUB = window.TOOLBOX.hub; } catch (eHub) {}
@@ -6610,7 +6611,7 @@ var GLOSS = {
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
-    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, progress: fopsProgress, preview: fopsPreview, FO: FO } } };
+    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, TORDER: TORDER, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, progress: fopsProgress, preview: fopsPreview, FO: FO } } };
 };
 
 /* ---- Feedback: screenshot + silent send (mailto fallback) ----
