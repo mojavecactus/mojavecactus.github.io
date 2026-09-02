@@ -376,7 +376,7 @@ async function boot(sheet, storage) {
     const box = () => w.document.getElementById('cc-fops');
     check('gate: old server (no fops key) -> no card', box() && box().hidden === true && box().innerHTML === '');
     sheet.fopsCap = true; await dev.pull('cc'); await sleep(50);
-    check('gate: server that knows the feature -> a separate Field Ops row under the counts, after the tiles', box().hidden === false && /Field Ops count sheet/.test(box().textContent) && /Upload the empty sheet/.test(box().textContent) && box().previousElementSibling && box().previousElementSibling.id === 'cc-cards' && !!box().querySelector('.fops-lab'));
+    check('gate: server that knows the feature -> Field Ops pinned at the top, Counts labelled below it', box().hidden === false && /Field Ops count sheet/.test(box().textContent) && /Upload the empty sheet/.test(box().textContent) && box().nextElementSibling && box().nextElementSibling.id === 'cc-counts-lab' && box().nextElementSibling.hidden === false && !!box().querySelector('.fops-lab') && w.document.getElementById('cc-cards').compareDocumentPosition(box()) & 2);
     w.document.querySelector('.fops-home').click(); await sleep(300);
     const head = () => w.document.getElementById('fops-head');
     check('screen: upload prompt with the bold Empty instruction and an Upload button', w.location.hash === '#/cc/fops' && /<b>empty<\/b>/.test(head().innerHTML) && !!w.document.getElementById('fops-up'));
@@ -389,6 +389,8 @@ async function boot(sheet, storage) {
     check('put: screen shows progress from the status in the put reply, with Replace / Remove', /0 found/.test(head().textContent) && /10 missing/.test(head().textContent) && /0 additional/.test(head().textContent) && /IT9999 SM SANDBOX SPLIT/.test(head().textContent) && !!w.document.getElementById('fops-rm'), head().textContent);
     w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
     check('home: row shows the sheet title + counts and never renders as a nested card', /IT9999 SM SANDBOX SPLIT/.test(box().textContent) && /10 missing/.test(box().textContent) && !box().querySelector('.fops-card') && !box().querySelector('button'));
+    { const c0 = sheet.statusCalls || 0; F.st('cc').status.at = 0; w.document.dispatchEvent(new w.Event('visibilitychange')); await sleep(1500);
+      check('live: coming back to the foreground refreshes the team picture', (sheet.statusCalls || 0) === c0 + 1, 'calls ' + sheet.statusCalls + ' vs ' + c0); }
     check('put: status cached', JSON.parse(w.localStorage.getItem('tbx_cc_fops_status')).ver === res.ver);
     check('put: list cached on this phone as text', JSON.parse(w.localStorage.getItem('tbx_cc_fops')).lines[2][2] === '24E01');
     dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';

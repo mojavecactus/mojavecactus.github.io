@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.118';
+  var APPVER = '4.119';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1897,6 +1897,7 @@ var GLOSS = {
     try {
       if (CC.view === 'count') { ccWake(); ccBeepInit(); setTimeout(function () { ccCamRecover(); }, 500); }
       ccFlushSoon(terrTgt(), 800);
+      setTimeout(function () { fopsLiveTick(true); }, 1200);
       ccAllCcTgts().forEach(function (tg, i2) { if (tg !== terrTgt() && ccPendingLS(tg)) ccFlushSoon(tg, 1600 + i2 * 300); });
     } catch (e2) {}
   });
@@ -1933,11 +1934,12 @@ var GLOSS = {
       '<div class="card cc-card cc-home">' +
         '<h2 class="cc-h">Cycle Count</h2>' +
         '<div class="cc-sub">Counts by location \u2014 open one to keep adding, or start fresh.</div>' +
+        '<div id="cc-fops" class="fops-wrap fops-top" hidden></div>' +
+        '<div id="cc-counts-lab" class="fops-lab" hidden>Counts</div>' +
         '<button id="cc-new" class="cc-btn">Start new count</button>' +
         '<div id="cc-sync" class="cc-sync"></div>' +
         sheetLinkHTML(ccSheetUrl()) +
         '<div id="cc-cards" class="ctc-wrap">' + skel(3) + '</div>' +
-        '<div id="cc-fops" class="fops-wrap" hidden></div>' +
       '</div>');
     document.getElementById('cc-new').addEventListener('click', function () { ccSession(); });
     fopsCard();
@@ -3509,14 +3511,26 @@ var GLOSS = {
     return '<div class="fops-hint off">Not on the Field Ops list \u2014 goes to Additional</div>';
   }
   function fopsNum(n) { return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  // Other phones' scans reach this phone through fops_status: refresh it about once a minute while the
+  // Cycle Count home or the Field Ops screen is open, and whenever the app comes back to the foreground.
+  function fopsLiveTick(force) {
+    try {
+      if (document.visibilityState !== 'visible') return;
+      if (!(CC.view === 'cchome' || CC.view === 'fops')) return;
+      var t = CC.tgt, s = fopsSt(t); if (!t || !s.cap || !s.list) return;
+      if (!force && Date.now() - ((s.status && s.status.at) || 0) < 50000) return;
+      fopsStatus(t).catch(function () {});
+    } catch (e) {}
+  }
+  setInterval(function () { fopsLiveTick(false); }, 60000);
   function fopsRoute() { return CC.terr === 'ct' ? '#/cc/fops' : '#/team/' + CC.terr + '/cc/fops'; }
 
   // -- the Cycle Count home: one clearly separate row under the counts; everything else lives on the Field Ops screen --
   function fopsCard() {
     var el = document.getElementById('cc-fops'); if (!el) return;
-    var t = CC.tgt, s = fopsSt(t);
-    if (!s.cap) { el.innerHTML = ''; el.hidden = true; return; }
-    el.hidden = false;
+    var t = CC.tgt, s = fopsSt(t), lab = document.getElementById('cc-counts-lab');
+    if (!s.cap) { el.innerHTML = ''; el.hidden = true; if (lab) lab.hidden = true; return; }
+    el.hidden = false; if (lab) lab.hidden = false;
     var body;
     if (!s.list && !s.meta) {
       body = '<div class="ctc-main"><div class="ctc-t">Field Ops count sheet</div><div class="ctc-n">Upload the empty sheet Field Ops sent \u2014 see what\u2019s found, missing and additional</div></div>';
