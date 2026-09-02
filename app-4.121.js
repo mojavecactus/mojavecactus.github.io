@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.120';
+  var APPVER = '4.121';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3613,7 +3613,7 @@ var GLOSS = {
     var errHTML = err ? '<div class="cc-err fops-err">' + esc(err) + '</div>' : '';
     if (!s.list && !s.meta) {
       head.innerHTML = '<h2 class="cc-h">Field Ops count sheet</h2>' +
-        '<div class="fops-sub">Upload the <b>empty</b> count sheet Field Ops sent you (.xlsx or .csv). Quantities fill in from the team\u2019s scans, and the team sheet gets a <b>Field Ops</b> tab \u2014 confirmed, additional and missing inventory, ready to send back.</div>' +
+        '<div class="fops-sub">Upload the <b>empty</b> count sheet Field Ops sent you (.xlsx or .csv). Scanned quantities fill in from the team\u2019s scans, and the team sheet gets a <b>Field Ops</b> tab for when it\u2019s time to return the count sheet to them.</div>' +
         '<div id="fops-act"><button id="fops-up" class="cc-btn fops-btn">Upload count sheet</button>' + errHTML + '</div>';
       document.getElementById('fops-up').addEventListener('click', function () { fopsPick(t); });
       return;
