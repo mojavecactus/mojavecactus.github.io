@@ -563,7 +563,12 @@ input[type="datetime-local"].cc-in::-webkit-date-and-time-value{text-align:left;
 .fops-lnk.danger{color:#FFB3AE;}
 .fops-warn{margin-top:8px; padding:8px 10px; border-radius:10px; background:rgba(253,181,21,.12); color:var(--bone); font-size:var(--fs-sm); line-height:1.4;}
 .fops-hint{margin:6px 0 2px; font-size:13px; font-weight:700;} .fops-hint.on{color:#5fd6a4;} .fops-hint.off{color:var(--amber);}
-.fops-screen{text-align:left;} .fops-screen .cc-h{text-align:left;} .fops-screen #fops-head{padding-bottom:12px; border-bottom:1px solid var(--line);}
+.fops-screen #fops-body{text-align:left;}
+.fops-screen #fops-head.has-list{padding-bottom:14px; border-bottom:1px solid var(--line);}
+.fops-screen .fops-intro{line-height:1.5; margin-bottom:14px;} .fops-screen .fops-intro b{color:var(--bone);}
+.fops-screen #fops-head .fops-nums, .fops-screen #fops-head .fops-row{justify-content:center;}
+.fops-screen #fops-head .fops-warn{text-align:left;}
+.fops-screen .fops-bar{margin:12px auto 8px; max-width:340px;}
 .fops-chips{margin:14px 0 6px;} .fops-chips .chip{cursor:pointer; font:inherit; font-size:13px; font-weight:800; background:transparent;}
 .fops-chips .chip[data-chip="missing"]{border-color:var(--amber); color:var(--amber);}
 .fops-chips .chip[data-chip="found"]{border-color:#5fd6a4; color:#5fd6a4;}
@@ -1014,7 +1019,7 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.121.js"></script>
+<script src="app-4.122.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
 </body>
 </html>
