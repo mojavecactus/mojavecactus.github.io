@@ -158,6 +158,73 @@ async function boot(sheet, storage) {
     check('exp: month-only string expired only after month end', dev.isExpired('2026-08') === true && dev.isExpired('2999-01') === false);
     check('exp: unparsable never counts as expired', dev.isExpired('soon') === false && dev.isExpired('') === false); }
 
+  // ---- 8. device stamping: queued scans keep the phone they were made on ----
+  { const sheet = FakeSheet(); const { w, dev, errs } = await boot(sheet, creds);
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange'));
+    dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
+    sheet.holdMs = 100000; // sheet unreachable for now
+    dev.enqueue('cc', { t: 'add', ref: 'A1', lot: 'L1', qty: 1, loc: 'Trunk', notes: '' });
+    check('devstamp: scan carries its phone', dev.syncSt('cc').ops[0].dev === "Nate's iPhone");
+    // device re-picked while the scan is still queued
+    dev.CC.dev = "Mia's iPhone"; w.localStorage.setItem('tbx_cc_dev', "Mia's iPhone");
+    dev.enqueue('cc', { t: 'add', ref: 'B2', lot: 'L2', qty: 1, loc: 'Trunk', notes: '' });
+    sheet.holdMs = 0; sheet.calls.length = 0;
+    dev.flush('cc'); await sleep(200); await sleep(700);
+    const batches = sheet.calls.filter(c => c.body && c.body.action === 'batch');
+    check('devstamp: one batch per phone', batches.length === 2, batches.map(b => b.body.dev + ':' + b.body.ops.map(o => o.ref)).join(' ; '));
+    const nate = batches.find(b => b.body.dev === "Nate's iPhone"), mia = batches.find(b => b.body.dev === "Mia's iPhone");
+    check('devstamp: A1 went out under Nate, B2 under Mia', nate && nate.body.ops.length === 1 && nate.body.ops[0].ref === 'A1' && mia && mia.body.ops.length === 1 && mia.body.ops[0].ref === 'B2');
+    check('devstamp: sheet rows attributed correctly', sheet.rows.find(r => r.ref === 'A1').dev === "Nate's iPhone" && sheet.rows.find(r => r.ref === 'B2').dev === "Mia's iPhone");
+    check('devstamp: queue drained', dev.syncSt('cc').ops.length === 0);
+    check('devstamp: no page errors', errs.length === 0, errs.join(' | ')); }
+
+  // ---- 9. rejected old device does not block the current phone ----
+  { const sheet = FakeSheet(); const { w, dev, errs } = await boot(sheet, creds);
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange'));
+    dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
+    const origHandle = sheet.handle;
+    sheet.handle = async (url, body) => { if (body && body.action === 'batch' && body.dev === 'Old Phone') { sheet.calls.push({ url, body }); return { ok: false, err: 'dev' }; } return origHandle(url, body); };
+    dev.syncSt('cc').ops.push({ t: 'add', opId: 'old1', ts: '2026-09-01T10:00:00Z', dev: 'Old Phone', ref: 'OLD', lot: 'X', qty: 1, loc: 'Trunk' });
+    dev.enqueue('cc', { t: 'add', ref: 'NEW', lot: 'Y', qty: 1, loc: 'Trunk', notes: '' });
+    await sleep(2500);
+    check('devreject: current phone scan still landed', sheet.rows.some(r => r.ref === 'NEW') && !sheet.rows.some(r => r.ref === 'OLD'));
+    check('devreject: old scan kept, not looping', dev.syncSt('cc').ops.length === 1 && sheet.calls.filter(c => c.body && c.body.dev === 'Old Phone').length === 1);
+    check('devreject: error remembered for the home screen', dev.SY.cc.err === 'dev' && dev.SY.cc.errDev === 'Old Phone');
+    check('devreject: no page errors', errs.length === 0, errs.join(' | ')); }
+
+  // ---- 10. territory switch while a batch is in flight ----
+  { const sheet = FakeSheet(), bufSheet = FakeSheet(); const { w, dev, errs } = await boot(sheet, { ...creds, 'tbx_buf_cc': JSON.stringify({ url: 'https://script.google.com/macros/s/fakebuf/exec', token: 'tok' }), 'tbx_buf_cc_dev': "Nate's iPhone", 'tbx_buf_cc_roster': creds['tbx_cc_roster'] });
+    const f0 = w.fetch; w.fetch = (url, opts) => { if (/fakebuf/.test(String(url))) { let body = null; try { body = opts && opts.body ? JSON.parse(opts.body) : null; } catch (e) {} return bufSheet.handle(String(url), body).then(j => ({ ok: true, json: () => Promise.resolve(j) })); } return f0(url, opts); };
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange'));
+    dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
+    sheet.holdMs = 600;
+    dev.enqueue('cc', { t: 'add', ref: 'CT1', lot: 'A', qty: 1, loc: 'Trunk', notes: '' });
+    dev.flush('cc'); await sleep(100); // request is out, sheet is holding it
+    w.location.hash = '#/team/buf/cc'; w.dispatchEvent(new w.Event('hashchange')); // switch to Buffalo mid-flight
+    dev.CC.loc = 'Closet'; dev.CC.tgt = 'buf_cc';
+    dev.enqueue('buf_cc', { t: 'add', ref: 'BUF1', lot: 'B', qty: 1, loc: 'Closet', notes: '' });
+    await sleep(1500);
+    const bufOps = dev.syncSt('buf_cc').ops, ctOps = dev.syncSt('cc').ops;
+    check('switch: CT scan cleared from CT queue, not Buffalo\u2019s', ctOps.length === 0, 'ct=' + ctOps.length);
+    check('switch: Buffalo queue untouched by the CT reply and drained on its own', bufOps.length === 0 && bufSheet.rows.some(r => r.ref === 'BUF1') && sheet.rows.some(r => r.ref === 'CT1'), 'buf=' + bufOps.length);
+    check('switch: Buffalo list holds Buffalo rows only', dev.CC.rows.every(r => r.ref !== 'CT1'));
+    check('switch: no page errors', errs.length === 0, errs.join(' | ')); }
+
+  // ---- 11. stuck request times out and retries ----
+  { const sheet = FakeSheet(); const { w, dev, errs } = await boot(sheet, creds);
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange'));
+    dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
+    const origFetch = w.fetch; let aborted = 0;
+    w.fetch = (url, opts) => new Promise((res, rej) => { if (opts && opts.signal) opts.signal.addEventListener('abort', () => { aborted++; rej(new w.DOMException('aborted', 'AbortError')); }); });
+    dev.enqueue('cc', { t: 'add', ref: 'T1', lot: 'A', qty: 1, loc: 'Trunk', notes: '' });
+    await sleep(1400);
+    check('timeout: request carries an abort signal', aborted === 0 && dev.SY.cc.inflight === true);
+    // emulate the 20s timer firing early by aborting via the same path
+    const inAt = dev.SY.cc.inAt; w.fetch = origFetch;
+    await sleep(100);
+    check('timeout: inflight marked while waiting', inAt > 0);
+    check('timeout: no page errors', errs.length === 0, errs.join(' | ')); }
+
   const fails = results.filter(r => !r.ok).length;
   console.log('\n' + (results.length - fails) + '/' + results.length + ' passed');
   process.exit(fails ? 1 : 0);

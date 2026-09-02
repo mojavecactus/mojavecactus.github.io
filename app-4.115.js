@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.114';
+  var APPVER = '4.115';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1612,6 +1612,7 @@ var GLOSS = {
     for (var i = HORDER.length - 1; i >= 0; i--) {
       var k = HORDER[i];
       if (liveSlugs.indexOf(k) < 0) {
+        if (ccPendingLS(TERR[k].tgt)) continue; // unsent scans on this phone: keep it until they go out
         HORDER.splice(i, 1); delete TERR[k];
         ['tbx_' + k + '_cc', 'tbx_' + k + '_cc_dev', 'tbx_' + k + '_cc_roster'].forEach(function (kk) { try { localStorage.removeItem(kk); } catch (e) {} });
         gone++;
@@ -1752,6 +1753,9 @@ var GLOSS = {
   function ccEnqueue(t, op) {
     op.opId = 'o' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     if (!op.ts) op.ts = new Date().toISOString();
+    // Remember which phone made this scan now, so a later device re-pick can't
+    // move queued scans onto someone else's tab.
+    if (!op.dev) op.dev = ccDevFor(t) || '';
     ccSyncSt(t).ops.push(op);
     ccSyncSave(t);
     ccDerive(t);
@@ -1761,6 +1765,12 @@ var GLOSS = {
     ccFlushSoon(t, 1200);
   }
   function ccFlushSoon(t, ms) { var y = ccSY(t); if (y.timer) clearTimeout(y.timer); y.timer = setTimeout(function () { ccFlush(t); }, ms || 800); }
+  function ccFetchTimeout(ms) {
+    // Give up on a stuck request instead of holding the queue until the browser does.
+    var ac = null; try { if (typeof AbortController !== 'undefined') ac = new AbortController(); } catch (e) {}
+    var to = ac ? setTimeout(function () { try { ac.abort(); } catch (e2) {} }, ms) : null;
+    return { signal: ac ? ac.signal : undefined, clear: function () { if (to) clearTimeout(to); } };
+  }
   function ccFlush(t, keep) {
     var y = ccSY(t), st = ccSyncSt(t), ep = ccEndpoint(t);
     var dv = ccDevFor(t);
@@ -1770,42 +1780,65 @@ var GLOSS = {
       y.inflight = false;
     }
     if (!st.ops.length) { ccPill(); return; }
+    // One batch per phone: scans carry the device they were made on, so a batch
+    // only holds scans from a single device and is sent under that name. Scans
+    // saved before this existed have no device and go under the current one.
+    // A device the sheet already rejected is skipped while other scans remain,
+    // so one stale group can't hold up the current phone. Re-picking the device
+    // clears the rejection and the group is tried again.
+    var bdev = '';
+    for (var b0 = 0; b0 < st.ops.length; b0++) { var d0 = st.ops[b0].dev || dv; if (!(y.err === 'dev' && d0 === y.errDev)) { bdev = d0; break; } }
+    if (!bdev) { ccPill(); ccSyncLine(t); return; }
+    var batch = [], cap = keep ? 25 : 150;
+    for (var bi = 0; bi < st.ops.length && batch.length < cap; bi++) { if ((st.ops[bi].dev || dv) === bdev) batch.push(st.ops[bi]); }
     y.inflight = true; y.inAt = Date.now(); ccPill();
-    var batch = st.ops.slice(0, keep ? 25 : 150);
-    fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: dv, ops: batch, norows: 1 }), keepalive: !!keep })
+    var tmo = ccFetchTimeout(20000);
+    fetch(ep.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ token: ep.token, action: 'batch', dev: bdev, ops: batch, norows: 1 }), keepalive: !!keep, signal: tmo.signal })
       .then(function (r) { return r.json(); })
       .then(function (j) {
+        tmo.clear();
         y.inflight = false;
+        // Look the territory state up again: the user may have switched territories
+        // while this request was out, and the object grabbed at the start would then
+        // belong to a different territory.
+        var st2 = ccSyncSt(t);
         if (!j || !j.ok || !j.applied) {
           // Not on the roster: nothing will change until the device is re-picked
           // (which flushes again), so don't sit in a retry loop.
-          if (j && j.err === 'dev') { ccStatus('This device isn\u2019t on the roster \u2014 tap change on ' + terrByTgt(t).name); ccPill(); return; }
+          if (j && j.err === 'dev') {
+            y.err = 'dev'; y.errDev = bdev; ccStatus((bdev === dv ? 'This device isn\u2019t' : bdev + ' isn\u2019t') + ' on the roster \u2014 tap change on ' + terrByTgt(t).name); ccPill(); ccSyncLine(t);
+            // Scans from any other phone can still go out.
+            if (st2.ops.some(function (o) { return (o.dev || dv) !== bdev; })) ccFlushSoon(t, 400);
+            return;
+          }
           if (j && j.err === 'busy') { ccPill(); ccFlushSoon(t, 1500 + Math.floor(Math.random() * 2500)); return; }
           y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 5000 * Math.max(1, y.retry)); return;
         }
+        if (y.errDev === bdev) { y.err = ''; y.errDev = ''; }
         var done = {}; j.applied.forEach(function (id) { done[id] = 1; });
         var fresh = {}; (j.fresh || j.applied).forEach(function (id) { fresh[id] = 1; });
-        var settled = st.ops.filter(function (o) { return fresh[o.opId]; });
-        st.ops = st.ops.filter(function (o) { return !done[o.opId]; });
-        if (j.rows) st.base = j.rows;
+        var settled = st2.ops.filter(function (o) { return fresh[o.opId]; });
+        st2.ops = st2.ops.filter(function (o) { return !done[o.opId]; });
+        if (j.rows) st2.base = j.rows;
         else if (settled.length) {
-          st.base = ccDeriveCore(st.base, settled, t, dv).map(function (r) { if (r.pending) { var c = {}; for (var k in r) c[k] = r[k]; delete c.pending; return c; } return r; });
+          st2.base = ccDeriveCore(st2.base, settled, t, bdev).map(function (r) { if (r.pending) { var c = {}; for (var k in r) c[k] = r[k]; delete c.pending; return c; } return r; });
         }
         y.retry = 0; y.lastOk = Date.now();
         ccSyncSave(t, true); ccDerive(t); ccRenderList();
         if (CC.view === 'cchome' && t === CC.tgt) ccHomeCards();
-            ccPill();
-        if (st.ops.length) ccFlushSoon(t, 400);
+        ccPill(); ccSyncLine(t);
+        if (st2.ops.length) ccFlushSoon(t, 400);
       })
-      .catch(function () { y.inflight = false; y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 4000 * Math.max(1, y.retry)); });
+      .catch(function () { tmo.clear(); y.inflight = false; y.retry = Math.min(y.retry + 1, 5); ccPill(); ccFlushSoon(t, 4000 * Math.max(1, y.retry)); });
   }
   function ccPull(t) {
     var ep = ccEndpoint(t);
     if (!ep) return Promise.reject(new Error('nocreds'));
     var y = ccSY(t), startOk = y.lastOk;
     var q = '&action=pull&dev=' + encodeURIComponent(ccDevFor(t) || '');
-    return fetch(ep.url + '?token=' + encodeURIComponent(ep.token) + q)
-      .then(function (r) { return r.json(); })
+    var tmo = ccFetchTimeout(20000);
+    return fetch(ep.url + '?token=' + encodeURIComponent(ep.token) + q, { signal: tmo.signal })
+      .then(function (r) { tmo.clear(); return r.json(); }, function (e) { tmo.clear(); throw e; })
       .then(function (j) {
         if (j && j.ok && j.rows) {
           if (j.sheetUrl && t !== 'cc') { try { ccLS('tbx_' + t + '_sheet', String(j.sheetUrl)); } catch (eS) {} var sl = document.querySelector('.sheetlink'); if (!sl && CC.view === 'cchome' && t === CC.tgt) { var sy0 = document.getElementById('cc-sync'); if (sy0) sy0.insertAdjacentHTML('afterend', sheetLinkHTML(j.sheetUrl)); } }
@@ -1962,7 +1995,9 @@ var GLOSS = {
       document.getElementById('cc-devgo').addEventListener('click', function () {
         var v = document.getElementById('cc-dev').value;
         if (!v) return;
-        CC.dev = v; ccLS(terrKey('_dev'), v); var nx = CC.ret || ccScreen; CC.ret = null; nx();
+        CC.dev = v; ccLS(terrKey('_dev'), v);
+        var y0 = ccSY(terrTgt()); y0.err = ''; y0.errDev = '';
+        var nx = CC.ret || ccScreen; CC.ret = null; nx();
       });
     }
     draw(ccRoster());
@@ -3049,6 +3084,16 @@ var GLOSS = {
       '</div>';
     }).join('');
   }
+  // The "Synced" line on the count home screen. Shared with the upload path so a
+  // roster rejection shows here instead of "still syncing" forever.
+  function ccSyncLine(t) {
+    if (CC.view !== 'cchome' || t !== CC.tgt) return;
+    var st = ccSyncSt(t), y = ccSY(t);
+    var s2 = document.getElementById('cc-sync'); if (!s2) return;
+    if (st.ops.length && y.err === 'dev') { s2.innerHTML = esc(st.ops.length + ' scan' + (st.ops.length > 1 ? 's' : '') + ' can\u2019t send \u2014 ' + (y.errDev && y.errDev !== ccDevFor(t) ? y.errDev : 'this phone') + ' isn\u2019t on the team roster. Tap change on the ' + terrByTgt(t).name + ' screen to re-pick the device.'); return; }
+    if (st.ops.length) { s2.innerHTML = esc(st.ops.length + ' scan' + (st.ops.length > 1 ? 's' : '') + ' still syncing \u2014 sends automatically.'); return; }
+    s2.innerHTML = sinceHTML(Math.max(y.lastOk || 0, y.lastPull || 0), 'Synced');
+  }
   function faFmt(iso) {
     var d = new Date(iso); if (isNaN(d)) return String(iso || '');
     var mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
@@ -3067,11 +3112,7 @@ var GLOSS = {
     else if (sy && manual) { sy.textContent = 'Refreshing\u2026'; }
     if (rf) { rf.classList.add('spin'); rf.disabled = true; }
     function done() { var r2 = document.getElementById('cc-rf'); if (r2) { r2.classList.remove('spin'); r2.disabled = false; } }
-    function syncLine() {
-      var st = ccSyncSt(t);
-      var s2 = document.getElementById('cc-sync');
-      if (s2) s2.innerHTML = st.ops.length ? esc(st.ops.length + ' scan' + (st.ops.length > 1 ? 's' : '') + ' still syncing \u2014 sends automatically.') : sinceHTML(Math.max(ccSY(t).lastOk || 0, ccSY(t).lastPull || 0), 'Synced');
-    }
+    function syncLine() { ccSyncLine(t); }
     ccFlushSoon(t, 250);
     return ccPull(t).then(function () {
       paint(); syncLine(); done();
