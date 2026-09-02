@@ -578,8 +578,18 @@ input[type="datetime-local"].cc-in::-webkit-date-and-time-value{text-align:left;
 .fops-chips .chip.on[data-chip="found"]{background:#5fd6a4; color:#141414;}
 .fops-chips .chip.on[data-chip="additional"]{background:#8fb9ea; color:#141414;}
 .fops-lot{color:var(--muted); font-weight:600; font-size:13px; margin-left:6px;}
-#fops-list{overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; margin-top:6px; padding-bottom:6px;}
+/* The list is an inset, scrollable panel; on the Field Ops screen the page itself is locked (body.cc-fixed) and
+   the panel takes every pixel left under the header, chips and search, down to the bottom of the screen. */
+#fops-list{overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; margin-top:8px; padding:8px 8px calc(env(safe-area-inset-bottom) + 8px);
+  background:rgba(0,0,0,.28); border:1px solid var(--line); border-radius:14px;
+  box-shadow:inset 0 10px 10px -10px rgba(0,0,0,.75), inset 0 -10px 10px -10px rgba(0,0,0,.75);}
 #fops-list .ctc:first-child{margin-top:0;}
+#fops-list .ctc{background:var(--panel);}
+body.cc-fixed .fops-screen{flex:1; min-height:0; display:flex; flex-direction:column; width:100%; max-width:420px; margin:0 auto; padding:16px 14px 0;}
+body.cc-fixed .fops-screen #fops-head{flex:0 0 auto;}
+body.cc-fixed .fops-screen #fops-body{flex:1; min-height:0; display:flex; flex-direction:column;}
+body.cc-fixed .fops-screen #fops-body > *{flex:0 0 auto;}
+body.cc-fixed .fops-screen #fops-list{flex:1 1 auto; min-height:0; max-height:none; margin-bottom:0;}
 .cc-note{margin:12px 0 2px; padding:9px 12px; border-radius:12px; background:rgba(253,181,21,.12);
   border:1px solid rgba(253,181,21,.42); color:var(--bone); font-size:13.5px; line-height:1.4;}
 .cc-note b{color:var(--amber); font-size:16px;}
@@ -1021,7 +1031,7 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.123.js"></script>
+<script src="app-4.124.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
 </body>
 </html>

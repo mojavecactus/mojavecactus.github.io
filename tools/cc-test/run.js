@@ -422,7 +422,7 @@ async function boot(sheet, storage) {
     // list screen
     two.w.location.hash = '#/cc/fops'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(300);
     const scr = () => two.w.document.getElementById('fops-list'), body2 = () => two.w.document.getElementById('fops-body');
-    check('screen: the list is its own scroll panel sized to the viewport', /px$/.test(scr().style.maxHeight) && parseInt(scr().style.maxHeight, 10) >= 240, scr().style.maxHeight);
+    check('screen: page locked (body.cc-fixed) so only the list panel scrolls', two.w.document.body.classList.contains('cc-fixed') && scr().style.maxHeight === '');
     check('screen: Missing chip first with 8 rows, chips carry team counts', scr() && scr().querySelectorAll('.fops-row2').length === 8 && /Missing 8/.test(body2().textContent) && /Found 2/.test(body2().textContent) && /Additional 1/.test(body2().textContent), body2().textContent.slice(0, 200));
     const qin = two.w.document.getElementById('fops-q'); qin.value = '3911-514'; qin.dispatchEvent(new two.w.Event('input'));
     check('screen: dash-insensitive search narrows without re-rendering the box', scr().querySelectorAll('.fops-row2').length === 1 && /3911-514-620HA/.test(scr().textContent) && two.w.document.getElementById('fops-q') === qin);
@@ -434,6 +434,7 @@ async function boot(sheet, storage) {
     w.document.getElementById('fops-rm').click(); await sleep(50);
     w.document.querySelector('.ask-ok').click(); await sleep(200);
     w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+    check('home: leaving the Field Ops screen unlocks the page', !w.document.body.classList.contains('cc-fixed'));
     check('remove: server cleared, home row back to the upload prompt, caches dropped', sheet.fops === null && /Upload the empty sheet/.test(box().textContent) && w.localStorage.getItem('tbx_cc_fops') === null && w.localStorage.getItem('tbx_cc_fops_status') === null, box().textContent);
     two.w.location.hash = '#/cc'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(400);
     check('remove: second phone drops the list on its next pull', two.dev.fops.st('cc').list === null && /Upload the empty sheet/.test(box2().textContent), box2().textContent);

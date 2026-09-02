@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.123';
+  var APPVER = '4.124';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3600,6 +3600,8 @@ var GLOSS = {
     setTitle('Field Ops', ''); backBtn.hidden = false; ccStop();
     if (!ctEnsure(fopsScreen)) return;
     CC.tgt = terrTgt(); CC.view = 'fops'; FOV.q = '';
+    // Same fixed layout as the count screen: the page never scrolls, only the list panel does.
+    if (document.body) document.body.classList.add('cc-fixed');
     render('<div class="card cc-card fops-screen"><div id="fops-head"></div><div id="fops-body"></div></div>');
     CURREFRESH = function () { var t = CC.tgt; return ccPull(t).then(function () { return fopsStatus(t); }).then(function () { fopsScreenPaint(); }); };
     fopsScreenPaint();
@@ -3662,6 +3664,7 @@ var GLOSS = {
   // chips and search box, so those stay put while the rows scroll (re-measured on resize / keyboard).
   function fopsFitList() {
     var list = document.getElementById('fops-list'); if (!list) return;
+    if (document.body && document.body.classList.contains('cc-fixed')) { list.style.maxHeight = ''; return; } // flex layout sizes it
     var vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 0; if (!vh) return;
     var top = list.getBoundingClientRect().top + (window.pageYOffset || 0);
     var h = Math.floor(vh - top - 18); if (h < 240) h = 240;
