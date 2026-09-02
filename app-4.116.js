@@ -3460,15 +3460,16 @@ var GLOSS = {
   function fopsRoute() { return CC.terr === 'ct' ? '#/cc/fops' : '#/team/' + CC.terr + '/cc/fops'; }
 
   // -- the card on the Cycle Count home screen --
-  function fopsCard() {
+  function fopsCard(err) {
     var el = document.getElementById('cc-fops'); if (!el) return;
     var t = CC.tgt, s = fopsSt(t);
     if (!s.cap) { el.innerHTML = ''; el.hidden = true; return; }
     el.hidden = false;
+    var errHTML = err ? '<div class="cc-err fops-err">' + esc(err) + '</div>' : '';
     if (!s.list && !s.meta) {
       el.innerHTML = '<div class="fops-card"><div class="fops-t">Field Ops count sheet</div>' +
         '<div class="fops-sub">Upload the <b>empty</b> count sheet Field Ops sent you (.xlsx or .csv). Quantities fill in from the team\u2019s scans and the sheet gets a <b>Field Ops</b> tab \u2014 confirmed, additional and missing inventory, ready to send back.</div>' +
-        '<button id="fops-up" class="cc-btn fops-btn">Upload count sheet</button></div>';
+        '<button id="fops-up" class="cc-btn fops-btn">Upload count sheet</button>' + errHTML + '</div>';
       document.getElementById('fops-up').addEventListener('click', function () { fopsPick(t); });
       return;
     }
@@ -3480,7 +3481,7 @@ var GLOSS = {
       '<div class="fops-sub">' + fopsNum(p.n) + ' lines' + (by ? ' \u00b7 uploaded by ' + esc(by) : '') + (at ? ' ' + esc(faFmt(at)) : '') + (s.list ? '' : ' \u00b7 <span class="fops-dim">syncing list\u2026</span>') + '</div>' +
       '<div class="fops-bar"><div class="fops-fill" style="width:' + pct + '%"></div></div>' +
       '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div>' +
-      '<div class="fops-row"><button id="fops-view" class="cc-btn fops-btn">View list</button><button id="fops-rep" class="fops-lnk">Replace</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div></div>';
+      '<div class="fops-row"><button id="fops-view" class="cc-btn fops-btn">View list</button><button id="fops-rep" class="fops-lnk">Replace</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
     document.getElementById('fops-view').addEventListener('click', function () { location.hash = fopsRoute(); });
     document.getElementById('fops-rep').addEventListener('click', function () { fopsPick(t); });
     document.getElementById('fops-rm').addEventListener('click', function () {
@@ -3490,7 +3491,7 @@ var GLOSS = {
         fopsPost(t, { action: 'fops_clear' }).then(function (j) {
           if (!j || !j.ok) throw new Error('clear');
           var s2 = fopsSt(t); s2.list = null; s2.meta = null; s2.idx = null; fopsSave(t); fopsCard();
-        }).catch(function () { fopsCard(); tbxAsk({ title: 'Couldn\u2019t reach the sheet', body: 'Check signal and try again.', ok: 'OK', cancel: 'Close' }); });
+        }).catch(function () { fopsCard('Couldn\u2019t reach the sheet \u2014 check signal and try again.'); });
       });
     });
   }
@@ -3502,10 +3503,7 @@ var GLOSS = {
       var f = inp.files && inp.files[0]; try { document.body.removeChild(inp); } catch (e) {}
       if (!f) return;
       var el = document.getElementById('cc-fops'); if (el) el.innerHTML = '<div class="fops-card"><div class="fops-sub">Reading ' + esc(f.name) + '\u2026</div></div>';
-      fopsParseFile(f).then(function (res) { fopsPreview(t, res); }).catch(function (e) {
-        fopsCard();
-        tbxAsk({ title: 'Couldn\u2019t use that file', body: fopsErrText(e), ok: 'OK', cancel: 'Close' });
-      });
+      fopsParseFile(f).then(function (res) { fopsPreview(t, res); }).catch(function (e) { fopsCard(fopsErrText(e)); });
     });
     inp.click();
   }
