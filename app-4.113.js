@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.112';
+  var APPVER = '4.113';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3443,7 +3443,7 @@ var GLOSS = {
         seenOp[op] = 1;
         if (g(r, 'tracking').trim()) { filled[op] = 1; return; }
         var p = byOp[op];
-        if (!p) { p = byOp[op] = { opId: op, ts: g(r, 'timestamp'), lines: 0, units: 0, by: g(r, 'enteredby'), refs: [] }; out.push(p); }
+        if (!p) { p = byOp[op] = { opId: op, ts: g(r, 'timestamp'), lines: 0, units: 0, by: fa2PersonName(g(r, 'enteredby')), refs: [] }; out.push(p); }
         p.lines++; p.units += Math.abs(fa2Num(g(r, 'qty')));
         var q = Math.abs(fa2Num(g(r, 'qty'))); p.refs.push(g(r, 'ref') + (q > 1 ? ' \u00d7' + q : ''));
       });
@@ -3891,11 +3891,11 @@ var GLOSS = {
           key: key, ty: ty,
           date: g(r, 'EventDate') || g(r, 'Timestamp').slice(0, 10),
           ts: g(r, 'Timestamp'),
-          from: g(r, 'From') || g(r, 'EnteredBy'),
+          from: g(r, 'From') || fa2PersonName(g(r, 'EnteredBy')),
           to: g(r, 'DropName') || g(r, 'ReceivedBy') || g(r, 'Facility') || '',
           drop: g(r, 'DropName'), fromRaw: g(r, 'From'), rb: g(r, 'ReceivedBy'), acc: g(r, 'AccountName'), accl: g(r, 'AccountLocation'), note: g(r, 'Note'),
           po: g(r, 'CasePO'), fac: g(r, 'Facility'), sur: g(r, 'Surgeon'), dos: g(r, 'DOS'), pid: g(r, 'PatientId'),
-          bo: g(r, 'CaseBO'), reason: g(r, 'Reason'), track: g(r, 'Tracking'), by: g(r, 'EnteredBy'),
+          bo: g(r, 'CaseBO'), reason: g(r, 'Reason'), track: g(r, 'Tracking'), by: fa2PersonName(g(r, 'EnteredBy')),
           rows: [], units: 0
         };
         groups.push(grp);
