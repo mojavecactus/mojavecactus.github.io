@@ -3378,12 +3378,13 @@ var GLOSS = {
   }
 
   // -- per-territory state (list cached on this phone, meta + capability from pull) --
-  var FO = { st: {}, fetching: {} };
+  var FO = { st: {}, fetching: {}, statusing: {} };
   function fopsSt(t) {
     var s = FO.st[t]; if (s) return s;
-    s = FO.st[t] = { list: null, meta: null, cap: false, loaded: true };
+    s = FO.st[t] = { list: null, meta: null, status: null, cap: false, loaded: true };
     try { var raw = localStorage.getItem('tbx_' + t + '_fops'); if (raw) { s.list = JSON.parse(raw); if (s.list && s.list.lines) s.list.lines = s.list.lines.map(function (a) { return Array.isArray(a) ? { d: a[0], m: a[1], b: a[2] } : a; }); } } catch (e) { s.list = null; }
     try { var rm = localStorage.getItem('tbx_' + t + '_fops_meta'); if (rm) s.meta = JSON.parse(rm); } catch (e2) { s.meta = null; }
+    try { var rs = localStorage.getItem('tbx_' + t + '_fops_status'); if (rs) s.status = JSON.parse(rs); } catch (e4) { s.status = null; }
     try { s.cap = localStorage.getItem('tbx_' + t + '_fops_cap') === '1'; } catch (e3) {}
     return s;
   }
@@ -3393,6 +3394,7 @@ var GLOSS = {
       if (s.list) localStorage.setItem('tbx_' + t + '_fops', JSON.stringify({ ver: s.list.ver, title: s.list.title, by: s.list.by || '', at: s.list.at || '', lines: s.list.lines.map(function (L) { return [L.d, L.m, L.b]; }) }));
       else localStorage.removeItem('tbx_' + t + '_fops');
       localStorage.setItem('tbx_' + t + '_fops_meta', JSON.stringify(s.meta || null));
+      if (s.status) localStorage.setItem('tbx_' + t + '_fops_status', JSON.stringify(s.status)); else localStorage.removeItem('tbx_' + t + '_fops_status');
       localStorage.setItem('tbx_' + t + '_fops_cap', s.cap ? '1' : '0');
     } catch (e) {}
   }
@@ -3401,9 +3403,50 @@ var GLOSS = {
     var s = fopsSt(t);
     if (!j || !('fops' in j)) { if (s.cap) { s.cap = false; fopsSave(t); if (CC.view === 'cchome' && t === CC.tgt) fopsCard(); } return; }
     s.cap = true; s.meta = j.fops || null;
-    if (!s.meta) { if (s.list) s.list = null; fopsSave(t); }
-    else { fopsSave(t); if (!s.list || s.list.ver !== s.meta.ver) fopsFetch(t); }
+    if (!s.meta) { if (s.list || s.status) { s.list = null; s.status = null; s.idx = null; } fopsSave(t); }
+    else {
+      fopsSave(t);
+      if (!s.list || s.list.ver !== s.meta.ver) fopsFetch(t);
+      else if (!s.status || s.status.ver !== s.meta.ver || (s.meta.built && s.status.built !== s.meta.built)) fopsStatus(t);
+    }
     if (CC.view === 'cchome' && t === CC.tgt) fopsCard();
+  }
+  // Team-wide reconcile from the server (every phone's scans), refreshed when the sheet has rebuilt.
+  function fopsStatus(t) {
+    if (FO.statusing[t]) return FO.statusing[t];
+    var ep = ccCredsFor(t); if (!ep) return Promise.reject(new Error('nocreds'));
+    var tmo = ccFetchTimeout(20000);
+    FO.statusing[t] = fetch(ep.url + '?token=' + encodeURIComponent(ep.token) + '&action=fops_status', { signal: tmo.signal })
+      .then(function (r) { tmo.clear(); return r.json(); }, function (e) { tmo.clear(); throw e; })
+      .then(function (j) { delete FO.statusing[t]; if (!j || !j.ok) throw new Error('fops_status'); fopsStatusSet(t, j); return j; })
+      .catch(function (e) { delete FO.statusing[t]; throw e; });
+    return FO.statusing[t];
+  }
+  function fopsStatusSet(t, j) {
+    var s = fopsSt(t), found = {};
+    (j.found || []).forEach(function (a) { found[a[0]] = +a[1] || 0; });
+    s.status = { at: Date.now(), ver: j.ver || '', built: j.built || '', found: found, additional: (j.additional || []).map(function (a) { return { d: a[0] || '', m: a[1] || '', b: a[2] || '', q: +a[3] || 0 }; }) };
+    fopsSave(t);
+    if (CC.view === 'cchome' && t === CC.tgt) fopsCard();
+    if (CC.view === 'fops' && t === CC.tgt) fopsScreenPaint();
+  }
+  // What this phone shows: the server's team-wide picture, plus this phone's own rows on top (instant, offline).
+  function fopsLocal(t) {
+    var s = fopsSt(t); if (!s.list) return null;
+    var found = {}, k, i, L;
+    if (s.status && s.status.ver === s.list.ver) for (k in s.status.found) if (fopsHas(s.status.found, k)) found[k] = s.status.found[k];
+    ccDerive(t);
+    var rows = ccSyncSt(t).rows || [], mine = {}, mineOrder = [];
+    for (i = 0; i < rows.length; i++) { var r = rows[i], q = Math.round(+r.qty || 0); if (q <= 0) continue; k = fopsKey(r.ref, r.lot); if (!fopsHas(mine, k)) { mine[k] = { q: 0, ref: r.ref, lot: r.lot, desc: r.desc || '' }; mineOrder.push(k); } mine[k].q += q; }
+    var spell = {}, listKeys = {};
+    for (i = 0; i < s.list.lines.length; i++) { L = s.list.lines[i]; var km = fopsKeyMat(L.m); if (!fopsHas(spell, km)) spell[km] = L.m; listKeys[fopsKey(L.m, L.b)] = 1; }
+    var confirmed = [], missing = [], additional = [], units = 0, addKeys = {};
+    for (i = 0; i < mineOrder.length; i++) { k = mineOrder[i]; if (fopsHas(listKeys, k) && !fopsHas(found, k)) found[k] = mine[k].q; }
+    for (i = 0; i < s.list.lines.length; i++) { L = s.list.lines[i]; k = fopsKey(L.m, L.b); if (fopsHas(found, k)) { confirmed.push({ d: L.d, m: L.m, b: L.b, q: found[k] }); units += found[k]; } else missing.push({ d: L.d, m: L.m, b: L.b }); }
+    if (s.status && s.status.ver === s.list.ver) for (i = 0; i < s.status.additional.length; i++) { var a = s.status.additional[i]; additional.push(a); addKeys[fopsKey(a.m, a.b)] = 1; }
+    for (i = 0; i < mineOrder.length; i++) { k = mineOrder[i]; if (fopsHas(listKeys, k) || fopsHas(addKeys, k)) continue; var mm = mine[k], kmm = fopsKeyMat(mm.ref); additional.push({ d: mm.desc, m: fopsHas(spell, kmm) ? spell[kmm] : fopsDash(mm.ref), b: String(mm.lot == null ? '' : mm.lot).trim(), q: mm.q }); addKeys[k] = 1; }
+    additional.sort(function (x, y) { return x.m < y.m ? -1 : x.m > y.m ? 1 : (x.b < y.b ? -1 : x.b > y.b ? 1 : 0); });
+    return { confirmed: confirmed, missing: missing, additional: additional, meta: { n: s.list.lines.length, confirmed: confirmed.length, missing: missing.length, additional: additional.length, units: units } };
   }
   function fopsFetch(t) {
     if (FO.fetching[t]) return FO.fetching[t];
@@ -3433,9 +3476,9 @@ var GLOSS = {
       .then(function (r) { tmo.clear(); return r.json(); }, function (e) { tmo.clear(); throw e; });
   }
   function fopsProgress(t) {
-    // Local reconcile when the list is on this phone (instant, offline); server meta otherwise.
+    // Team picture from the server plus this phone's rows when the list is here; server meta otherwise.
     var s = fopsSt(t);
-    if (s.list) { ccDerive(t); return fopsReconcile(s.list.lines, ccSyncSt(t).rows).meta; }
+    if (s.list) { var R = fopsLocal(t); if (R) return R.meta; }
     return s.meta ? { n: s.meta.n, confirmed: s.meta.confirmed, missing: s.meta.missing, additional: s.meta.additional, units: s.meta.units } : null;
   }
   // 'on' | 'lotoff' | 'off' | null (no list on this phone)
@@ -3482,6 +3525,7 @@ var GLOSS = {
       '<div class="fops-bar"><div class="fops-fill" style="width:' + pct + '%"></div></div>' +
       '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div>' +
       '<div class="fops-row"><button id="fops-view" class="cc-btn fops-btn">View list</button><button id="fops-rep" class="fops-lnk">Replace</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
+    if (s.list && (!s.status || s.status.ver !== s.list.ver || Date.now() - (s.status.at || 0) > 60000)) fopsStatus(t).catch(function () {});
     document.getElementById('fops-view').addEventListener('click', function () { location.hash = fopsRoute(); });
     document.getElementById('fops-rep').addEventListener('click', function () { fopsPick(t); });
     document.getElementById('fops-rm').addEventListener('click', function () {
@@ -3490,7 +3534,7 @@ var GLOSS = {
         el.innerHTML = '<div class="fops-card"><div class="fops-sub">Removing\u2026</div></div>';
         fopsPost(t, { action: 'fops_clear' }).then(function (j) {
           if (!j || !j.ok) throw new Error('clear');
-          var s2 = fopsSt(t); s2.list = null; s2.meta = null; s2.idx = null; fopsSave(t); fopsCard();
+          var s2 = fopsSt(t); s2.list = null; s2.meta = null; s2.status = null; s2.idx = null; fopsSave(t); fopsCard();
         }).catch(function () { fopsCard('Couldn\u2019t reach the sheet \u2014 check signal and try again.'); });
       });
     });
@@ -3525,8 +3569,9 @@ var GLOSS = {
       fopsPost(t, { action: 'fops_put', title: res.title, src: res.src, ver: res.ver, lines: res.lines.map(function (L) { return [L.d, L.m, L.b]; }) }).then(function (j) {
         if (!j || !j.ok) throw new Error(j && j.err ? j.err : 'put');
         var s2 = fopsSt(t);
-        s2.cap = true; s2.list = { ver: j.ver || res.ver, title: res.title, by: (j.meta && j.meta.by) || ccDevFor(t) || '', at: (j.meta && j.meta.at) || new Date().toISOString(), lines: res.lines }; s2.meta = j.meta || null; s2.idx = null;
-        fopsSave(t); fopsCard();
+        s2.cap = true; s2.list = { ver: j.ver || res.ver, title: res.title, by: (j.meta && j.meta.by) || ccDevFor(t) || '', at: (j.meta && j.meta.at) || new Date().toISOString(), lines: res.lines }; s2.meta = j.meta || null; s2.idx = null; s2.status = null;
+        fopsSave(t);
+        if (j.status) fopsStatusSet(t, j.status); else fopsCard();
       }).catch(function (e) {
         b.disabled = false; b.textContent = 'Use this sheet';
         var er = document.getElementById('fops-err'); if (er) { er.textContent = (e && e.message === 'dev') ? 'This phone isn\u2019t on the roster \u2014 re-pick the device.' : 'Couldn\u2019t reach the sheet \u2014 check signal and try again.'; er.hidden = false; }
@@ -3542,18 +3587,19 @@ var GLOSS = {
     CC.tgt = terrTgt(); CC.view = 'fops'; FOV.q = '';
     render('<div class="card cc-card fops-screen"><div id="fops-head"></div><input id="fops-q" class="cc-in" type="search" autocomplete="off" placeholder="Search material, batch or description"><div id="fops-list" class="ctc-wrap"></div></div>');
     document.getElementById('fops-q').addEventListener('input', function (e) { FOV.q = e.target.value; fopsScreenPaint(); });
-    CURREFRESH = function () { var t = CC.tgt; return ccPull(t).then(function () { fopsScreenPaint(); }); };
+    CURREFRESH = function () { var t = CC.tgt; return ccPull(t).then(function () { return fopsStatus(t); }).then(function () { fopsScreenPaint(); }); };
     fopsScreenPaint();
-    ccPull(CC.tgt).then(function () { fopsScreenPaint(); }).catch(function () {});
+    var t0 = CC.tgt;
+    ccPull(t0).then(function () { return fopsStatus(t0); }).then(function () { fopsScreenPaint(); }).catch(function () { fopsScreenPaint(); });
   }
   function fopsScreenPaint() {
     var head = document.getElementById('fops-head'), list = document.getElementById('fops-list'); if (!head || !list) return;
     var t = CC.tgt, s = fopsSt(t);
     if (!s.list) { head.innerHTML = '<h2 class="cc-h">Field Ops</h2>'; list.innerHTML = emptyHTML('\uD83D\uDCCB', s.meta ? 'Syncing the list\u2026' : 'No count sheet loaded', s.meta ? 'Pull down to refresh.' : 'Upload the empty sheet Field Ops sent on the Cycle Count screen.'); return; }
-    ccDerive(t);
-    var R = fopsReconcile(s.list.lines, ccSyncSt(t).rows);
+    var R = fopsLocal(t), teamOk = s.status && s.status.ver === s.list.ver;
     var sets = { missing: R.missing, found: R.confirmed, additional: R.additional };
     head.innerHTML = '<h2 class="cc-h">' + esc(s.list.title || 'Field Ops') + '</h2>' +
+      (teamOk ? '' : '<div class="fops-sub">Showing this phone\u2019s scans \u2014 the team picture loads when the sheet is reachable.</div>') +
       '<div class="chips fops-chips">' + ['missing', 'found', 'additional'].map(function (c) { return '<button class="chip' + (FOV.chip === c ? '' : ' dim') + '" data-chip="' + c + '">' + c.charAt(0).toUpperCase() + c.slice(1) + ' ' + fopsNum(sets[c].length) + '</button>'; }).join('') + '</div>';
     head.querySelectorAll('[data-chip]').forEach(function (b) { b.addEventListener('click', function () { FOV.chip = b.dataset.chip; fopsScreenPaint(); }); });
     var q = nrm(FOV.q), arr = sets[FOV.chip] || [];
@@ -6564,7 +6610,7 @@ var GLOSS = {
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
-    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, progress: fopsProgress, preview: fopsPreview, FO: FO } } };
+    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, progress: fopsProgress, preview: fopsPreview, FO: FO } } };
 };
 
 /* ---- Feedback: screenshot + silent send (mailto fallback) ----

@@ -27,6 +27,14 @@ function decryptPayload(pw) {
   }
 }
 
+// The Field Ops reconcile core, lifted verbatim from the bundle so the fake sheet answers fops_status like fops.gs does.
+const CORE = (() => { const APP = /<script src="(app[^"]*\.js)"/.exec(fs.readFileSync(R + '/index.html', 'utf8'))[1]; const src = fs.readFileSync(R + '/' + APP, 'utf8');
+  const body = src.slice(src.indexOf('==== FOPS CORE BEGIN ===='), src.indexOf('==== FOPS CORE END ====')).replace(/^.*FOPS CORE BEGIN ====\n/, '');
+  return new Function(body + '\nreturn { key: fopsKey, reconcile: fopsReconcile, ver: fopsVer };')(); })();
+function fopsStatusOf(s) { if (!s.fops) return { ok: true, ver: '', built: '', found: [], additional: [] };
+  const R = CORE.reconcile(s.fops.lines.map(a => ({ d: a[0], m: a[1], b: a[2] })), s.rows);
+  return { ok: true, ver: s.fops.ver, built: s.fops.meta.built || '', found: R.confirmed.map(c => [CORE.key(c.m, c.b), c.q]), additional: R.additional.map(a => [a.d, a.m, a.b, a.q]) }; }
+
 // Fake sheet endpoint (mirrors the CT bound script's contract): batch dedups by opId, pull returns rows.
 function FakeSheet() {
   const s = { rows: [], seen: {}, calls: [], fail: 0, busy: 0, devOk: true, holdMs: 0, fopsCap: false, fops: null };
@@ -36,7 +44,8 @@ function FakeSheet() {
     if (s.fail > 0) { s.fail--; throw new Error('net'); }
     if (/action=pull/.test(url)) { const resp = { ok: true, rows: s.rows.map(r => ({ ...r })) }; if (s.fopsCap) resp.fops = s.fops ? s.fops.meta : null; return resp; }
     if (/action=fops_get/.test(url)) return s.fops ? { ok: true, ver: s.fops.ver, title: s.fops.title, meta: s.fops.meta, lines: s.fops.lines } : { ok: true, ver: '', title: '', meta: null, lines: [] };
-    if (body && body.action === 'fops_put') { if (!s.devOk) return { ok: false, err: 'dev' }; s.fops = { ver: body.ver, title: body.title, lines: body.lines, meta: { ver: body.ver, title: body.title, n: body.lines.length, confirmed: 0, missing: body.lines.length, additional: 0, units: 0, at: new Date().toISOString(), by: body.dev } }; return { ok: true, ver: body.ver, meta: s.fops.meta }; }
+    if (/action=fops_status/.test(url)) { s.statusCalls = (s.statusCalls || 0) + 1; return fopsStatusOf(s); }
+    if (body && body.action === 'fops_put') { if (!s.devOk) return { ok: false, err: 'dev' }; s.fops = { ver: body.ver, title: body.title, lines: body.lines, meta: { ver: body.ver, title: body.title, n: body.lines.length, confirmed: 0, missing: body.lines.length, additional: 0, units: 0, at: new Date().toISOString(), by: body.dev, built: 'b1' } }; return { ok: true, ver: body.ver, meta: s.fops.meta, status: fopsStatusOf(s) }; }
     if (body && body.action === 'fops_clear') { s.fops = null; return { ok: true }; }
     if (/action=roster/.test(url)) return { devices: ["Nate's iPhone", "Mia's iPhone"] };
     if (body && body.action === 'batch') {
@@ -370,27 +379,39 @@ async function boot(sheet, storage) {
     w.document.getElementById('fops-use').click(); await sleep(200);
     const put = sheet.calls.find(c => c.body && c.body.action === 'fops_put');
     check('put: sent as text triples with device, title, ver', put && put.body.dev === "Nate's iPhone" && put.body.title === 'IT9999 SM SANDBOX SPLIT' && put.body.ver === res.ver && put.body.lines.length === 10 && put.body.lines[2][2] === '24E01', JSON.stringify(put && put.body.lines[2]));
-    check('put: card shows progress from local reconcile', /0 found/.test(box().textContent) && /10 missing/.test(box().textContent) && /0 additional/.test(box().textContent) && /IT9999 SM SANDBOX SPLIT/.test(box().textContent), box().textContent);
+    check('put: card shows progress from the status in the put reply', /0 found/.test(box().textContent) && /10 missing/.test(box().textContent) && /0 additional/.test(box().textContent) && /IT9999 SM SANDBOX SPLIT/.test(box().textContent), box().textContent);
+    check('put: status cached', JSON.parse(w.localStorage.getItem('tbx_cc_fops_status')).ver === res.ver);
     check('put: list cached on this phone as text', JSON.parse(w.localStorage.getItem('tbx_cc_fops')).lines[2][2] === '24E01');
     dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
     dev.enqueue('cc', { t: 'add', ref: '0234100001', lot: '24E01', qty: 2, loc: 'Trunk', notes: '' });
     dev.enqueue('cc', { t: 'add', ref: '3910947022', lot: 'L9', qty: 1, loc: 'Trunk', notes: '', desc: 'AlphaVent | 4.75mm' });
     await sleep(100); F.card();
-    check('progress: scans move lines instantly (pending included)', /1 found/.test(box().textContent) && /9 missing/.test(box().textContent) && /1 additional/.test(box().textContent), box().textContent);
+    check('progress: own scans move lines instantly, before any sync (overlay on the team status)', /1 found/.test(box().textContent) && /9 missing/.test(box().textContent) && /1 additional/.test(box().textContent), box().textContent);
+    const st1 = sheet.statusCalls || 0;
     check('hint: on / lot off / off', F.hint('cc', '234-100-001', '24e01') === 'on' && F.hint('cc', '0234100001', 'OTHER') === 'lotoff' && F.hint('cc', '3910947022', 'L9') === 'off' && /On the Field Ops list/.test(F.hintHTML('cc', '0234100001', '24E01')));
     await sleep(1700);
+    F.card(); await sleep(50);
+    check('progress: after the flush the card still shows the scan (no flicker while the team status catches up)', /1 found/.test(box().textContent) && /1 additional/.test(box().textContent) && (sheet.statusCalls || 0) === st1, box().textContent + ' statusCalls=' + sheet.statusCalls);
+    // the sheet rebuilt (built changes) -> next pull refreshes the team status
+    sheet.fops.meta.built = 'b2'; await dev.pull('cc'); await sleep(80);
+    check('status: pull sees a new build stamp and refetches the team picture', (sheet.statusCalls || 0) === st1 + 1 && F.st('cc').status.built === 'b2' && F.st('cc').status.found['234100001|24E01'] === 2, 'statusCalls=' + sheet.statusCalls);
+    // another phone's scan reaches this phone through the status, not through pull rows
+    sheet.rows.push({ id: 'rx', ts: '2026-09-02T10:00:00Z', dev: "Mia's iPhone", ref: '0130', lot: '091024-05', qty: 1, loc: 'Storage', desc: 'InSpace' });
+    sheet.fops.meta.built = 'b3'; await dev.pull('cc'); await sleep(80); F.card();
+    check('status: teammate scan counts as found on this phone', /2 found/.test(box().textContent) && /8 missing/.test(box().textContent) && F.hint('cc', '0130', '091024-05') === 'on', box().textContent);
     // second phone: pull brings meta, list follows via fops_get
     const saved = { 'tbx_cc': creds['tbx_cc'], 'tbx_cc_dev': "Mia's iPhone", 'tbx_cc_roster': creds['tbx_cc_roster'], 'tbx_tour_done': '1' };
     const two = await boot(sheet, saved);
     two.w.location.hash = '#/cc'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(400);
     const box2 = () => two.w.document.getElementById('cc-fops');
     check('sync: second phone got the list through pull -> fops_get', sheet.calls.some(c => /action=fops_get/.test(c.url)) && two.dev.fops.st('cc').list && two.dev.fops.st('cc').list.lines.length === 10 && two.dev.fops.st('cc').list.lines[2].b === '24E01');
-    check('sync: second phone card shows the same progress', /1 found/.test(box2().textContent) && /9 missing/.test(box2().textContent), box2().textContent);
+    await sleep(100);
+    check('sync: second phone card shows the team progress via fops_status', /2 found/.test(box2().textContent) && /8 missing/.test(box2().textContent) && /1 additional/.test(box2().textContent), box2().textContent);
     check('hint: second phone hints without ever uploading', two.dev.fops.hint('cc', '0130', '091024-05') === 'on');
     // list screen
     two.w.location.hash = '#/cc/fops'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(300);
     const scr = two.w.document.getElementById('fops-list');
-    check('screen: Missing chip first with 9 rows, chips carry counts', scr && scr.querySelectorAll('.fops-row2').length === 9 && /Missing 9/.test(two.w.document.getElementById('fops-head').textContent) && /Found 1/.test(two.w.document.getElementById('fops-head').textContent) && /Additional 1/.test(two.w.document.getElementById('fops-head').textContent));
+    check('screen: Missing chip first with 8 rows, chips carry team counts', scr && scr.querySelectorAll('.fops-row2').length === 8 && /Missing 8/.test(two.w.document.getElementById('fops-head').textContent) && /Found 2/.test(two.w.document.getElementById('fops-head').textContent) && /Additional 1/.test(two.w.document.getElementById('fops-head').textContent), two.w.document.getElementById('fops-head').textContent);
     const qin = two.w.document.getElementById('fops-q'); qin.value = '3911-514'; qin.dispatchEvent(new two.w.Event('input'));
     check('screen: dash-insensitive search narrows', scr.querySelectorAll('.fops-row2').length === 1 && /3911-514-620HA/.test(scr.textContent));
     two.w.document.querySelector('[data-chip="additional"]').click();
@@ -400,7 +421,7 @@ async function boot(sheet, storage) {
     w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
     w.document.getElementById('fops-rm').click(); await sleep(50);
     w.document.querySelector('.ask-ok').click(); await sleep(200);
-    check('remove: server cleared, card back to upload prompt', sheet.fops === null && /Upload count sheet/.test(box().textContent) && w.localStorage.getItem('tbx_cc_fops') === null, box().textContent);
+    check('remove: server cleared, card back to upload prompt, caches dropped', sheet.fops === null && /Upload count sheet/.test(box().textContent) && w.localStorage.getItem('tbx_cc_fops') === null && w.localStorage.getItem('tbx_cc_fops_status') === null, box().textContent);
     two.w.location.hash = '#/cc'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(400);
     check('remove: second phone drops the list on its next pull', two.dev.fops.st('cc').list === null && /Upload count sheet/.test(box2().textContent), box2().textContent);
     check('fops sync: no page errors', errs.length === 0 && two.errs.length === 0, errs.concat(two.errs).join(' | ')); }
