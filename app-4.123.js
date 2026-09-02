@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.122';
+  var APPVER = '4.123';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3655,7 +3655,23 @@ var GLOSS = {
     body.querySelectorAll('[data-chip]').forEach(function (b) { b.addEventListener('click', function () { FOV.chip = b.dataset.chip; fopsScreenPaint(); }); });
     var qi = document.getElementById('fops-q');
     qi.addEventListener('input', function (e) { FOV.q = e.target.value; fopsListPaint(); });
+    fopsFitList();
+    var lst = document.getElementById('fops-list'); if (lst) lst.scrollTop = 0;
   }
+  // The list scrolls inside its own panel: size it to what is left of the viewport under the header,
+  // chips and search box, so those stay put while the rows scroll (re-measured on resize / keyboard).
+  function fopsFitList() {
+    var list = document.getElementById('fops-list'); if (!list) return;
+    var vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 0; if (!vh) return;
+    var top = list.getBoundingClientRect().top + (window.pageYOffset || 0);
+    var h = Math.floor(vh - top - 18); if (h < 240) h = 240;
+    list.style.maxHeight = h + 'px';
+  }
+  (function () {
+    var t = null; function refit() { if (CC.view !== 'fops') return; if (t) clearTimeout(t); t = setTimeout(function () { t = null; fopsFitList(); }, 80); }
+    window.addEventListener('resize', refit); window.addEventListener('orientationchange', refit);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', refit);
+  })();
   // Re-render only the rows while typing (keeps the search box focused).
   function fopsListPaint() {
     var list = document.getElementById('fops-list'); if (!list) return;
@@ -3664,6 +3680,7 @@ var GLOSS = {
     var q = nrm(FOV.q), arr = sets[FOV.chip] || [];
     if (q) arr = arr.filter(function (L) { return nrm(L.m).indexOf(q) > -1 || nrm(L.b).indexOf(q) > -1 || nrm(L.d).indexOf(q) > -1; });
     var cap = 300, shown = arr.slice(0, cap);
+    list.scrollTop = 0;
     list.innerHTML = !arr.length ? '<div class="cc-empty">' + (q ? 'Nothing matches.' : 'Nothing here.') + '</div>' :
       shown.map(function (L) {
         return '<div class="ctc fops-row2"><div class="ctc-main"><div class="ctc-t">' + esc(L.m) + ' <span class="fops-lot">' + esc(L.b) + '</span></div><div class="ctc-n">' + esc(L.d || '') + '</div></div>' +

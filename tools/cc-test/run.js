@@ -422,6 +422,7 @@ async function boot(sheet, storage) {
     // list screen
     two.w.location.hash = '#/cc/fops'; two.w.dispatchEvent(new two.w.Event('hashchange')); await sleep(300);
     const scr = () => two.w.document.getElementById('fops-list'), body2 = () => two.w.document.getElementById('fops-body');
+    check('screen: the list is its own scroll panel sized to the viewport', /px$/.test(scr().style.maxHeight) && parseInt(scr().style.maxHeight, 10) >= 240, scr().style.maxHeight);
     check('screen: Missing chip first with 8 rows, chips carry team counts', scr() && scr().querySelectorAll('.fops-row2').length === 8 && /Missing 8/.test(body2().textContent) && /Found 2/.test(body2().textContent) && /Additional 1/.test(body2().textContent), body2().textContent.slice(0, 200));
     const qin = two.w.document.getElementById('fops-q'); qin.value = '3911-514'; qin.dispatchEvent(new two.w.Event('input'));
     check('screen: dash-insensitive search narrows without re-rendering the box', scr().querySelectorAll('.fops-row2').length === 1 && /3911-514-620HA/.test(scr().textContent) && two.w.document.getElementById('fops-q') === qin);
