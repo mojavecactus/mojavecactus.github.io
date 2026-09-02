@@ -225,6 +225,27 @@ async function boot(sheet, storage) {
     check('timeout: inflight marked while waiting', inAt > 0);
     check('timeout: no page errors', errs.length === 0, errs.join(' | ')); }
 
+  // ---- 12. 4.116: merged rows stay marked unsynced; set carries expiry; typed expiry; reserved slugs; history prune ----
+  { const sheet = FakeSheet(); const { w, dev, errs } = await boot(sheet, creds);
+    const base = [{ id: 'r0', ts: '2026-09-01T10:00:00Z', ref: 'A', lot: 'L', qty: 2, loc: 'Trunk', exp: '' }];
+    const rows = dev.deriveCore(base, [{ t: 'add', opId: 'x1', ref: 'A', lot: 'L', qty: 1, loc: 'Trunk' }], 'cc', 'N');
+    check('pend: add merged into a synced row marks it unsynced', rows[0].qty === 3 && rows[0].pending === true);
+    const rows2 = dev.deriveCore(base, [{ t: 'set', opId: 'x2', ref: 'A', lot: 'L', qty: 2, loc: 'Trunk', exp: '2027-03', expired: false }], 'cc', 'N');
+    check('set: expiry edit carried onto the row', rows2[0].exp === '2027-03' && rows2[0].pending === true);
+    check('expInput: forms normalised', dev.expInput('2027-03') === '2027-03' && dev.expInput('2027-03-15') === '2027-03-15' && dev.expInput('3/2027') === '2027-03' && dev.expInput('3/5/2027') === '2027-03-05' && dev.expInput('270300') === '2027-03' && dev.expInput('') === '');
+    const bufName = dev.TERR.buf.name;
+    dev.hubTerrAdd({ slug: 'buf', name: 'Hijack' }, false);
+    check('reserved: hub team cannot rename a built-in territory', dev.TERR.buf.name === bufName && dev.TERR.buf.enc === 'cc-buf.enc.json');
+    dev.hubTerrAdd({ slug: 'bos', name: 'Boston' }, false);
+    check('reserved: normal hub team still added', dev.TERR.bos && dev.TERR.bos.hub === true);
+    w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange'));
+    dev.CC.loc = 'Trunk'; dev.CC.tgt = 'cc';
+    dev.CC.hist = { 'trunk|ZZZ|old': [1, 2], 'trunk|A|L': [2] };
+    dev.CC.rows = [{ id: 'r0', ref: 'A', lot: 'L', loc: 'Trunk', qty: 2 }];
+    dev.histPrune();
+    check('hist: prune drops history for lines no longer on the count', !dev.CC.hist['trunk|ZZZ|old'] && !!dev.CC.hist['trunk|A|L']);
+    check('4.116: no page errors', errs.length === 0, errs.join(' | ')); }
+
   const fails = results.filter(r => !r.ok).length;
   console.log('\n' + (results.length - fails) + '/' + results.length + ' passed');
   process.exit(fails ? 1 : 0);

@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.115';
+  var APPVER = '4.116';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1600,8 +1600,10 @@ var GLOSS = {
   var HORDER = [];
   var GMRE = /^[^@\s]+@(gmail|googlemail)\.com$/i;
   function hubOn() { return !!(HUB && HUB.url); }
+  var TERR_BUILTIN = {}; for (var tbk in TERR) TERR_BUILTIN[tbk] = 1;
   function hubTerrAdd(t, save) {
     if (!t || !t.slug) return;
+    if (TERR_BUILTIN[t.slug]) return; // built-in territories keep their own names and files
     if (TERR[t.slug]) { if (t.name) { TERR[t.slug].name = t.name; TERR[t.slug].gate = t.name + ' team access \u2014 enter the password.'; } return; }
     TERR[t.slug] = { id: t.slug, name: t.name || t.slug, enc: '', tgt: t.slug + '_cc', gate: (t.name || t.slug) + ' team access \u2014 enter the password.', fa: false, hub: true };
     HORDER.push(t.slug);
@@ -1663,6 +1665,16 @@ var GLOSS = {
   }
   function ccB64d(x) { var bin = atob(x), a = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; }
   function ccExp(e6) { return expDisp(e6); }
+  // Typed expiry on the manual/editor sheets -> the same 'YYYY-MM[-DD]' form scans produce.
+  function ccExpInput(v) {
+    v = String(v || '').trim(); if (!v) return '';
+    var m;
+    if ((m = v.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/))) return m[3] ? m[1] + '-' + m[2] + '-' + m[3] : m[1] + '-' + m[2];
+    if ((m = v.match(/^(\d{1,2})\/(\d{4})$/))) return m[2] + '-' + ('0' + m[1]).slice(-2);
+    if ((m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))) return m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+    if (/^\d{6}$/.test(v)) return expDisp(v);
+    return v;
+  }
   function ccIsExpired(exp) { var n = expDaysLeft(exp); return n !== null && n < 0; }
   function ccBar(hide) {
     var b = document.getElementById('bottombar'); if (b) b.style.display = hide ? 'none' : '';
@@ -1731,11 +1743,11 @@ var GLOSS = {
       var j = (k in idx) ? idx[k] : -1;
       if (op.t === 'add') {
         var q = Math.max(1, Math.round(+op.qty || 1));
-        if (j >= 0) { var row = rows[j]; row.qty = (+row.qty || 0) + q; row.ts = op.ts || row.ts; if (!row.desc && op.desc) row.desc = op.desc; if (!row.exp && op.exp) row.exp = op.exp; if (op.expired) row.expired = true; }
+        if (j >= 0) { var row = rows[j]; row.qty = (+row.qty || 0) + q; row.ts = op.ts || row.ts; row.pending = true; if (!row.desc && op.desc) row.desc = op.desc; if (!row.exp && op.exp) row.exp = op.exp; if (op.expired) row.expired = true; }
         else { rows.push(ccOpRow(t, op, q, dev)); idx[k] = rows.length - 1; }
       } else if (op.t === 'set') {
         var q2 = Math.max(0, Math.round(+op.qty || 0));
-        if (j >= 0) { rows[j].qty = q2; rows[j].ts = op.ts || rows[j].ts; }
+        if (j >= 0) { rows[j].qty = q2; rows[j].ts = op.ts || rows[j].ts; rows[j].pending = true; if (op.exp !== undefined && op.exp !== rows[j].exp) { rows[j].exp = op.exp; rows[j].expired = !!op.expired; } }
         else { rows.push(ccOpRow(t, op, q2, dev)); idx[k] = rows.length - 1; }
       } else if (op.t === 'del') {
         if (j >= 0) { rows.splice(j, 1); reindex(); }
@@ -1922,7 +1934,10 @@ var GLOSS = {
       var c = e.target.closest ? e.target.closest('.ctc') : null; if (!c) return;
       var loc = c.dataset.loc; if (!loc) return;
       CC.loc = loc;
-      var p = loc.split(' \u2014 '); CC.locBase = p[0]; CC.subloc = p.slice(1).join(' \u2014 ');
+      // Prefer the split this phone saved when the count was started; fall back to the last separator.
+      var lb = ccLS(terrKey('_locsplit:' + loc));
+      if (lb) { try { var ps = JSON.parse(lb); CC.locBase = ps[0]; CC.subloc = ps[1] || ''; } catch (eS) { lb = null; } }
+      if (!lb) { var k = loc.lastIndexOf(' \u2014 '); CC.locBase = k > -1 ? loc.slice(0, k) : loc; CC.subloc = k > -1 ? loc.slice(k + 3) : ''; }
       CC.notes = ''; CC.tgt = terrTgt(); ccCount();
     });
     ccHomeLoad(terrTgt(), false);
@@ -2037,6 +2052,7 @@ var GLOSS = {
       var subloc = document.getElementById('cc-subloc').value.trim();
       CC.locBase = loc; CC.subloc = subloc;
       CC.loc = subloc ? loc + ' \u2014 ' + subloc : loc;
+      if (subloc) ccLS(terrKey('_locsplit:' + CC.loc), JSON.stringify([loc, subloc]));
       CC.notes = document.getElementById('cc-notes').value.trim();
       var ls = [loc].concat(locs.filter(function (l) { return l !== loc; })).slice(0, 8);
       ccLS(terrKey('_locs'), JSON.stringify(ls));
@@ -2116,6 +2132,7 @@ var GLOSS = {
           } catch (e0) {}
           if (track && track.applyConstraints) track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
           var tb = document.getElementById('cc-torch');
+          if (tb) { tb.hidden = true; tb.classList.remove('on'); tb.onclick = null; } // new track starts with the torch off
           var caps = track && track.getCapabilities ? track.getCapabilities() : null;
           if (tb && caps && caps.torch) {
             tb.hidden = false; var on = false;
@@ -2167,6 +2184,7 @@ var GLOSS = {
   var CC_FULL = { formats: ['DataMatrix', 'Code128', 'QRCode', 'EAN-13', 'UPC-A', 'PDF417'], maxNumberOfSymbols: 1, tryHarder: true, tryRotate: true, tryInvert: true, tryDownscale: false };
   function ccWorkerInit() {
     if (CC.worker || CC.workerFailed || typeof Worker === 'undefined') return;
+    CC.wfirst = true;
     try {
       var wk = new Worker('ccscan.js');
       wk.onmessage = function (e) {
@@ -2180,17 +2198,23 @@ var GLOSS = {
   }
   function ccWorkerDrop() {
     try { if (CC.worker) CC.worker.terminate(); } catch (e) {}
-    CC.worker = null; CC.workerFailed = true; CC.wcb = {};
+    CC.worker = null; CC.wcb = {};
+    // One slow frame shouldn't cost the whole session: allow a single respawn,
+    // then fall back to the main thread for good.
+    CC.wdrops = (CC.wdrops || 0) + 1;
+    if (CC.wdrops >= 2) CC.workerFailed = true; else setTimeout(function () { if (ccScanView() && !CC.workerFailed) ccWorkerInit(); }, 1500);
   }
   function ccDecode(img, opts) {
     if (!CC.worker) return ZXingWASM.readBarcodes(img, opts);
     return new Promise(function (resolve) {
       var id = ++CC.wid, done = false;
+      // First decode includes the WASM warm-up in the worker, which is slow on older phones.
+      var wms = CC.wfirst ? 15000 : 5000; CC.wfirst = false;
       var wd = setTimeout(function () {
         if (done) return; done = true; delete CC.wcb[id];
-        ccWorkerDrop(); // unresponsive worker: fall back to the main thread
+        ccWorkerDrop(); // unresponsive worker: respawn once, then main thread
         resolve(null);
-      }, 5000);
+      }, wms);
       CC.wcb[id] = function (res) { if (done) return; done = true; clearTimeout(wd); resolve(res); };
       try {
         CC.worker.postMessage({ id: id, buf: img.data.buffer, w: img.width, h: img.height, opts: opts }, [img.data.buffer]);
@@ -2284,7 +2308,7 @@ var GLOSS = {
     try { q = JSON.parse(localStorage.getItem('tbx_learn_q') || '[]'); } catch (e) {}
     if (!q.length) return;
     var dev = '';
-    try { dev = ccLS('tbx_cc_dev') || ''; } catch (e2) {}
+    try { dev = ccLS(terrKey('_dev')) || ccLS('tbx_cc_dev') || ''; } catch (e2) {}
     hubCall('learn', { items: q, dev: dev, ver: APPVER }).then(function (j) {
       if (!j || !j.ok) return; // unknown to this hub version: keep queued, try next session
       try {
@@ -2469,15 +2493,21 @@ var GLOSS = {
       var lv = document.getElementById('cc-clot');
       var useLot = lot || (lv ? lv.value.trim() : '');
       if (!useLot) { if (lv) { lv.classList.add('cc-need'); try { lv.focus(); } catch (e4) {} } return; }
-      closeModal(); CC.running = true;
-      ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (useLot ? ' \u00b7 Lot ' + useLot : ''));
-      ccRearm(600); // counted it: allow the very next scan of the same item quickly
-      ccAdd(ref, desc, fam, useLot, exp, q); ccSchedule(220);
+      ccQtyOk(q).then(function (yes) {
+        if (!yes) return;
+        closeModal(); CC.running = true;
+        ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (useLot ? ' \u00b7 Lot ' + useLot : ''));
+        ccRearm(600); // counted it: allow the very next scan of the same item quickly
+        ccAdd(ref, desc, fam, useLot, exp, q); ccSchedule(220);
+      });
     };
     document.getElementById('cc-cx').onclick = function () {
       closeModal(); ccRearm(2200); CC.running = true; ccStatus('Cancelled \u2014 keep scanning'); ccSchedule(300);
     };
   }
+  var CC_QCAP = 200;
+  // Big numbers are almost always a slipped finger. Ask once before they hit the sheet.
+  function ccQtyOk(q) { return q > CC_QCAP ? tbxAsk({ title: 'Add ' + q + '?', body: 'That\u2019s more than ' + CC_QCAP + ' units on one line. Add it anyway?', ok: 'Add ' + q }) : Promise.resolve(true); }
   function ccAdd(ref, desc, fam, lot, exp, qty) {
     qty = Math.max(1, Math.round(+qty || 1));
     var t = CC.tgt;
@@ -2519,10 +2549,13 @@ var GLOSS = {
       var e3 = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = '', fam = '', ref = v;
       if (e3) { var it = recOf(e3); ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
-      ccModalClose(sheet); CC.running = true;
-      ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
-      ccRearm(600);
-      ccAdd(ref, desc, fam, lot, exp, q); ccSchedule(220);
+      ccQtyOk(q).then(function (yes) {
+        if (!yes) return;
+        ccModalClose(sheet); CC.running = true;
+        ccStatus('Added ' + ref + (q > 1 ? ' \u00d7' + q : '') + (lot ? ' \u00b7 Lot ' + lot : ''));
+        ccRearm(600);
+        ccAdd(ref, desc, fam, lot, exp, q); ccSchedule(220);
+      });
     };
     document.getElementById('cc-lx').onclick = function () {
       ccModalClose(sheet); CC.running = true;
@@ -2532,10 +2565,10 @@ var GLOSS = {
   }
   function ccUnknown(r, lot, exp) {
     CC.running = false;
-    ccBeep('warn');
     var sheet = document.getElementById('cc-sheet');
-    sheet.classList.remove('cc-modal');
-    sheet.hidden = false;
+    if (!sheet) { CC.running = true; ccSchedule(300); return; }
+    ccBeep('warn');
+    ccModalOpen(sheet);
     sheet.innerHTML =
       '<div class="cc-sh-h">Unknown barcode</div>' +
       '<div class="cc-sub">GTIN ' + esc(r.p.gtin || '') + '</div>' +
@@ -2564,20 +2597,21 @@ var GLOSS = {
           } catch (eL) {}
         }
       }
-      sheet.hidden = true; CC.running = true; ccRearm();
+      ccModalClose(sheet); CC.running = true;
       ccAdd(ref, desc, fam, lotv || lot, exp); ccSchedule(400);
     });
-    document.getElementById('cc-uskip').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccRearm(); ccSchedule(300); });
+    document.getElementById('cc-uskip').addEventListener('click', function () { ccModalClose(sheet); CC.running = true; ccSchedule(300); });
   }
   function ccManual() {
     CC.running = false;
     var sheet = document.getElementById('cc-sheet');
-    sheet.classList.remove('cc-modal');
-    sheet.hidden = false;
+    if (!sheet) { CC.running = true; ccSchedule(300); return; }
+    ccModalOpen(sheet);
     sheet.innerHTML =
       '<div class="cc-sh-h">Manual add</div>' +
       '<input id="cc-mpn" class="cc-in" type="text" autocomplete="off" placeholder="Part number">' +
       '<input id="cc-mlot" class="cc-in" type="text" autocomplete="off" placeholder="Lot">' +
+      '<input id="cc-mexp" class="cc-in" type="text" autocomplete="off" inputmode="numeric" placeholder="Expiry (optional, YYYY-MM or YYYY-MM-DD)">' +
       '<div class="cc-qlabel">Quantity</div>' +
       '<div class="cc-qtyrow"><button id="cc-mqm" class="cc-qbtn" aria-label="Decrease">\u2212</button>' +
         '<input id="cc-mqv" class="cc-qin" type="number" inputmode="numeric" min="1" value="1">' +
@@ -2603,11 +2637,15 @@ var GLOSS = {
       var e = BYPN[v] || BYPN[v.replace(/^0+/, '')];
       var desc = '', fam = '', ref = v;
       if (e) { var it = recOf(e); ref = it.sku; desc = it.t || it.name || ''; fam = it.fam || ''; }
-      sheet.hidden = true; CC.running = true; ccRearm();
       var q = Math.max(1, Math.round(+qvEl.value || 1));
-      ccAdd(ref, desc, fam, lot, '', q); ccSchedule(400);
+      var mexp = ccExpInput(document.getElementById('cc-mexp').value);
+      ccQtyOk(q).then(function (yes) {
+        if (!yes) return;
+        ccModalClose(sheet); CC.running = true;
+        ccAdd(ref, desc, fam, lot, mexp, q); ccSchedule(400);
+      });
     });
-    document.getElementById('cc-mx').addEventListener('click', function () { sheet.hidden = true; CC.running = true; ccRearm(); ccSchedule(300); });
+    document.getElementById('cc-mx').addEventListener('click', function () { ccModalClose(sheet); CC.running = true; ccSchedule(300); });
   }
   function ccEditor(r) {
     CC.running = false;
@@ -2623,6 +2661,8 @@ var GLOSS = {
         '<div class="cc-sh-h">' + esc(r.ref) + (r.desc ? ' \u2014 ' + esc(r.desc) : '') + '</div>' +
         '<div class="cc-sub">' + (r.lot ? 'Lot ' + esc(r.lot) : 'No lot') + (r.exp ? ' \u00b7 Exp ' + esc(r.exp) : '') + '</div>' +
         ((r.expired || ccIsExpired(r.exp)) ? '<div class="cc-exptag">EXPIRED</div>' : '') +
+        '<div class="cc-qlabel">Expiry</div>' +
+        '<input id="cc-qexp" class="cc-in" type="text" autocomplete="off" inputmode="numeric" placeholder="YYYY-MM or YYYY-MM-DD" value="' + esc(r.exp || '') + '">' +
         '<div class="cc-qlabel">Final quantity</div>' +
         '<div class="cc-qtyrow"><button id="cc-qm" class="cc-qbtn">\u2212</button><input id="cc-qv" class="cc-qin" type="number" inputmode="numeric" value="' + q + '"><button id="cc-qp" class="cc-qbtn">+</button></div>' +
         (breakdown ? '<div class="cc-break">' + esc(breakdown) + '</div>' : '') +
@@ -2632,15 +2672,18 @@ var GLOSS = {
       document.getElementById('cc-qp').onclick = function () { qv.value = (+qv.value || 0) + 1; };
       document.getElementById('cc-qdone').onclick = function () {
         var nq = Math.max(0, Math.round(+qv.value || 0));
-        closeModal(); CC.running = true; ccSchedule(300);
-        if (nq === (+r.qty || 0)) return;
-        var delta = nq - (+r.qty || 0);
-        if (!CC.hist[key]) CC.hist[key] = [];
-        CC.hist[key].push(delta); ccHistSave();
-        var t = CC.tgt;
-        var op = { t: 'set', ref: r.ref, lot: r.lot || '', qty: nq, desc: r.desc || '', fam: r.fam || '', exp: r.exp || '', expired: !!(r.expired || ccIsExpired(r.exp)) };
-        op.loc = r.loc; op.notes = r.notes || '';
-        ccEnqueue(t, op);
+        var nexp = ccExpInput(document.getElementById('cc-qexp').value);
+        ccQtyOk(nq).then(function (yes) {
+          if (!yes) return;
+          closeModal(); CC.running = true; ccSchedule(300);
+          var qChanged = nq !== (+r.qty || 0), eChanged = nexp !== (r.exp || '');
+          if (!qChanged && !eChanged) return;
+          if (qChanged) { var delta = nq - (+r.qty || 0); if (!CC.hist[key]) CC.hist[key] = []; CC.hist[key].push(delta); ccHistSave(); }
+          var t = CC.tgt;
+          var op = { t: 'set', ref: r.ref, lot: r.lot || '', qty: nq, desc: r.desc || '', fam: r.fam || '', exp: nexp, expired: ccIsExpired(nexp) };
+          op.loc = r.loc; op.notes = r.notes || '';
+          ccEnqueue(t, op);
+        });
       };
       document.getElementById('cc-qdel').onclick = function () {
         tbxAsk({ title: 'Delete this line?', body: r.ref + (r.lot ? ' \u00b7 Lot ' + r.lot : '') + '\nIt comes off the count on this phone and the sheet.', ok: 'Delete', danger: true }).then(function (yes) {
@@ -2813,9 +2856,10 @@ var GLOSS = {
           return serr('Couldn\u2019t create the territory \u2014 try again, or text Nate.');
         }
         hubTerrAdd({ slug: j.slug, name: j.name }, true);
-        ccLS('tbx_' + j.tgt, JSON.stringify(j.creds));
-        ccLS('tbx_' + j.tgt + '_dev', j.selfDev);
-        ccLS('tbx_' + j.tgt + '_roster', JSON.stringify(j.creds.devices || []));
+        var jt = j.slug + '_cc'; // what the router will look for; j.tgt is informational
+        ccLS('tbx_' + jt, JSON.stringify(j.creds));
+        ccLS('tbx_' + jt + '_dev', j.selfDev);
+        ccLS('tbx_' + jt + '_roster', JSON.stringify(j.creds.devices || []));
         location.hash = '#/team/' + j.slug + '/cc';
       }).catch(function () { serr('Couldn\u2019t reach the server \u2014 check signal and try again.'); });
     });
@@ -3102,16 +3146,22 @@ var GLOSS = {
   }
 
   // ---- home cache + refresh (instant paint from last-known rows, background sync) ----
+  function ccHistPrune() {
+    // Scan history is only useful for lines still on the count; drop the rest so it can't grow forever.
+    try {
+      var live = {}; CC.rows.forEach(function (x) { live[ccHK(x)] = 1; });
+      var n = 0; Object.keys(CC.hist).forEach(function (k) { if (!live[k]) { delete CC.hist[k]; n++; } });
+      if (n) ccHistSave();
+    } catch (e) {}
+  }
   function ccHomeLoad(t, manual) {
     var sy = document.getElementById('cc-sync');
-    var rf = document.getElementById('cc-rf');
-    ccDerive(t);
+    ccDerive(t); ccHistPrune();
     var rows = CC.rows;
     var paint = ccHomeCards;
     if (rows.length) { paint(); if (sy) sy.textContent = manual ? 'Refreshing\u2026' : 'Updating\u2026'; }
     else if (sy && manual) { sy.textContent = 'Refreshing\u2026'; }
-    if (rf) { rf.classList.add('spin'); rf.disabled = true; }
-    function done() { var r2 = document.getElementById('cc-rf'); if (r2) { r2.classList.remove('spin'); r2.disabled = false; } }
+    function done() {}
     function syncLine() { ccSyncLine(t); }
     ccFlushSoon(t, 250);
     return ccPull(t).then(function () {
@@ -6121,7 +6171,7 @@ var GLOSS = {
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
-    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expIso: expIso, expDisp: expDisp, catCount: catCount } };
+    cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount } };
 };
 
 /* ---- Feedback: screenshot + silent send (mailto fallback) ----
