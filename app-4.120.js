@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.119';
+  var APPVER = '4.120';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3642,7 +3642,7 @@ var GLOSS = {
     if (q) arr = arr.filter(function (L) { return nrm(L.m).indexOf(q) > -1 || nrm(L.b).indexOf(q) > -1 || nrm(L.d).indexOf(q) > -1; });
     var cap = 300, shown = arr.slice(0, cap);
     body.innerHTML = (teamOk ? '' : '<div class="fops-sub">Showing this phone\u2019s scans \u2014 the team picture loads when the sheet is reachable.</div>') +
-      '<div class="chips fops-chips">' + ['missing', 'found', 'additional'].map(function (c) { return '<button class="chip' + (FOV.chip === c ? '' : ' dim') + '" data-chip="' + c + '">' + c.charAt(0).toUpperCase() + c.slice(1) + ' ' + fopsNum(sets[c].length) + '</button>'; }).join('') + '</div>' +
+      '<div class="chips fops-chips">' + ['missing', 'found', 'additional'].map(function (c) { return '<button class="chip' + (FOV.chip === c ? ' on' : ' dim') + '" data-chip="' + c + '">' + c.charAt(0).toUpperCase() + c.slice(1) + ' ' + fopsNum(sets[c].length) + '</button>'; }).join('') + '</div>' +
       '<input id="fops-q" class="cc-in" type="search" autocomplete="off" placeholder="Search material, batch or description" value="' + esc(FOV.q) + '">' +
       '<div id="fops-list" class="ctc-wrap">' +
       (!arr.length ? '<div class="cc-empty">' + (q ? 'Nothing matches.' : (FOV.chip === 'missing' ? 'Nothing missing \u2014 every line on the list has been counted.' : FOV.chip === 'found' ? 'Nothing counted yet.' : 'Nothing extra \u2014 every scan is on the list.')) + '</div>' :
