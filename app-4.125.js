@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.124';
+  var APPVER = '4.125';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3638,6 +3638,8 @@ var GLOSS = {
     var body = document.getElementById('fops-body'); if (!body) return;
     fopsHead();
     var t = CC.tgt, s = fopsSt(t);
+    // Only a loaded list fills the screen (panel to the bottom); with nothing loaded the card hugs its content.
+    var card = document.querySelector('.fops-screen'); if (card) card.classList.toggle('has-list', !!s.list);
     if (!s.list) { body.innerHTML = s.meta ? '<div class="cc-empty">Syncing the list\u2026 pull down to refresh.</div>' : ''; return; }
     var R = fopsLocal(t), teamOk = s.status && s.status.ver === s.list.ver;
     var sets = { missing: R.missing, found: R.confirmed, additional: R.additional };

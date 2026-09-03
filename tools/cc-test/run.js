@@ -380,12 +380,14 @@ async function boot(sheet, storage) {
     w.document.querySelector('.fops-home').click(); await sleep(300);
     const head = () => w.document.getElementById('fops-head');
     check('screen: upload prompt with the bold Empty instruction and an Upload button', w.location.hash === '#/cc/fops' && /<b>empty<\/b>/.test(head().innerHTML) && !!w.document.getElementById('fops-up'));
+    check('screen: with nothing loaded the card hugs its content (no has-list stretch)', !w.document.querySelector('.fops-screen').classList.contains('has-list'));
     const res = F.fromGrid(F.readXlsx(new Uint8Array(makeXlsx(FIX)).buffer)[0].grid, 4); res.src = 'Field_ops_count_sheet.xlsx'; res.ver = F.ver(res.lines);
     F.preview('cc', res);
     check('preview: counts + catalog matches + warnings shown on the screen', /10 lines/.test(head().textContent) && /lines match the catalog/.test(head().textContent) && /already had a quantity/.test(head().textContent));
     w.document.getElementById('fops-use').click(); await sleep(200);
     const put = sheet.calls.find(c => c.body && c.body.action === 'fops_put');
     check('put: sent as text triples with device, title, ver', put && put.body.dev === "Nate's iPhone" && put.body.title === 'IT9999 SM SANDBOX SPLIT' && put.body.ver === res.ver && put.body.lines.length === 10 && put.body.lines[2][2] === '24E01', JSON.stringify(put && put.body.lines[2]));
+    check('put: a loaded list switches the card to the full-height panel layout', w.document.querySelector('.fops-screen').classList.contains('has-list'));
     check('put: screen shows progress from the status in the put reply, with Replace / Remove', /0 found/.test(head().textContent) && /10 missing/.test(head().textContent) && /0 additional/.test(head().textContent) && /IT9999 SM SANDBOX SPLIT/.test(head().textContent) && !!w.document.getElementById('fops-rm'), head().textContent);
     w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
     check('home: row shows the sheet title + counts and never renders as a nested card', /IT9999 SM SANDBOX SPLIT/.test(box().textContent) && /10 missing/.test(box().textContent) && !box().querySelector('.fops-card') && !box().querySelector('button'));
