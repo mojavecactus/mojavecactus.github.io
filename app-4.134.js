@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.133';
+  var APPVER = '4.134';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3774,7 +3774,7 @@ var GLOSS = {
     var enc = new TextEncoder(), F = window.TBX_FFLATE;
     var bytes = F.zipSync({ '[Content_Types].xml': enc.encode(types), '_rels/.rels': enc.encode(rels), 'xl/workbook.xml': enc.encode(wb), 'xl/_rels/workbook.xml.rels': enc.encode(wbRels), 'xl/styles.xml': enc.encode(styles), 'xl/worksheets/sheet1.xml': enc.encode(sheet) }, { level: 6 });
     var d = new Date(), day = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
-    return { bytes: bytes, name: fopsFileSafe(X.title) + ' \u2014 reconciliation ' + day + '.xlsx', teamOk: X.teamOk, n: X.n };
+    return { bytes: bytes, name: fopsFileSafe(X.title) + ' - Completed Cycle Count ' + day + '.xlsx', teamOk: X.teamOk, n: X.n };
   }
   // iOS: the share sheet (Save to Files, Mail, AirDrop...) works in Safari and the home-screen app; fall back to a download.
   function fopsDeliver(file) {
@@ -3783,7 +3783,7 @@ var GLOSS = {
     try {
       if (navigator.share && navigator.canShare && typeof File === 'function') {
         var f = new File([blob], file.name, { type: type });
-        if (navigator.canShare({ files: [f] })) return navigator.share({ files: [f], title: file.name }).then(function () { return 'share'; });
+        if (navigator.canShare({ files: [f] })) return navigator.share({ files: [f] }).then(function () { return 'share'; });   // no title/text: iOS would add a text.txt alongside
       }
     } catch (e) {}
     var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; a.rel = 'noopener'; a.style.display = 'none';
