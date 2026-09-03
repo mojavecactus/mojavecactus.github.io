@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.129';
+  var APPVER = '4.130';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3629,7 +3629,7 @@ var GLOSS = {
       '<div class="fops-sub">' + fopsNum(p.n) + ' lines' + (by ? ' \u00b7 uploaded by ' + esc(by) : '') + (at ? ' ' + esc(faFmt(at)) : '') + (s.list ? '' : ' \u00b7 <span class="fops-dim">syncing list\u2026</span>') + '</div>' +
       '<div class="fops-bar"><div class="fops-fill" style="width:' + pct + '%"></div></div>' +
       '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div>' +
-      '<div id="fops-act"><div class="fops-row">' + (s.list ? '<button id="fops-dl" class="fops-lnk strong">Download Field Ops Sheet</button>' : '') + '<button id="fops-rep" class="fops-lnk">Replace sheet</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
+      '<div id="fops-act">' + (s.list ? '<div class="fops-row"><button id="fops-dl" class="fops-lnk strong">Download Field Ops Sheet</button></div>' : '') + '<div class="fops-row fops-row-links"><button id="fops-rep" class="fops-lnk">Replace sheet</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
     var dl = document.getElementById('fops-dl'); if (dl) dl.addEventListener('click', function () { fopsDownload(t); });
     document.getElementById('fops-rep').addEventListener('click', function () { fopsPick(t); });
     document.getElementById('fops-rm').addEventListener('click', function () { fopsRemove(t); });
