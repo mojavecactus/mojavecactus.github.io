@@ -82,6 +82,7 @@ async function boot(sheet, storage) {
     return sheet.handle(String(url), body).then(j => ({ ok: true, json: () => Promise.resolve(j), text: () => Promise.resolve(JSON.stringify(j)) })); };
   w.ZXingWASM = { readBarcodes: () => Promise.resolve([]), prepareZXingModule() {} }; w.scrollTo = () => {};
   w.eval(decryptPayload(process.env.APP_PW));
+  if (!w.TextEncoder) { w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder; }   // browsers have these; jsdom's window does not
   w.eval(fs.readFileSync(R + '/lib/inflate.js', 'utf8'));
   w.document.documentElement.classList.add('authed');
   w.eval(fs.readFileSync(R + '/' + APP, 'utf8')); w.TBX_BOOT();
@@ -388,6 +389,13 @@ async function boot(sheet, storage) {
     const put = sheet.calls.find(c => c.body && c.body.action === 'fops_put');
     check('put: sent as text triples with device, title, ver', put && put.body.dev === "Nate's iPhone" && put.body.title === 'IT9999 SM SANDBOX SPLIT' && put.body.ver === res.ver && put.body.lines.length === 10 && put.body.lines[2][2] === '24E01', JSON.stringify(put && put.body.lines[2]));
     check('put: a loaded list switches the card to the full-height panel layout', w.document.querySelector('.fops-screen').classList.contains('has-list'));
+    // ---- Excel export: same layout as the Field Ops tab, built on the phone ----
+    { const X = F.xlsx('cc'); const Z = w.TBX_FFLATE.unzipSync(X.bytes); const dec = new w.TextDecoder(); const sheet = dec.decode(Z['xl/worksheets/sheet1.xml']);
+      const cell = (ref) => { const m = new RegExp('<c r="' + ref + '"[^>]*>(?:<is><t[^>]*>([^<]*)</t></is>|<v>([^<]*)</v>)</c>').exec(sheet); return m ? (m[1] != null ? m[1] : +m[2]) : undefined; };
+      check('xlsx: a zip with the workbook parts and a Field Ops sheet, named after the title', Z['[Content_Types].xml'] && Z['xl/workbook.xml'] && Z['xl/styles.xml'] && /<sheet name="Field Ops"/.test(dec.decode(Z['xl/workbook.xml'])) && X.name === 'IT9999 SM SANDBOX SPLIT \u2014 reconciliation ' + new Date().toISOString().slice(0, 10) + '.xlsx', X.name);
+      check('xlsx: title in A1, status in P1, section titles on row 3, headers on row 4, 4 frozen rows', cell('A1') === 'IT9999 SM SANDBOX SPLIT' && /Confirmed 0 \u00b7 Missing 10 \u00b7 Additional 0/.test(cell('P1')) && cell('A3') === 'Confirmed Inventory' && cell('F3') === 'Additional Inventory' && cell('K3') === 'Missing Inventory' && cell('A4') === 'Material Description' && cell('N4') === 'Quantity' && /ySplit="4"/.test(sheet), String(cell('P1')));
+      check('xlsx: missing block in list order with trap values kept as text (inline strings, never numbers)', cell('K5') === 'Low Dense PE HipCheck Drape 25X65' && cell('L5') === '0103-0400' && cell('L6') === '0130' && cell('M6') === '091024-05' && cell('M7') === '24E01' && cell('L8') === '3911-514-620HA' && cell('L11') === '4700' && typeof cell('M7') === 'string' && /<c r="L11" t="inlineStr"/.test(sheet) && /<c r="M6" t="inlineStr"/.test(sheet), JSON.stringify([cell('K5'), cell('L5'), cell('L6'), cell('M6'), cell('M7'), cell('L8'), cell('L11')]));
+      check('xlsx: section bands carry the tab colours and the widths match', /<c r="B3" s="2"\/>/.test(sheet) && /<c r="G3" s="3"\/>/.test(sheet) && /<c r="L3" s="4"\/>/.test(sheet) && /<col min="1" max="1" width="48.14"/.test(sheet) && /<col min="16" max="16" width="74.29"/.test(sheet)); }
     check('put: screen shows progress from the status in the put reply, with Replace / Remove', /0 found/.test(head().textContent) && /10 missing/.test(head().textContent) && /0 additional/.test(head().textContent) && /IT9999 SM SANDBOX SPLIT/.test(head().textContent) && !!w.document.getElementById('fops-rm'), head().textContent);
     w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
     check('home: row shows the sheet title + counts and never renders as a nested card', /IT9999 SM SANDBOX SPLIT/.test(box().textContent) && /10 missing/.test(box().textContent) && !box().querySelector('.fops-card') && !box().querySelector('button'));
@@ -405,9 +413,23 @@ async function boot(sheet, storage) {
     await sleep(1700);
     F.card(); await sleep(50);
     check('progress: after the flush the row still shows the scan (no flicker while the team status catches up)', /1 found/.test(box().textContent) && /1 additional/.test(box().textContent) && (sheet.statusCalls || 0) === st1, box().textContent + ' statusCalls=' + sheet.statusCalls);
+    { const X2 = F.xlsx('cc'); const Z2 = w.TBX_FFLATE.unzipSync(X2.bytes); const sh2 = new w.TextDecoder().decode(Z2['xl/worksheets/sheet1.xml']);
+      if (process.env.DUMP_XLSX) fs.writeFileSync(process.env.DUMP_XLSX, Buffer.from(X2.bytes));   // for a look in a real spreadsheet app
+      const c2 = (ref) => { const m = new RegExp('<c r="' + ref + '"[^>]*>(?:<is><t[^>]*>([^<]*)</t></is>|<v>([^<]*)</v>)</c>').exec(sh2); return m ? (m[1] != null ? m[1] : +m[2]) : undefined; };
+      check('xlsx: after scans the confirmed block has a numeric quantity and the additional block uses Field Ops dashes', c2('B5') === '0234100001' && c2('C5') === '24E01' && c2('D5') === 2 && /<c r="D5"><v>2<\/v><\/c>/.test(sh2) && c2('G5') === '3910-947-022' && c2('I5') === 1 && /Confirmed 1 \u00b7 Missing 9 \u00b7 Additional 1/.test(c2('P1')), JSON.stringify([c2('B5'), c2('C5'), c2('D5'), c2('G5'), c2('I5')])); }
+    // share sheet first, download fallback second
+    { w.location.hash = '#/cc/fops'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+      let shared = null; w.navigator.share = (o) => { shared = o; return Promise.resolve(); }; w.navigator.canShare = (o) => !!(o && o.files && o.files.length);
+      w.document.getElementById('fops-dl').click(); await sleep(150);
+      check('download: the share sheet gets one .xlsx File', shared && shared.files && shared.files.length === 1 && /reconciliation .*\.xlsx$/.test(shared.files[0].name) && shared.files[0].type.indexOf('spreadsheetml') > -1, shared && JSON.stringify(shared.files.map(f => f.name)));
+      delete w.navigator.share; delete w.navigator.canShare; let clicked = null; const oc = w.HTMLAnchorElement.prototype.click; w.HTMLAnchorElement.prototype.click = function () { clicked = this; }; w.URL.createObjectURL = () => 'blob:x'; w.URL.revokeObjectURL = () => {};
+      w.document.getElementById('fops-dl').click(); await sleep(150); w.HTMLAnchorElement.prototype.click = oc;
+      check('download: without the share sheet an anchor download is used', clicked && /reconciliation .*\.xlsx$/.test(clicked.download) && clicked.href === 'blob:x', clicked && clicked.download);
+      w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300); }
     // the sheet rebuilt (built changes) -> next pull refreshes the team status
+    const st1b = sheet.statusCalls || 0;
     sheet.fops.meta.built = 'b2'; await dev.pull('cc'); await sleep(80);
-    check('status: pull sees a new build stamp and refetches the team picture', (sheet.statusCalls || 0) === st1 + 1 && F.st('cc').status.built === 'b2' && F.st('cc').status.found['234100001|24E01'] === 2, 'statusCalls=' + sheet.statusCalls);
+    check('status: pull sees a new build stamp and refetches the team picture', (sheet.statusCalls || 0) === st1b + 1 && F.st('cc').status.built === 'b2' && F.st('cc').status.found['234100001|24E01'] === 2, 'statusCalls=' + sheet.statusCalls);
     // another phone's scan reaches this phone through the status, not through pull rows
     sheet.rows.push({ id: 'rx', ts: '2026-09-02T10:00:00Z', dev: "Mia's iPhone", ref: '0130', lot: '091024-05', qty: 1, loc: 'Storage', desc: 'InSpace' });
     sheet.fops.meta.built = 'b3'; await dev.pull('cc'); await sleep(80); F.card();
