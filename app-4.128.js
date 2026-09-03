@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.127';
+  var APPVER = '4.128';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3009,7 +3009,7 @@ var GLOSS = {
     ccStop();
     CC.view = 'help';
     render('<div class="card cc-card"><h2 class="cc-h">How it works</h2>' +
-      '<div class="cc-sub">The full cycle-count guide \u2014 setup, scanning, syncing, and the team sheet.</div>' +
+      '<div class="cc-sub">The full cycle-count guide \u2014 setup, scanning, syncing, the team sheet, and the Field Ops count sheet.</div>' +
       '<button id="help-view" class="cc-btn" type="button" style="margin-top:14px">View the guide</button>' +
       '<div class="cc-sub2" style="margin-top:12px"><button id="help-dl" class="cc-link" type="button">Download as PDF</button> \u2014 save it to Files or share it.</div>' +
       '<div id="help-body"></div></div>');
@@ -3053,7 +3053,7 @@ var GLOSS = {
     ccStop();
     CC.view = 'helpview';
     var pages = '';
-    for (var i = 1; i <= 6; i++) pages += '<img src="guide/pages/p' + i + '.webp" loading="lazy" alt="Guide page ' + i + '" style="display:block; width:100%; border-radius:10px; margin:0 0 12px; background:#fff">';
+    for (var i = 1; i <= 7; i++) pages += '<img src="guide/pages/p' + i + '.webp" loading="lazy" alt="Guide page ' + i + '" style="display:block; width:100%; border-radius:10px; margin:0 0 12px; background:#fff">';
     render('<div style="max-width:560px; margin:10px auto; padding:0 10px">' + pages +
       '<div class="cc-sub2" style="text-align:center; margin:6px 0 20px"><button id="hv-dl" class="cc-link" type="button">Download as PDF</button></div></div>');
     var hd2 = document.getElementById('hv-dl');
