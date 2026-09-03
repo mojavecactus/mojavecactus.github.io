@@ -385,6 +385,7 @@ async function boot(sheet, storage) {
     check('home: no download button before a Field Ops sheet is loaded', !w.document.getElementById('cc-fops-dl'));
     const res = F.fromGrid(F.readXlsx(new Uint8Array(makeXlsx(FIX)).buffer)[0].grid, 4); res.src = 'Field_ops_count_sheet.xlsx'; res.ver = F.ver(res.lines);
     F.preview('cc', res);
+    check('preview: no "Kept as text" line (trap lots are handled silently)', !/Kept as text/i.test(head().textContent));
     check('preview: counts + catalog matches + warnings shown on the screen', /10 lines/.test(head().textContent) && /lines match the catalog/.test(head().textContent) && /already had a quantity/.test(head().textContent));
     w.document.getElementById('fops-use').click(); await sleep(200);
     const put = sheet.calls.find(c => c.body && c.body.action === 'fops_put');

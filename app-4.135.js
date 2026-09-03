@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.134';
+  var APPVER = '4.135';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3564,7 +3564,7 @@ var GLOSS = {
     if (!FO.catIdx) { FO.catIdx = {}; for (var pk in BYPN) FO.catIdx[fopsKeyMat(pk)] = 1; }
     var catN = 0; for (var i = 0; i < res.lines.length; i++) { if (fopsHas(FO.catIdx, fopsKeyMat(res.lines[i].m))) catN++; }
     el.innerHTML = '<div class="fops-t">' + esc(res.title || res.src || 'Count sheet') + '</div>' +
-      '<div class="fops-sub">' + fopsNum(res.stats.lines) + ' lines \u00b7 ' + fopsNum(res.stats.materials) + ' materials \u00b7 ' + fopsNum(catN) + ' lines match the catalog' + (res.stats.traps.length ? '<br>Kept as text: ' + esc(res.stats.traps.join(', ')) : '') + '</div>' +
+      '<div class="fops-sub">' + fopsNum(res.stats.lines) + ' lines \u00b7 ' + fopsNum(res.stats.materials) + ' materials \u00b7 ' + fopsNum(catN) + ' lines match the catalog</div>' +
       (res.warnings.length ? '<div class="fops-warn">' + res.warnings.map(function (w) { return '<div>\u26a0 ' + esc(w) + '</div>'; }).join('') + '</div>' : '') +
       (same ? '<div class="fops-sub">This is the sheet already loaded.</div>' : '') +
       (s.list && !same ? '<div class="fops-sub">Replaces the sheet loaded now for the whole team.</div>' : '') +
