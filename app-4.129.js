@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.128';
+  var APPVER = '4.129';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3629,7 +3629,7 @@ var GLOSS = {
       '<div class="fops-sub">' + fopsNum(p.n) + ' lines' + (by ? ' \u00b7 uploaded by ' + esc(by) : '') + (at ? ' ' + esc(faFmt(at)) : '') + (s.list ? '' : ' \u00b7 <span class="fops-dim">syncing list\u2026</span>') + '</div>' +
       '<div class="fops-bar"><div class="fops-fill" style="width:' + pct + '%"></div></div>' +
       '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div>' +
-      '<div id="fops-act"><div class="fops-row">' + (s.list ? '<button id="fops-dl" class="fops-lnk strong">Download .xlsx</button>' : '') + '<button id="fops-rep" class="fops-lnk">Replace sheet</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
+      '<div id="fops-act"><div class="fops-row">' + (s.list ? '<button id="fops-dl" class="fops-lnk strong">Download Field Ops Sheet</button>' : '') + '<button id="fops-rep" class="fops-lnk">Replace sheet</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
     var dl = document.getElementById('fops-dl'); if (dl) dl.addEventListener('click', function () { fopsDownload(t); });
     document.getElementById('fops-rep').addEventListener('click', function () { fopsPick(t); });
     document.getElementById('fops-rm').addEventListener('click', function () { fopsRemove(t); });
@@ -3727,27 +3727,26 @@ var GLOSS = {
   // Minimal OOXML workbook: inline strings (lots like 24E01 stay text), numeric quantities, the tab's fills/bold/widths/freeze.
   function fopsXlsxBytes(t) {
     var X = fopsXlsxRows(t), rows = X.rows, i, j, sd = '';
+    // Cells must appear in column order inside each row (Excel repairs the file otherwise), so every row is
+    // walked column by column; the row-3 section bands are emitted as empty styled cells in that same pass.
+    var bandOf = function (col) { return col >= 1 && col <= 4 ? 2 : col >= 6 && col <= 9 ? 3 : col >= 11 && col <= 14 ? 4 : 0; };
     for (i = 0; i < rows.length; i++) {
       var r = rows[i], cells = '';
-      for (j = 0; j < r.length; j++) {
-        var v = r[j]; if (v === '' || v == null) continue;
-        var ref = fopsColRef(j + 1) + (i + 1), st = 0;
+      for (j = 0; j < FOPS_XL.cols; j++) {
+        var v = r[j], ref = fopsColRef(j + 1) + (i + 1), st = 0, empty = (v === '' || v == null);
         if (i === 0) st = j === 0 ? 1 : (j === FOPS_XL.cols - 1 ? 6 : 0);
-        else if (i === 2) st = j === 0 ? 8 : j === 5 ? 9 : j === 10 ? 10 : 0;
+        else if (i === 2) st = j === 0 ? 8 : j === 5 ? 9 : j === 10 ? 10 : bandOf(j + 1);
         else if (i === 3) st = 5;
+        if (empty) { if (i === 2 && st) cells += '<c r="' + ref + '" s="' + st + '"/>'; continue; }
         if (typeof v === 'number' && i >= FOPS_XL.hdr) cells += '<c r="' + ref + '"><v>' + v + '</v></c>';
         else cells += '<c r="' + ref + '" t="inlineStr"' + (st ? ' s="' + st + '"' : '') + '><is><t xml:space="preserve">' + fopsXmlEsc(v) + '</t></is></c>';
-      }
-      if (i === 2) { // fill the whole section band like the tab (A3:D3 green, F3:I3 blue, K3:N3 red)
-        var band = [[1, 4, 2], [6, 9, 3], [11, 14, 4]], extra = '';
-        for (var b = 0; b < band.length; b++) for (var cc = band[b][0]; cc <= band[b][1]; cc++) if (!rows[2][cc - 1]) extra += '<c r="' + fopsColRef(cc) + '3" s="' + band[b][2] + '"/>';
-        cells += extra;
       }
       sd += '<row r="' + (i + 1) + '">' + cells + '</row>';
     }
     var cols = ''; for (i = 0; i < FOPS_XL.widths.length; i++) cols += '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + (Math.round(FOPS_XL.widths[i] / 7 * 100) / 100) + '" customWidth="1"/>';
     var sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-      '<sheetViews><sheetView workbookViewId="0"><pane ySplit="' + FOPS_XL.hdr + '" topLeftCell="A' + (FOPS_XL.hdr + 1) + '" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+      '<dimension ref="A1:' + fopsColRef(FOPS_XL.cols) + rows.length + '"/>' +
+      '<sheetViews><sheetView workbookViewId="0"><pane ySplit="' + FOPS_XL.hdr + '" topLeftCell="A' + (FOPS_XL.hdr + 1) + '" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A' + (FOPS_XL.hdr + 1) + '" sqref="A' + (FOPS_XL.hdr + 1) + '"/></sheetView></sheetViews>' +
       '<cols>' + cols + '</cols><sheetData>' + sd + '</sheetData></worksheet>';
     var styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
       '<fonts count="4"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="12"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><i/><sz val="10"/><color rgb="FF666666"/><name val="Arial"/></font></fonts>' +
