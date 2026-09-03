@@ -382,6 +382,7 @@ async function boot(sheet, storage) {
     const head = () => w.document.getElementById('fops-head');
     check('screen: upload prompt with the bold Empty instruction and an Upload button', w.location.hash === '#/cc/fops' && /<b>empty<\/b>/.test(head().innerHTML) && !!w.document.getElementById('fops-up'));
     check('screen: with nothing loaded the card hugs its content (no has-list stretch)', !w.document.querySelector('.fops-screen').classList.contains('has-list'));
+    check('home: no download button before a Field Ops sheet is loaded', !w.document.getElementById('cc-fops-dl'));
     const res = F.fromGrid(F.readXlsx(new Uint8Array(makeXlsx(FIX)).buffer)[0].grid, 4); res.src = 'Field_ops_count_sheet.xlsx'; res.ver = F.ver(res.lines);
     F.preview('cc', res);
     check('preview: counts + catalog matches + warnings shown on the screen', /10 lines/.test(head().textContent) && /lines match the catalog/.test(head().textContent) && /already had a quantity/.test(head().textContent));
@@ -401,7 +402,7 @@ async function boot(sheet, storage) {
       check('xlsx: cells are in column order in every row and the sheet declares its dimension (Excel opens it without repair)', badRows.length === 0 && /<dimension ref="A1:P14"\/>/.test(sheet) && /<selection pane="bottomLeft"/.test(sheet), 'bad rows ' + badRows.join(',')); }
     check('put: screen shows progress from the status in the put reply, with Replace / Remove', /0 found/.test(head().textContent) && /10 missing/.test(head().textContent) && /0 additional/.test(head().textContent) && /IT9999 SM SANDBOX SPLIT/.test(head().textContent) && !!w.document.getElementById('fops-rm'), head().textContent);
     w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
-    check('home: row shows the sheet title + counts and never renders as a nested card', /IT9999 SM SANDBOX SPLIT/.test(box().textContent) && /10 missing/.test(box().textContent) && !box().querySelector('.fops-card') && !box().querySelector('button'));
+    check('home: row shows the sheet title + counts and never renders as a nested card', /IT9999 SM SANDBOX SPLIT/.test(box().textContent) && /10 missing/.test(box().textContent) && !box().querySelector('.fops-card') && !box().querySelector('.fops-home button'));
     { const c0 = sheet.statusCalls || 0; F.st('cc').status.at = 0; w.document.dispatchEvent(new w.Event('visibilitychange')); await sleep(1500);
       check('live: coming back to the foreground refreshes the team picture', (sheet.statusCalls || 0) === c0 + 1, 'calls ' + sheet.statusCalls + ' vs ' + c0); }
     check('put: status cached', JSON.parse(w.localStorage.getItem('tbx_cc_fops_status')).ver === res.ver);
@@ -422,11 +423,14 @@ async function boot(sheet, storage) {
       check('xlsx: after scans the confirmed block has a numeric quantity and the additional block uses Field Ops dashes', c2('B5') === '0234100001' && c2('C5') === '24E01' && c2('D5') === 2 && /<c r="D5"><v>2<\/v><\/c>/.test(sh2) && c2('G5') === '3910-947-022' && c2('I5') === 1 && /Confirmed 1 \u00b7 Missing 9 \u00b7 Additional 1/.test(c2('P1')), JSON.stringify([c2('B5'), c2('C5'), c2('D5'), c2('G5'), c2('I5')])); }
     // share sheet first, download fallback second
     { w.location.hash = '#/cc/fops'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+      check('download: the Field Ops screen no longer carries the download button (it lives on the Cycle Count home)', !w.document.getElementById('fops-dl') && !!w.document.getElementById('fops-rep'));
+      w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300);
+      check('download: Cycle Count home shows Download Completed Cycle Count Sheet above the Field Ops row while a list is loaded', (() => { const b = w.document.getElementById('cc-fops-dl'); const lab = w.document.querySelector('#cc-fops .fops-lab'); return !!b && /Download Completed Cycle Count Sheet/.test(b.textContent) && !!lab && (b.compareDocumentPosition(lab) & 4) === 4; })());
       let shared = null; w.navigator.share = (o) => { shared = o; return Promise.resolve(); }; w.navigator.canShare = (o) => !!(o && o.files && o.files.length);
-      w.document.getElementById('fops-dl').click(); await sleep(150);
+      w.document.getElementById('cc-fops-dl').click(); await sleep(150);
       check('download: the share sheet gets one .xlsx File', shared && shared.files && shared.files.length === 1 && /reconciliation .*\.xlsx$/.test(shared.files[0].name) && shared.files[0].type.indexOf('spreadsheetml') > -1, shared && JSON.stringify(shared.files.map(f => f.name)));
       delete w.navigator.share; delete w.navigator.canShare; let clicked = null; const oc = w.HTMLAnchorElement.prototype.click; w.HTMLAnchorElement.prototype.click = function () { clicked = this; }; w.URL.createObjectURL = () => 'blob:x'; w.URL.revokeObjectURL = () => {};
-      w.document.getElementById('fops-dl').click(); await sleep(150); w.HTMLAnchorElement.prototype.click = oc;
+      w.document.getElementById('cc-fops-dl').click(); await sleep(150); w.HTMLAnchorElement.prototype.click = oc;
       check('download: without the share sheet an anchor download is used', clicked && /reconciliation .*\.xlsx$/.test(clicked.download) && clicked.href === 'blob:x', clicked && clicked.download);
       w.location.hash = '#/cc'; w.dispatchEvent(new w.Event('hashchange')); await sleep(300); }
     // the sheet rebuilt (built changes) -> next pull refreshes the team status

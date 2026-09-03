@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.131';
+  var APPVER = '4.132';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3541,8 +3541,10 @@ var GLOSS = {
         '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div></div>';
       if (s.list && (!s.status || s.status.ver !== s.list.ver || Date.now() - (s.status.at || 0) > 60000)) fopsStatus(t).catch(function () {});
     }
-    el.innerHTML = '<div class="fops-lab">Field Ops</div><div class="fops-home" role="button" tabindex="0"><div class="fops-ic">\uD83D\uDCCB</div>' + body + '<div class="fops-chev">\u203A</div></div>';
+    el.innerHTML = (s.list ? '<div class="fops-dl-wrap"><button id="cc-fops-dl" class="cc-btn cc-btn-out" type="button">Download Completed Cycle Count Sheet</button></div>' : '') +
+      '<div class="fops-lab">Field Ops</div><div class="fops-home" role="button" tabindex="0"><div class="fops-ic">\uD83D\uDCCB</div>' + body + '<div class="fops-chev">\u203A</div></div>';
     el.querySelector('.fops-home').addEventListener('click', function () { location.hash = fopsRoute(); });
+    var dl = document.getElementById('cc-fops-dl'); if (dl) dl.addEventListener('click', function () { fopsDownload(t); });
   }
   function fopsPick(t) {
     var inp = document.createElement('input'); inp.type = 'file';
@@ -3629,8 +3631,7 @@ var GLOSS = {
       '<div class="fops-sub">' + fopsNum(p.n) + ' lines' + (by ? ' \u00b7 uploaded by ' + esc(by) : '') + (at ? ' ' + esc(faFmt(at)) : '') + (s.list ? '' : ' \u00b7 <span class="fops-dim">syncing list\u2026</span>') + '</div>' +
       '<div class="fops-bar"><div class="fops-fill" style="width:' + pct + '%"></div></div>' +
       '<div class="fops-nums"><span class="ok">' + fopsNum(p.confirmed) + ' found</span><span class="miss">' + fopsNum(p.missing) + ' missing</span><span class="add">' + fopsNum(p.additional) + ' additional</span></div>' +
-      '<div id="fops-act">' + (s.list ? '<div class="fops-row"><button id="fops-dl" class="fops-lnk strong">Download Field Ops Sheet</button></div>' : '') + '<div class="fops-row fops-row-links"><button id="fops-rep" class="fops-lnk">Replace sheet</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
-    var dl = document.getElementById('fops-dl'); if (dl) dl.addEventListener('click', function () { fopsDownload(t); });
+      '<div id="fops-act"><div class="fops-row"><button id="fops-rep" class="fops-lnk">Replace sheet</button><button id="fops-rm" class="fops-lnk danger">Remove</button></div>' + errHTML + '</div>';
     document.getElementById('fops-rep').addEventListener('click', function () { fopsPick(t); });
     document.getElementById('fops-rm').addEventListener('click', function () { fopsRemove(t); });
     if (s.list && (!s.status || s.status.ver !== s.list.ver || Date.now() - (s.status.at || 0) > 60000)) fopsStatus(t).catch(function () {});
@@ -3793,13 +3794,14 @@ var GLOSS = {
   function fopsDownload(t) {
     var s = fopsSt(t); if (!s.list) return;
     var file;
-    try { file = fopsXlsxBytes(t); } catch (e) { fopsHead('Couldn\u2019t build the file on this phone.'); return; }
+    try { file = fopsXlsxBytes(t); } catch (e) { if (document.getElementById('fops-head')) fopsHead('Couldn\u2019t build the file on this phone.'); else toastMsg('Couldn\u2019t build the file on this phone.', 3000); return; }
     fopsDeliver(file).then(function (how) {
       toastMsg(how === 'share' ? 'Shared ' + file.name : 'Downloading ' + file.name, 2600);
       fopsStatus(t).catch(function () {});     // freshen the team picture for the next export
     }).catch(function (e) {
       if (e && e.name === 'AbortError') return;  // the share sheet was dismissed
-      fopsHead('Couldn\u2019t hand the file to this phone \u2014 open the Google Sheet and use Download there.');
+      var msg = 'Couldn\u2019t hand the file to this phone \u2014 open the Google Sheet and use Download there.';
+      if (document.getElementById('fops-head')) fopsHead(msg); else toastMsg(msg, 3600);
     });
   }
 
