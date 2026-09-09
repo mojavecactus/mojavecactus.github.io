@@ -127,7 +127,9 @@ main{padding:16px 14px calc(env(safe-area-inset-bottom) + 28px); max-width:640px
 .bo-head{display:flex; align-items:flex-start; gap:10px; padding-right:40px;}
 .bo-title{font-size:var(--fs-md); font-weight:700; color:var(--bone);}
 .bo-sub{margin:3px 0 0;}
-.bo-rf{top:14px; right:14px;}
+.bo-rf{top:14px; right:14px; transition:opacity .15s;}
+.bo-rf.spin{animation:bo-spin .8s linear infinite; opacity:.85;}
+@keyframes bo-spin{to{transform:rotate(360deg);}}
 .bo-chips{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; padding:2px 0 0;}
 .bochip{flex:none; border:1.5px solid #5a564e; background:var(--panel); color:var(--bone); font:inherit; font-weight:700; font-size:12.5px; border-radius:999px; padding:7px 12px; cursor:pointer; white-space:nowrap; transition:transform .08s ease;}
 .bochip:active{transform:scale(.94);}
@@ -1085,7 +1087,7 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.138.js"></script>
+<script src="app-4.139.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
 </body>
 </html>

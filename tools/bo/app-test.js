@@ -121,7 +121,9 @@ async function boot(opts) {
     qi.value = ''; qi.dispatchEvent(new t.w.Event('input')); await sleep(20);
     // refresh button
     t.$('#bo-refresh').click(); await sleep(60);
-    check('bo: refresh button forces a hub call', t.calls.filter(c => c.url === HUB).length === 2);
+    check('bo: refresh button forces a hub call and spins while it runs', t.calls.filter(c => c.url === HUB).length === 2 && t.$('#bo-refresh').classList.contains('spin') && t.$('#bo-refresh').disabled);
+    await sleep(700);
+    check('bo: spin stops after the refresh settles', !t.$('#bo-refresh').classList.contains('spin') && !t.$('#bo-refresh').disabled);
     // tap an entry → card
     Array.from(t.$$('#bo-body .bo-row')).find(r => /CAT00776/.test(r.textContent)).click(); await sleep(40);
     check('bo: tapping an entry opens the product card', t.w.location.hash === '#/pn/CAT00776' && t.$('.card h1') && /FlowPort/.test(t.txt('.card h1')), t.w.location.hash);
@@ -164,7 +166,7 @@ async function boot(opts) {
     check('cache: fresh cache (5 min) → no hub call at boot', t.calls.filter(c => c.url === HUB).length === 0);
     await t.go('#/pn/CAT00776');
     check('cache: pills/banner render from cache with the hub down', t.$('.bobanner .bopill.bo') && t.$('.bobanner'));
-    await t.go('#/bo'); await sleep(80);
+    await t.go('#/bo'); await sleep(750);
     check('cache: report opens from cache; hub failure noted in the sub-line', t.$$('.bo-gh').length === 3 && /hub unreachable, showing saved report/.test(t.txt('#bo-sub')), t.txt('#bo-sub'));
     check('cache: no page errors', t.errs.length === 0, t.errs.join(' | '));
     const s = await boot({ storage: { tbx_bo: JSON.stringify({ at: Date.now() - 40 * 60000, data: API }) } }); await sleep(1700);
@@ -173,7 +175,7 @@ async function boot(opts) {
     check('offline, never loaded: no call, tile says offline', o.calls.filter(c => c.url === HUB).length === 0 && /Offline/.test(o.txt('.tile-bo .n')), o.txt('.tile-bo .n'));
     await o.go('#/bo'); await sleep(50);
     check('offline, never loaded: empty state, no errors', /Offline/.test(o.txt('#bo-body')) && o.errs.length === 0, o.txt('#bo-body'));
-    const d = await boot({ hubDown: true }); await sleep(1700); await d.go('#/bo'); await sleep(80);
+    const d = await boot({ hubDown: true }); await sleep(1700); await d.go('#/bo'); await sleep(750);
     check('hub down, never loaded: retry state', /Couldn’t reach/.test(d.txt('#bo-body')) && d.$('[data-bo-retry]') && d.errs.length === 0, d.txt('#bo-body'));
     d.$('[data-bo-retry]').click(); await sleep(60);
     check('hub down: retry issues another call (boot + open + retry)', d.calls.filter(c => c.url === HUB).length === 3, d.calls.filter(c => c.url === HUB).length); }

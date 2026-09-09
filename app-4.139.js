@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.138';
+  var APPVER = '4.139';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -351,9 +351,13 @@ var GLOSS = {
     });
     var rb = document.getElementById('bo-refresh'), bodyEl = document.getElementById('bo-body');
     function refresh() {
-      if (rb) { rb.disabled = true; rb.style.opacity = '.45'; }
+      if (rb) { rb.disabled = true; rb.classList.add('spin'); }
       draw();
-      boFetch(function () { if (rb) { rb.disabled = false; rb.style.opacity = ''; } draw(); });
+      var t0 = Date.now();
+      boFetch(function () {
+        // keep the spin visible for at least half a turn so a fast (cached) answer still reads as a refresh
+        setTimeout(function () { if (rb) { rb.disabled = false; rb.classList.remove('spin'); } draw(); }, Math.max(0, 600 - (Date.now() - t0)));
+      });
     }
     if (rb) rb.addEventListener('click', refresh);
     if (bodyEl) bodyEl.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('[data-bo-retry]')) refresh(); });
