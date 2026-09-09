@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.137';
+  var APPVER = '4.138';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -312,7 +312,7 @@ var GLOSS = {
       if (!body) return;
       if (sub) sub.textContent = subLine();
       if (src) src.innerHTML = 'Updated automatically from the weekly Inventory Report email.' +
-        (BO.data && BO.data.highspot ? '<a class="bo-hs" href="' + esc(BO.data.highspot) + '" target="_blank" rel="noopener">Full report on Highspot &#x203A;</a>' : '');
+        (BO.data && BO.data.highspot ? '<br><a class="bo-hs" href="' + esc(BO.data.highspot) + '" target="_blank" rel="noopener">Full report on Highspot &#x203A;</a>' : '');
       var d = BO.data;
       if (!d) {
         if (chips) chips.innerHTML = '';
