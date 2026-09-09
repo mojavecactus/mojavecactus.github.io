@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.136';
+  var APPVER = '4.137';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -288,6 +288,7 @@ var GLOSS = {
     render('<div class="card bo-card">' +
       '<div class="bo-head"><div class="bo-hl"><div class="bo-title">Weekly Stryker Inventory Report</div><div class="cc-sub bo-sub" id="bo-sub"></div></div>' +
       '<button id="bo-refresh" class="ct-help bo-rf" type="button" aria-label="Refresh">↻</button></div>' +
+      '<div class="bo-src" id="bo-src"></div>' +
       '<input id="bo-q" class="cc-in" type="search" autocomplete="off" placeholder="Filter by part number or description…">' +
       '<div class="bo-chips" id="bo-chips"></div>' +
       '</div><div id="bo-body"></div>');
@@ -307,9 +308,11 @@ var GLOSS = {
       return (nq && nh.indexOf(nq) > -1) || (nz.length > 1 && nh.indexOf(nz) > -1) || hay.toLowerCase().indexOf(q.toLowerCase()) > -1;
     }
     function draw() {
-      var body = document.getElementById('bo-body'), sub = document.getElementById('bo-sub'), chips = document.getElementById('bo-chips');
+      var body = document.getElementById('bo-body'), sub = document.getElementById('bo-sub'), chips = document.getElementById('bo-chips'), src = document.getElementById('bo-src');
       if (!body) return;
       if (sub) sub.textContent = subLine();
+      if (src) src.innerHTML = 'Updated automatically from the weekly Inventory Report email.' +
+        (BO.data && BO.data.highspot ? '<a class="bo-hs" href="' + esc(BO.data.highspot) + '" target="_blank" rel="noopener">Full report on Highspot &#x203A;</a>' : '');
       var d = BO.data;
       if (!d) {
         if (chips) chips.innerHTML = '';
@@ -335,8 +338,6 @@ var GLOSS = {
       section('bo', 'On backorder', 'Nothing on backorder');
       section('ctl', 'Inventory controlled', 'No inventory-controlled products');
       section('clr', 'Recently cleared', 'Nothing cleared recently');
-      html += '<div class="foot">Updated automatically from the weekly Inventory Report email.' +
-        (d.highspot ? '<br><a class="footlink" href="' + esc(d.highspot) + '" target="_blank" rel="noopener">Full report on Highspot &#x203A;</a>' : '') + '</div>';
       body.innerHTML = html;
     }
     BO.redraw = draw;

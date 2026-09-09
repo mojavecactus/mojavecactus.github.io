@@ -107,7 +107,7 @@ async function boot(opts) {
     check('bo: zero-tolerant match links 279401100 to the 0279401100 card', zero && zero.getAttribute('data-go') === '#/pn/0279401100' && /90-S Max/.test(zero.textContent), zero && zero.getAttribute('data-go'));
     const clr = t.$$('#bo-body .list')[2].querySelectorAll('.bo-row');
     check('bo: cleared entries say week of Sep 7; 234020235 links to the leading-zero card', clr.length === 11 && Array.from(clr).every(r => /week of Sep 7/.test(r.textContent)) && Array.from(clr).find(r => /234020235/.test(r.textContent)).getAttribute('data-go') === '#/pn/0234020235');
-    check('bo: highspot footer link', (() => { const a = t.$('#bo-body .foot a'); return a && a.getAttribute('target') === '_blank' && /highspot\.com/.test(a.href); })());
+    check('bo: Highspot link at the top of the report card', (() => { const a = t.$('#bo-src a.bo-hs'); return a && a.getAttribute('target') === '_blank' && /highspot\.com/.test(a.href) && /Updated automatically/.test(t.txt('#bo-src')) && !t.$('#bo-body .foot'); })());
     // chips
     t.$('[data-bo-sec="ctl"]').click(); await sleep(20);
     check('bo: chip narrows to one section', t.$$('.bo-gh').length === 1 && /Inventory controlled/.test(t.txt('.bo-gh')) && t.$('[data-bo-sec="ctl"]').classList.contains('on'));
