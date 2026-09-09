@@ -103,6 +103,52 @@ main{padding:16px 14px calc(env(safe-area-inset-bottom) + 28px); max-width:640px
 .tile-inv .n{color:rgba(20,20,20,.75);}
 .tile-inv .ct{color:#141414;}
 .tile-inv:active{background:var(--amber-press);}
+/* backorder report: dark-blue home tile, status pills, card banner, report screen */
+.tile-bo{background:#15304F; border-color:#2E5F96; color:#EAF3FF;}
+.tile-bo b{color:#EAF3FF;}
+.tile-bo .n{color:#9CC9FF;}
+.tile-bo .ct{color:#9CC9FF;}
+.tile-bo .tico{background:rgba(156,201,255,.12); border-color:rgba(156,201,255,.24);}
+.tile-bo:active{background:#1C3F69;}
+.bopill{display:inline-block; border:1px solid; border-radius:6px; padding:1px 7px; font-size:10.5px; font-weight:800; white-space:nowrap; letter-spacing:.35px; text-transform:uppercase; vertical-align:middle; line-height:1.5;}
+.bopill.bo{background:#3A1516; color:#FFB3AE; border-color:#D06A68;}
+.bopill.ctl{background:#3A2A14; color:#FFD98A; border-color:#8A6420;}
+.bopill.clr{background:#143A22; color:#9BE3B4; border-color:#3E8A55;}
+.card h1 .bopill{font-size:11px; margin-left:4px; position:relative; top:-2px;}
+.bobanner{background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:0 0 14px;}
+.bobanner .bo-line{display:block; font-size:13.5px; font-weight:600; color:var(--bone); line-height:1.5;}
+.bobanner .bo-line .bopill{margin-right:7px; position:relative; top:-1px;}
+.bobanner .bo-w{display:inline;}
+.bobanner .bo-line + .bo-line{margin-top:8px;}
+.bobanner .bo-msg{color:#C9C5BE; font-size:13px; line-height:1.45; margin:6px 0 4px;}
+.bo-asof{color:var(--muted); font-weight:500; white-space:nowrap;}
+.bobanner .bo-more{display:block; margin-top:8px; border:0; background:none; color:var(--amber); font-weight:700; font-size:12.5px; padding:0; cursor:pointer; font-family:inherit;}
+.bo-card{position:relative; padding:16px; margin-bottom:12px;}
+.bo-head{display:flex; align-items:flex-start; gap:10px; padding-right:40px;}
+.bo-title{font-size:var(--fs-md); font-weight:700; color:var(--bone);}
+.bo-sub{margin:3px 0 0;}
+.bo-rf{top:14px; right:14px;}
+.bo-chips{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; padding:2px 0 0;}
+.bochip{flex:none; border:1.5px solid #5a564e; background:var(--panel); color:var(--bone); font:inherit; font-weight:700; font-size:12.5px; border-radius:999px; padding:7px 12px; cursor:pointer; white-space:nowrap; transition:transform .08s ease;}
+.bochip:active{transform:scale(.94);}
+.bochip.on{border-color:#9CC9FF; color:#0F1F33; background:#9CC9FF;}
+.bo-card .cc-in{margin:12px 0 0;}
+.bo-gh{margin-top:18px;}
+.bo-gh.bo{color:#FFB3AE;}
+.bo-gh.ctl{color:#FFD98A;}
+.bo-gh.clr{color:#9BE3B4;}
+.bo-gh .bo-win{color:var(--muted); font-weight:600; letter-spacing:0; text-transform:none; font-size:12px;}
+.bo-row .rl{min-width:0;}
+.bo-row .bo-top{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:5px;}
+.bo-row .bo-sku{color:var(--amber); font-size:12.5px; font-weight:600; letter-spacing:.2px;}
+.bo-row .bo-nocat{color:var(--muted); font-size:11px; font-weight:600;}
+.bo-row .rl b.ti{white-space:normal;}
+.bo-row .rl span.bo-desc{white-space:normal; color:#B9B5AE;}
+.bo-row .rl span.bo-meta{white-space:normal; color:var(--bone); font-weight:600; margin-top:4px;}
+.bo-row .rl span.bo-asof{display:inline; margin:0; white-space:nowrap; font-size:inherit;}
+.bo-row .bo-note{display:block; white-space:normal; color:#B9B5AE; font-size:12.5px; line-height:1.45; margin-top:5px; border-left:2px solid var(--line); padding-left:8px;}
+.bo-nolink{cursor:default;}
+.bo-nolink:active{background:var(--panel); transform:none;}
 button.tile, .rowitem{cursor:pointer; width:100%;}
 .list{display:flex; flex-direction:column; gap:8px;}
 .rowitem{display:flex; align-items:center; gap:12px; background:var(--panel);
@@ -1036,7 +1082,7 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.135.js"></script>
+<script src="app-4.136.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
 </body>
 </html>

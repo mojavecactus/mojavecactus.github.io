@@ -2,3 +2,6 @@ data.js
 gtin.js
 whatsnew.js
 cc-config.json
+tools/bo/fixtures/
+tools/bo/shots/
+tools/bo/node_modules

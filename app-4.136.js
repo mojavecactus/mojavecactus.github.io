@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.135';
+  var APPVER = '4.136';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -142,6 +142,221 @@ var GLOSS = {
   function recOf(entry) {
     if (!entry) return null;
     return entry.kind === 'item' ? D.items[entry.idx] : entry.kind === 'probe' ? D.probes[entry.idx] : D.shavers[entry.idx];
+  }
+
+  // ---- Backorder Report (weekly Stryker Inventory Report, served by the syksmtoolbox backorder hub) ----
+  // Read path only. The hub is fetched at most every 30 min and cached in localStorage so the status pills
+  // and the report work offline. Everything here is guarded: a hub problem must never touch the catalog,
+  // the scanner, or the cycle-count screens (which share nothing with this module).
+  var BOH = null; try { if (D.bo && D.bo.url && D.bo.key) BOH = D.bo; } catch (eBo0) {}
+  var BO = { data: null, by: {}, at: 0, busy: false, err: '', redraw: null };
+  var BO_AUTO_MS = 30 * 60000, BO_STALE_MS = 5 * 60000;
+  var BO_PILL = { bo: 'Backorder', ctl: 'Controlled', clr: 'Cleared' };
+  var BO_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function boOn() { return !!BOH; }
+  function boKeyZ(s) { return nrm(s).replace(/^0+/, ''); }
+  function boDate(iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; }
+  function boFmt(iso) { var d = boDate(iso); if (!d) return ''; var s = BO_MON[d.getMonth()] + ' ' + d.getDate(); if (d.getFullYear() !== new Date().getFullYear()) s += ', ' + d.getFullYear(); return s; }
+  function boShort(iso) { var d = boDate(iso); return d ? (d.getMonth() + 1) + '/' + d.getDate() : ''; }
+  function boPast(iso) { var d = boDate(iso); if (!d) return false; var t = new Date(); t.setHours(0, 0, 0, 0); return d < t; }
+  function boAgo(ts) {
+    var s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 90) return 'just now'; if (s < 3600) return Math.round(s / 60) + ' min ago';
+    if (s < 86400) return Math.round(s / 3600) + ' h ago'; return Math.round(s / 86400) + ' d ago';
+  }
+  var BYPNZ = {};
+  Object.keys(BYPN).forEach(function (k) { var z = k.replace(/^0+/, ''); if (!BYPNZ[z] || k === z) BYPNZ[z] = BYPN[k]; });
+  function boCatalog(sku) {
+    var e = BYPN[nrm(sku)] || BYPNZ[boKeyZ(sku)]; if (!e) return null;
+    var rec = recOf(e); return (rec && !rec.hidden) ? { rec: rec, route: pnRoute(rec.sku) } : null;
+  }
+  function boIndex() {
+    var by = {}, d = BO.data;
+    function put(kind, r) {
+      if (!r || !r.sku) return;
+      var k = nrm(r.sku), kz = 'z' + boKeyZ(r.sku);
+      var e = by[k] || by[kz] || { st: {} };
+      e.st[kind] = 1; e[kind] = r; by[k] = e; by[kz] = e;
+    }
+    if (d) {
+      (d.backorders || []).forEach(function (r) { put('bo', r); });
+      (d.controlled || []).forEach(function (r) { put('ctl', r); });
+      (d.cleared || []).forEach(function (r) { put('clr', r); });
+    }
+    BO.by = by;
+  }
+  function boFor(sku) { if (!sku || !BO.data) return null; return BO.by[nrm(sku)] || BO.by['z' + boKeyZ(sku)] || null; }
+  function boKinds(e) { var a = []; if (!e) return a; if (e.st.bo) a.push('bo'); if (e.st.ctl) a.push('ctl'); if (e.st.clr && !e.st.bo) a.push('clr'); return a; }
+  (function boLoad() {
+    try {
+      var j = JSON.parse(localStorage.getItem('tbx_bo') || 'null');
+      if (j && j.data && j.data.ok && j.data.backorders) { BO.data = j.data; BO.at = +j.at || 0; boIndex(); }
+    } catch (e) {}
+  })();
+  function boSave() { try { localStorage.setItem('tbx_bo', JSON.stringify({ at: BO.at, data: BO.data })); } catch (e) {} }
+  function boFetch(cb) {
+    if (!boOn() || BO.busy) { if (cb) cb(false); return; }
+    if (navigator.onLine === false) { BO.err = 'offline'; if (cb) cb(false); return; }
+    BO.busy = true;
+    var ac = null; try { if (typeof AbortController !== 'undefined') ac = new AbortController(); } catch (e0) {}
+    var to = ac ? setTimeout(function () { try { ac.abort(); } catch (e1) {} }, 9000) : null;
+    var done = function (ok) { BO.busy = false; if (to) clearTimeout(to); if (cb) cb(ok); };
+    try {
+      fetch(BOH.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'bo', key: BOH.key }), signal: ac ? ac.signal : undefined })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok || !j.backorders || !j.controlled) throw new Error('bad');
+          BO.data = j; BO.at = Date.now(); BO.err = ''; boIndex(); boSave(); done(true);
+        })
+        .catch(function () { BO.err = 'net'; done(false); });
+    } catch (e2) { BO.err = 'net'; done(false); }
+  }
+  function boRefresh(force, cb) {
+    if (!boOn()) { if (cb) cb(false); return; }
+    if (!force && BO.data && Date.now() - BO.at < BO_AUTO_MS) { if (cb) cb(false); return; }
+    boFetch(function (ok) { boPaint(); if (cb) cb(ok); });
+  }
+  function boPaint() { // refresh what is on screen without re-routing: home tile counts, or the report list
+    try {
+      var n = document.querySelector('.tile-bo .n'); if (n) n.innerHTML = boTileSub();
+      if ((location.hash || '#/').split('?')[0] === '#/bo' && typeof BO.redraw === 'function') BO.redraw();
+    } catch (e) {}
+  }
+  function boPillsHTML(sku, max) {
+    var e = boFor(sku); if (!e) return '';
+    return boKinds(e).slice(0, max || 3).map(function (k) { return '<span class="bopill ' + k + '">' + BO_PILL[k] + '</span>'; }).join('');
+  }
+  function boWhen(r) { // one line for a backordered row
+    var w;
+    if (r.clearDate) w = boPast(r.clearDate) ? 'Clear date passed (was ' + boFmt(r.clearDate) + ')' : 'Est. full clear ' + boFmt(r.clearDate);
+    else if (r.clearText) w = 'Est. full clear ' + esc(r.clearText);
+    else return r.since ? 'On backorder since week of ' + boFmt(r.since) : 'No clear date given';
+    if (r.asOf) w += ' <span class="bo-asof">per ' + boShort(r.asOf) + ' report</span>';
+    return w;
+  }
+  function boBannerHTML(sku) {
+    var e = boFor(sku); if (!e) return '';
+    var lines = [];
+    if (e.st.bo) lines.push('<div class="bo-line"><span class="bopill bo">Backorder</span><span class="bo-w">' + boWhen(e.bo) + '</span></div>' + (e.bo.note ? '<div class="bo-msg">' + esc(e.bo.note) + '</div>' : ''));
+    if (e.st.ctl) lines.push('<div class="bo-line"><span class="bopill ctl">Controlled</span><span class="bo-w">Inventory controlled · 24–36 hr shipping delay</span></div>' + (e.ctl.msg ? '<div class="bo-msg">' + esc(e.ctl.msg) + '</div>' : ''));
+    if (e.st.clr && !e.st.bo) lines.push('<div class="bo-line"><span class="bopill clr">Cleared</span><span class="bo-w">Cleared backorder · week of ' + boFmt(e.clr.clearedOn) + '</span></div>');
+    return '<div class="bobanner">' + lines.join('') + '<button class="bo-more" data-go="#/bo">Backorder Report &#x203A;</button></div>';
+  }
+  function boTileSub() {
+    var d = BO.data;
+    if (!d) return BO.err === 'offline' ? 'Offline — report not loaded yet' : 'Weekly report · tap to load';
+    var parts = [d.backorders.length + ' on backorder', d.controlled.length + ' controlled'];
+    if ((d.cleared || []).length) parts.push(d.cleared.length + ' cleared');
+    return esc(parts.join(' · '));
+  }
+  function boTileHTML() {
+    if (!boOn()) return '';
+    return '<button class="tile tile-bo" data-go="#/bo">' +
+      '<span class="tico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9CC9FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>' +
+      '<span class="tl"><b>Backorder Report</b><span class="n">' + boTileSub() + '</span></span>' +
+      '<span class="ct">&#x203A;</span></button>';
+  }
+  function boEntryHTML(kind, r) {
+    var cat = boCatalog(r.sku), title = cat ? (cat.rec.t || cat.rec.name || r.desc) : r.desc;
+    var meta = kind === 'bo' ? boWhen(r) : kind === 'ctl' ? 'Inventory controlled · 24–36 hr shipping delay' : 'Cleared backorder · week of ' + boFmt(r.clearedOn);
+    var text = kind === 'bo' ? r.note : kind === 'ctl' ? r.msg : '';
+    var pills = boPillsHTML(r.sku, 3) || '<span class="bopill ' + kind + '">' + BO_PILL[kind] + '</span>';
+    var inner = '<div class="rl"><div class="bo-top">' + pills + '<span class="bo-sku mono">' + esc(r.sku) + '</span>' + (cat ? '' : '<span class="bo-nocat">Not in ToolBox</span>') + '</div>' +
+      '<b class="ti">' + esc(title) + '</b>' +
+      (cat && r.desc && nrm(r.desc) !== nrm(title) ? '<span class="ld bo-desc">' + esc(r.desc) + '</span>' : '') +
+      '<span class="ld bo-meta">' + meta + '</span>' +
+      (text ? '<div class="bo-note">' + esc(text) + '</div>' : '') + '</div>';
+    return cat ? '<button class="rowitem bo-row" data-go="' + cat.route + '">' + inner + '<div class="ct">&#x203A;</div></button>'
+      : '<div class="rowitem bo-row bo-nolink">' + inner + '</div>';
+  }
+  function boSorted(kind, list) {
+    var a = list.slice();
+    function tt(r) { var c = boCatalog(r.sku); return ((c && (c.rec.t || c.rec.name)) || r.desc || '').toLowerCase(); }
+    if (kind === 'bo') a.sort(function (x, y) {
+      var gx = x.clearDate ? 0 : x.clearText ? 1 : 2, gy = y.clearDate ? 0 : y.clearText ? 1 : 2;
+      if (gx !== gy) return gx - gy;
+      if (gx === 0 && x.clearDate !== y.clearDate) return x.clearDate < y.clearDate ? -1 : 1;
+      var a1 = tt(x), b1 = tt(y); return a1 < b1 ? -1 : a1 > b1 ? 1 : 0;
+    });
+    if (kind === 'clr') a.sort(function (x, y) { if (x.clearedOn !== y.clearedOn) return x.clearedOn < y.clearedOn ? 1 : -1; var a1 = tt(x), b1 = tt(y); return a1 < b1 ? -1 : a1 > b1 ? 1 : 0; });
+    return a;
+  }
+  function boScreen() {
+    setTitle('Backorder ', 'Report'); backBtn.hidden = false;
+    if (!boOn()) { render(emptyHTML('&#x1F4E6;', 'Backorder Report isn’t set up', 'This build has no report hub configured.', '')); return; }
+    var q = '', sec = 'all';
+    render('<div class="card bo-card">' +
+      '<div class="bo-head"><div class="bo-hl"><div class="bo-title">Weekly Stryker Inventory Report</div><div class="cc-sub bo-sub" id="bo-sub"></div></div>' +
+      '<button id="bo-refresh" class="ct-help bo-rf" type="button" aria-label="Refresh">↻</button></div>' +
+      '<input id="bo-q" class="cc-in" type="search" autocomplete="off" placeholder="Filter by part number or description…">' +
+      '<div class="bo-chips" id="bo-chips"></div>' +
+      '</div><div id="bo-body"></div>');
+    function subLine() {
+      var d = BO.data, s = '';
+      if (d && d.weekOf) s = 'Week of ' + boFmt(d.weekOf);
+      if (BO.busy) s += (s ? ' · ' : '') + 'refreshing…';
+      else if (BO.at) s += (s ? ' · ' : '') + 'updated ' + boAgo(BO.at);
+      if (BO.err === 'offline') s += ' · offline';
+      else if (BO.err === 'net' && d) s += ' · hub unreachable, showing saved report';
+      return s || 'Loading…';
+    }
+    function matches(r) {
+      if (!q) return true;
+      var cat = boCatalog(r.sku), hay = [r.sku, r.desc, r.note || '', r.msg || '', cat ? (cat.rec.t || cat.rec.name || '') : ''].join(' ');
+      var nq = nrm(q), nz = boKeyZ(q), nh = nrm(hay);
+      return (nq && nh.indexOf(nq) > -1) || (nz.length > 1 && nh.indexOf(nz) > -1) || hay.toLowerCase().indexOf(q.toLowerCase()) > -1;
+    }
+    function draw() {
+      var body = document.getElementById('bo-body'), sub = document.getElementById('bo-sub'), chips = document.getElementById('bo-chips');
+      if (!body) return;
+      if (sub) sub.textContent = subLine();
+      var d = BO.data;
+      if (!d) {
+        if (chips) chips.innerHTML = '';
+        body.innerHTML = BO.busy ? '<div class="cc-empty">Loading the report…</div>'
+          : BO.err === 'offline' ? emptyHTML('&#x1F4F5;', 'Offline', 'No report is saved on this phone yet — open this once with signal and it works offline after that.', '')
+          : emptyHTML('&#x1F4E6;', 'Couldn’t reach the report hub', 'Check your signal and try again.', '<button class="footlink" data-bo-retry="1">Try again &#x203A;</button>');
+        return;
+      }
+      var lists = { bo: boSorted('bo', d.backorders.filter(matches)), ctl: (d.controlled || []).filter(matches), clr: boSorted('clr', (d.cleared || []).filter(matches)) };
+      var tot = lists.bo.length + lists.ctl.length + lists.clr.length;
+      if (chips) chips.innerHTML = '<button class="bochip' + (sec === 'all' ? ' on' : '') + '" data-bo-sec="all">All · ' + tot + '</button>' +
+        [['bo', 'Backorder'], ['ctl', 'Controlled'], ['clr', 'Cleared']].map(function (p) {
+          return '<button class="bochip' + (sec === p[0] ? ' on' : '') + '" data-bo-sec="' + p[0] + '">' + p[1] + ' · ' + lists[p[0]].length + '</button>';
+        }).join('');
+      var html = '', wk = d.weekOf ? ' as of the week of ' + boFmt(d.weekOf) : '';
+      function section(kind, label, empty) {
+        if (sec !== 'all' && sec !== kind) return;
+        var L = lists[kind];
+        html += '<div class="grouphead bo-gh ' + kind + '">' + label + ' · ' + L.length + (kind === 'clr' ? ' <span class="bo-win">last ' + (d.clearedDays || 30) + ' days</span>' : '') + '</div>';
+        html += L.length ? '<div class="list">' + L.map(function (r) { return boEntryHTML(kind, r); }).join('') + '</div>'
+          : '<div class="cc-empty">' + (q ? 'No matches here.' : empty + wk + '.') + '</div>';
+      }
+      section('bo', 'On backorder', 'Nothing on backorder');
+      section('ctl', 'Inventory controlled', 'No inventory-controlled products');
+      section('clr', 'Recently cleared', 'Nothing cleared recently');
+      html += '<div class="foot">Updated automatically from the weekly Inventory Report email.' +
+        (d.highspot ? '<br><a class="footlink" href="' + esc(d.highspot) + '" target="_blank" rel="noopener">Full report on Highspot &#x203A;</a>' : '') + '</div>';
+      body.innerHTML = html;
+    }
+    BO.redraw = draw;
+    draw();
+    var qi = document.getElementById('bo-q');
+    if (qi) qi.addEventListener('input', function () { q = qi.value.trim(); draw(); });
+    var card = content.querySelector('.bo-card');
+    if (card) card.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('[data-bo-sec]') : null; if (!b) return;
+      sec = b.getAttribute('data-bo-sec'); draw();
+    });
+    var rb = document.getElementById('bo-refresh'), bodyEl = document.getElementById('bo-body');
+    function refresh() {
+      if (rb) { rb.disabled = true; rb.style.opacity = '.45'; }
+      draw();
+      boFetch(function () { if (rb) { rb.disabled = false; rb.style.opacity = ''; } draw(); });
+    }
+    if (rb) rb.addEventListener('click', refresh);
+    if (bodyEl) bodyEl.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('[data-bo-retry]')) refresh(); });
+    if (!BO.data || Date.now() - BO.at > BO_STALE_MS) refresh();
   }
 
   // ---- favorites (per device) with permalink migration ----
@@ -384,7 +599,7 @@ var GLOSS = {
   // ---- shared fragments ----
   function rowHTML(route, it, subline, hideSz) {
     var t = it.t || it.name || '', sz = hideSz ? '' : (it.sz || ''), ld = it.ld || '', uom = it.uom || '';
-    var tags = (it.tags || []).map(function (tg) { return '<span class="subtag">' + esc(tg) + '</span>'; }).join('');
+    var tags = boPillsHTML(it.sku, 2) + (it.tags || []).map(function (tg) { return '<span class="subtag">' + esc(tg) + '</span>'; }).join('');
     var line2 = ld ? '<span class="ld">' + esc(ld) + '</span>' :
                 (subline ? '<span class="ld dim2">' + esc(subline) + '</span>' : '');
     return '<button class="rowitem" data-go="' + route + '">' +
@@ -467,6 +682,7 @@ var GLOSS = {
     }).join('');
     var built = !!rows || !!o.note || !!o.bp || !!(o.imgs && o.imgs.length);
     var tagb = (o.tags || []).map(function (tg) { return ' <span class="subtag">' + esc(tg) + '</span>'; }).join('');
+    var bob = boBannerHTML(o.sku); // backorder / controlled / cleared status, with the pill inside the banner
     var fav = '';
     if (o.fav) {
       var on = isFav(o.fav.route);
@@ -475,6 +691,7 @@ var GLOSS = {
         '<button class="favbtn" data-share="1">&#8599; Share</button>';
     }
     return '<div class="card"><h1>' + esc(o.name) + tagb + '</h1><div class="fam">' + esc(o.fam || '') + '</div>' +
+      bob +
       (!built ? '<div class="nobuild">Not built yet</div>' : '') +
       (o.warn ? '<div class="warn">&#9888; ' + esc(o.warn) + '</div>' : '') +
       '<div class="pnblock"><div class="num mono">' + esc(o.sku) + '</div>' +
@@ -1133,6 +1350,7 @@ var GLOSS = {
         '<span class="tl"><b>' + esc(t.label) + '</b><span class="n">' + t.n + ' items</span></span>' +
         '<span class="ct">&#x203A;</span></button>';
     }).join('');
+    tiles += boTileHTML();
     tiles += '<button class="tile tile-inv" data-act="otherteams">' +
       '<span class="tico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#141414" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>' +
       '<span class="tl"><b>Inventory Management</b><span class="n">Territory Cycle Counts</span></span>' +
@@ -6267,6 +6485,7 @@ var GLOSS = {
       return;
     }
     if (h === '#/about') return aboutScreen();
+    if (h === '#/bo') return boScreen();
     if (h === '#/probes') return probesScreen();
     if ((m = h.match(/^#\/probe\/(\d+)$/))) return legacyRedirect('probe', +m[1]);
     if (h === '#/shavers') return shaversScreen();
@@ -6298,6 +6517,10 @@ var GLOSS = {
     window.addEventListener('hashchange', route); route();
     window.__tbxRouted = true; // boot succeeded: later errors are bugs, not cache corruption (see heal)
     setTimeout(showTour, 700);
+    // Backorder report: never on the render path — first fetch after the home screen has painted,
+    // then at most every 30 min, plus whenever the app comes back to the foreground stale.
+    setTimeout(function () { try { boRefresh(false); } catch (e) {} }, 1500);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { try { boRefresh(false); } catch (e) {} } });
   }
   if (document.documentElement.classList.contains('authed')) { tbxStart(); }
   else { window.addEventListener('tbx-unlock', tbxStart, { once: true }); }
