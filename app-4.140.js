@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.139';
+  var APPVER = '4.140';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -148,7 +148,7 @@ var GLOSS = {
   // Read path only. The hub is fetched at most every 30 min and cached in localStorage so the status pills
   // and the report work offline. Everything here is guarded: a hub problem must never touch the catalog,
   // the scanner, or the cycle-count screens (which share nothing with this module).
-  var BOH = null; try { if (D.bo && D.bo.url && D.bo.key) BOH = D.bo; } catch (eBo0) {}
+  var BOH = null; try { if (D.bo && D.bo.url && D.bo.key && !D.bo.off) BOH = D.bo; } catch (eBo0) {} // bo.off = feature switched off (payload flag)
   var BO = { data: null, by: {}, at: 0, busy: false, err: '', redraw: null };
   var BO_AUTO_MS = 30 * 60000, BO_STALE_MS = 5 * 60000;
   var BO_PILL = { bo: 'Backorder', ctl: 'Controlled', clr: 'Cleared' };
@@ -189,6 +189,7 @@ var GLOSS = {
   function boKinds(e) { var a = []; if (!e) return a; if (e.st.bo) a.push('bo'); if (e.st.ctl) a.push('ctl'); if (e.st.clr && !e.st.bo) a.push('clr'); return a; }
   (function boLoad() {
     try {
+      if (!boOn()) { localStorage.removeItem('tbx_bo'); return; }
       var j = JSON.parse(localStorage.getItem('tbx_bo') || 'null');
       if (j && j.data && j.data.ok && j.data.backorders) { BO.data = j.data; BO.at = +j.at || 0; boIndex(); }
     } catch (e) {}
@@ -6490,7 +6491,7 @@ var GLOSS = {
       return;
     }
     if (h === '#/about') return aboutScreen();
-    if (h === '#/bo') return boScreen();
+    if (h === '#/bo') { if (!boOn()) { location.replace('#/'); return; } return boScreen(); }
     if (h === '#/probes') return probesScreen();
     if ((m = h.match(/^#\/probe\/(\d+)$/))) return legacyRedirect('probe', +m[1]);
     if (h === '#/shavers') return shaversScreen();

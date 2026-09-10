@@ -46,7 +46,7 @@ async function boot(opts) {
   if (opts.offline) Object.defineProperty(w.navigator, 'onLine', { get: () => false });
   w.ZXingWASM = { readBarcodes: () => Promise.resolve([]), prepareZXingModule() {} }; w.scrollTo = () => {};
   w.eval(decryptPayload(process.env.APP_PW));
-  if (opts.noHub) delete w.TOOLBOX.bo; else w.TOOLBOX.bo = { url: HUB, key: 'test-key' }; // the live payload carries the real hub; tests always swap it
+  if (opts.noHub) delete w.TOOLBOX.bo; else if (opts.off) w.TOOLBOX.bo = { url: HUB, key: 'test-key', off: true }; else w.TOOLBOX.bo = { url: HUB, key: 'test-key' }; // the live payload carries the real hub (+ off flag); tests always swap it
   if (!w.TextEncoder) { w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder; }
   w.eval(fs.readFileSync(R + '/lib/inflate.js', 'utf8'));
   w.document.documentElement.classList.add('authed');
@@ -183,8 +183,23 @@ async function boot(opts) {
   // ---- 5. payload without bo config (old payload + new app): tile hidden, everything else normal ----
   { const t = await boot({ noHub: true }); await sleep(1700);
     check('no config: no tile, no hub call, no pills, no errors', !t.$('.tile-bo') && t.calls.filter(c => c.url === HUB).length === 0 && t.errs.length === 0 && t.$$('.tiles .tile').length === 8);
-    await t.go('#/bo'); await sleep(30);
-    check('no config: #/bo shows a plain not-set-up state', /isn’t set up/.test(t.txt('#content')), t.txt('#content')); }
+    await t.go('#/bo'); await sleep(60);
+    check('no config: #/bo redirects home', t.w.location.hash === '#/' && !!t.$('.tiles'), t.w.location.hash); }
+
+  // ---- 5b. feature switched off via the payload flag (bo.off) — what the live payload carries while dormant ----
+  { const cache = { tbx_bo: JSON.stringify({ at: Date.now() - 60000, data: API }) };
+    const t = await boot({ off: true, storage: cache }); await sleep(1700);
+    check('off: no tile, no hub call, no errors, 8 tiles', !t.$('.tile-bo') && t.calls.filter(c => c.url === HUB).length === 0 && t.errs.length === 0 && t.$$('.tiles .tile').length === 8);
+    check('off: cached report is discarded so old pills disappear', t.w.localStorage.getItem('tbx_bo') === null);
+    await t.go('#/pn/CAT00776');
+    check('off: card shows no pill and no banner even though the report was cached', !t.$('.card .bopill') && !t.$('.bobanner'));
+    t.$('#q').value = 'flowport'; t.$('#q').dispatchEvent(new t.w.Event('input')); await sleep(30);
+    check('off: search rows carry no pills', t.$$('.rowitem').length > 0 && !t.$('.rowitem .bopill'));
+    t.$('#q').value = ''; t.$('#q').dispatchEvent(new t.w.Event('input')); await sleep(30);
+    await t.go('#/bo'); await sleep(60);
+    check('off: #/bo redirects home', t.w.location.hash === '#/' && !!t.$('.tiles') && !t.$('#bo-body'), t.w.location.hash);
+    Object.defineProperty(t.w.document, 'hidden', { get: () => false, configurable: true }); t.w.document.dispatchEvent(new t.w.Event('visibilitychange')); await sleep(50);
+    check('off: foreground never fetches, no errors', t.calls.filter(c => c.url === HUB).length === 0 && t.errs.length === 0, t.errs.join(' | ')); }
 
   // ---- 6. bad API shape is ignored, cache untouched ----
   { const t = await boot({ api: { ok: true, nonsense: 1 } }); await sleep(1700);

@@ -19,8 +19,8 @@ const API = C.buildApi(st, { clearedDays: 30, reportId: '2026-09-07', weekOf: '2
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, timezoneId: 'America/New_York' });
   await ctx.addInitScript((hub) => {
     try { localStorage.setItem('tbx_tour_done', '1'); localStorage.setItem('tbx_a2hs_x', '1'); localStorage.setItem('tbx_wn_seen', '99'); } catch (e) {}
-    // the payload has no bo config yet: attach it as the decrypted data lands
-    let t; Object.defineProperty(window, 'TOOLBOX', { configurable: true, get() { return t; }, set(v) { if (v && !v.bo) v.bo = { url: hub, key: 'k' }; t = v; } });
+    // screenshots always show the feature ON with the fake hub, whatever the live payload says (bo.off while dormant)
+    let t; Object.defineProperty(window, 'TOOLBOX', { configurable: true, get() { return t; }, set(v) { if (v) v.bo = { url: hub, key: 'k' }; t = v; } });
   }, HUB);
   const page = await ctx.newPage(); const errs = [];
   page.on('pageerror', e => errs.push(String(e)));
