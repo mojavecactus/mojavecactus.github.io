@@ -45,29 +45,73 @@
 (function () {
   /* iOS 27 home-screen apps honour the phone's page-zoom setting (75%, 85%, …) but still report
      env(safe-area-inset-*) in unzoomed points, so at 75% the header covers only three quarters of the
-     status bar. Measure the zoom (screen edge ÷ layout width) and hand it to CSS as --z; every length that
-     must stay put on screen — status-bar / home-indicator clearance and the header row — divides by it.
-     Works for zoom-out and zoom-in alike. iPhone + iOS 27+ + standalone only; at 100% zoom nothing is set
-     and the CSS computes to exactly today's values. */
-  try {
-    var m = /\(iPhone; CPU iPhone OS (\d+)_/.exec(navigator.userAgent || '');
-    if (!m || +m[1] < 27) return;
-    var standalone = navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
-    if (!standalone) return;
-    var root = document.documentElement;
-    function apply() {
-      var w = window.innerWidth, h = window.innerHeight, sw = screen.width, sh = screen.height;
-      if (!(w > 0 && sw > 0 && sh > 0)) return;
-      var ref = w > h ? Math.max(sw, sh) : Math.min(sw, sh); /* the screen edge that innerWidth spans; innerWidth ignores the keyboard */
-      var z = Math.round(ref / w * 1000) / 1000;
-      if (!(z > 0)) return;
-      z = Math.min(3, Math.max(0.5, z));
-      if (Math.abs(z - 1) < 0.005) root.style.removeProperty('--z'); else root.style.setProperty('--z', String(z));
+     status bar. Measure the zoom and hand it to CSS as --z; every length that must stay put on screen —
+     status-bar / home-indicator clearance and the header row — divides by it. Works for zoom-out and
+     zoom-in alike. iPhone home-screen launches only; at 100% nothing is set and the CSS computes to
+     exactly today's values. No iOS-version check: since iOS 26 the UA is frozen at "OS 18_7", and
+     iOS ≤ 26 never zooms a web app, so the measured zoom itself is the gate.
+     Diagnostics: tap the header title 5 times within 2 s to show the numbers behind this. */
+  var SHELL = 'tbx-v372';
+  var root = document.documentElement, ua = navigator.userAgent || '';
+  var PRESETS = [0.5, 0.75, 0.85, 1, 1.15, 1.25, 1.5, 1.75, 2, 2.5, 3];
+  function nearPreset(z) { for (var i = 0; i < PRESETS.length; i++) if (Math.abs(PRESETS[i] - z) < 0.02) return PRESETS[i]; return null; }
+  function measure() {
+    var w = window.innerWidth, h = window.innerHeight, sw = screen.width, sh = screen.height, dpr = window.devicePixelRatio || 1;
+    var ref = w > h ? Math.max(sw, sh) : Math.min(sw, sh);           /* the screen edge innerWidth spans; innerWidth ignores the keyboard */
+    var zs = (w > 0 && ref > 0) ? Math.round(ref / w * 1000) / 1000 : 1;
+    var how = 'screen';
+    if (Math.abs(zs - 1) < 0.005 && Math.abs(dpr - Math.round(dpr)) > 0.02) {
+      /* screen size scaled along with the zoom (so the ratio hides it) but the pixel ratio did not: an iPhone at 100% is exactly 2× or 3× */
+      var c3 = nearPreset(dpr / 3), c2 = nearPreset(dpr / 2);
+      var zd = c3 !== null ? c3 : c2;
+      if (zd !== null) { zs = zd; how = 'dpr'; }
     }
+    var z = Math.min(3, Math.max(0.5, zs));
+    if (!(z > 0)) z = 1;
+    return { w: w, h: h, sw: sw, sh: sh, dpr: dpr, z: z, how: how };
+  }
+  var iphone = /iPhone/.test(ua);
+  var standalone = navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || (iphone && !/Safari\//.test(ua));
+  var active = iphone && standalone;
+  function apply() {
+    if (!active) return;
+    var m = measure();
+    if (Math.abs(m.z - 1) < 0.005) root.style.removeProperty('--z'); else root.style.setProperty('--z', String(m.z));
+  }
+  try {
     apply();
     window.addEventListener('resize', apply);
     window.addEventListener('orientationchange', function () { setTimeout(apply, 80); });
     window.TBX_ZOOM = apply;
+  } catch (e) {}
+  try {
+    document.addEventListener('DOMContentLoaded', function () {
+      var t = document.getElementById('title'); if (!t) return;
+      var taps = [];
+      t.addEventListener('click', function () {
+        var now = Date.now(); taps.push(now); taps = taps.filter(function (x) { return now - x < 2000; });
+        if (taps.length < 5) return;
+        taps = [];
+        var old = document.getElementById('zdbg'); if (old) { old.remove(); return; }
+        var m = measure(), cs = getComputedStyle(root), bar = document.getElementById('bar');
+        var probe = document.createElement('div');
+        probe.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top, 0px);visibility:hidden;pointer-events:none';
+        document.body.appendChild(probe); var inset = getComputedStyle(probe).height; probe.remove();
+        var box = document.createElement('pre'); box.id = 'zdbg';
+        box.style.cssText = 'position:fixed;left:8px;right:8px;top:38%;z-index:9999;margin:0;padding:12px 14px;border-radius:12px;background:rgba(20,20,20,.97);color:#F4F2EE;border:1px solid #6b5a2a;font:12px/1.55 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;box-shadow:0 10px 28px rgba(0,0,0,.5)';
+        box.textContent = [
+          'shell ' + SHELL + '   active ' + active + ' (iphone ' + iphone + ', standalone ' + standalone + ')',
+          '--z ' + (cs.getPropertyValue('--z').trim() || '(unset = 1)') + '   measured ' + m.z + ' via ' + m.how,
+          'inner ' + m.w + '×' + m.h + '   screen ' + m.sw + '×' + m.sh + '   dpr ' + m.dpr,
+          'inset-top ' + inset + '   bar padding-top ' + (bar ? getComputedStyle(bar).paddingTop : '?'),
+          'navigator.standalone ' + String(navigator.standalone) + '   display-mode standalone ' + (window.matchMedia ? matchMedia('(display-mode: standalone)').matches : '?'),
+          'ua ' + ua,
+          '(tap this box to close)'
+        ].join('\n');
+        box.addEventListener('click', function () { box.remove(); });
+        document.body.appendChild(box);
+      });
+    });
   } catch (e) {}
 })();
 </script>
