@@ -37,6 +37,10 @@ for (const f of [APP, 'sw.js']) {
   const seen = {};
   all.forEach(i => { seen[i.sku] = (seen[i.sku] || 0) + 1; });
   Object.entries(seen).filter(([, v]) => v > 1).forEach(([k, v]) => FAIL('duplicate sku: ' + k + ' x' + v));
+  // leading zeros are optional in the app (0234020117 = 234020117): twins would be two cards for one part
+  const z = {};
+  all.forEach(i => { const k = nrm(i.sku).replace(/^0+/, ''); (z[k] = z[k] || []).push(i.sku); });
+  Object.values(z).filter(v => v.length > 1).forEach(v => FAIL('duplicate sku (leading zeros): ' + v.join(' / ')));
 }
 
 // ---- 3 counts (cat-only formula) ----
@@ -182,20 +186,25 @@ all.forEach(i => (i.specs || []).forEach(([k, v]) => {
   if (sum !== total) FAIL('counts sum ' + sum + ' != visible items ' + total);
 }
 
+// ---- 8f retired part numbers: hidden stub with `moved` -> a visible card; the note is the popup's explanation ----
+{
+  const BY = {};
+  all.forEach(i => { BY[nrm(i.sku)] = i; });
+  D.items.filter(i => i.moved).forEach(i => {
+    if (!i.hidden) FAIL('moved stub must be hidden: ' + i.sku);
+    const t = BY[nrm(i.moved)];
+    if (!t) FAIL('moved target unresolved: ' + i.sku + ' -> ' + i.moved);
+    else if (t.hidden) FAIL('moved target is hidden: ' + i.sku + ' -> ' + i.moved);
+    if (!i.note) FAIL('moved stub has no note (the popup explanation): ' + i.sku);
+  });
+}
+
 // ---- 9 gtin ----
 {
   const BY = {};
   all.forEach(i => { BY[nrm(i.sku)] = 1; });
-  // Retired part numbers whose physical stock can still be scanned: the barcode keeps resolving to the OLD
-  // number (cycle counts record what is on the shelf) even though the catalog only shows the replacement.
-  // No crosswalk — these simply stay out of the catalog. Samurai CAT00227/CAT02421 -> CAT00229/CAT02423 (2026).
-  const RETIRED = new Set(['CAT00227', 'CAT02421']);
   let dangling = 0;
-  Object.entries(G).forEach(([g, sku]) => {
-    if (BY[nrm(sku)]) return;
-    if (RETIRED.has(nrm(sku))) { WARN('gtin -> retired sku (kept for scanning, no card): ' + g + ' -> ' + sku); return; }
-    dangling++; FAIL('gtin -> unknown sku: ' + g + ' -> ' + sku);
-  });
+  Object.entries(G).forEach(([g, sku]) => { if (!BY[nrm(sku)]) { dangling++; FAIL('gtin -> unknown sku: ' + g + ' -> ' + sku); } });
   const mapped = new Set(Object.values(G).map(nrm));
   const un = all.filter(i => !mapped.has(nrm(i.sku)));
   WARN('skus without gtin mapping: ' + un.length);

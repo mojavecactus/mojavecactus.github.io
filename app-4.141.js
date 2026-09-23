@@ -166,9 +166,20 @@ var GLOSS = {
   }
   var BYPNZ = {};
   Object.keys(BYPN).forEach(function (k) { var z = k.replace(/^0+/, ''); if (!BYPNZ[z] || k === z) BYPNZ[z] = BYPN[k]; });
+  // Retired part numbers still in circulation: a hidden stub card with `moved` (e.g. Samurai CAT00227 -> CAT00229).
+  // The old number keeps scanning, searching and opening — it lands on the current card with a "part number
+  // changed" popup (pnMoveShow). Its barcodes still resolve to the OLD number, so cycle counts are unchanged.
+  function movedOf(sku) {
+    var n = nrm(sku); if (!n) return null;
+    var e = BYPN[n] || BYPNZ[n.replace(/^0+/, '')];
+    var it = e && e.kind === 'item' ? D.items[e.idx] : null;
+    return it && it.hidden && it.moved && BYPN[nrm(it.moved)] ? it : null;
+  }
   function boCatalog(sku) {
     var e = BYPN[nrm(sku)] || BYPNZ[boKeyZ(sku)]; if (!e) return null;
-    var rec = recOf(e); return (rec && !rec.hidden) ? { rec: rec, route: pnRoute(rec.sku) } : null;
+    var rec = recOf(e);
+    if (rec && rec.hidden && rec.moved && BYPN[nrm(rec.moved)]) return { rec: rec, route: pnRoute(rec.sku) }; // old number: its own row, opened through the change popup
+    return (rec && !rec.hidden) ? { rec: rec, route: pnRoute(rec.sku) } : null;
   }
   function boIndex() {
     var by = {}, d = BO.data;
@@ -715,9 +726,12 @@ var GLOSS = {
   var SBUCKETS = ['Arthroscopy', 'Biologics', 'Capital', 'Disposables', 'Implants', 'Instruments', 'Suture'];
   function resultsHTML() {
     var hits = searchAll(CURQ);
+    var mvq = movedOf(CURQ); // the query IS a retired number: say what replaced it (the new card is in the hits via its alt)
+    var mvn = mvq ? '<button class="pnm-sr" data-pnm="' + esc(mvq.sku) + '"><b class="mono">' + esc(mvq.sku) + '</b> is now <b class="mono">' + esc(mvq.moved) +
+      '</b> \u2014 same product, new part number. <span class="pnm-why">Why &#x203A;</span></button>' : '';
     if (!hits.length) {
       SFILT = null;
-      return emptyHTML('&#x1F50D;', 'No matches for \u201c' + CURQ + '\u201d', 'Try fewer letters or a part-number fragment \u2014 dashes are optional.', '<button class="footlink" data-act="scan">Scan the barcode instead &#x203A;</button>');
+      return mvn + emptyHTML('&#x1F50D;', 'No matches for \u201c' + CURQ + '\u201d', 'Try fewer letters or a part-number fragment \u2014 dashes are optional.', '<button class="footlink" data-act="scan">Scan the barcode instead &#x203A;</button>');
     }
     var counts = {};
     hits.forEach(function (h) { (h.buckets || []).forEach(function (b) { counts[b] = (counts[b] || 0) + 1; }); });
@@ -739,8 +753,8 @@ var GLOSS = {
       '<button class="schip sort' + (SSORT === 'sku' ? ' on' : '') + '" data-ssort="1" aria-pressed="' + (SSORT === 'sku') + '">' + (SSORT === 'sku' ? 'Part # A\u2013Z' : 'Best match') + ' &#x21C5;</button>' +
       '</div>';
     var CAP = SALL ? shown.length : 60;
-    if (!shown.length) return chips + frow + '<div class="empty">No results match these filters. <button class="footlink" data-sfclear="1">Clear filters</button></div>';
-    return chips + frow + '<div class="list" style="margin-top:8px">' +
+    if (!shown.length) return mvn + chips + frow + '<div class="empty">No results match these filters. <button class="footlink" data-sfclear="1">Clear filters</button></div>';
+    return mvn + chips + frow + '<div class="list" style="margin-top:8px">' +
       shown.slice(0, CAP).map(function (h) { return rowHTML(h.route, h.it, h.sub); }).join('') + '</div>' +
       (shown.length > CAP ? '<button class="showall" data-sall="1">Show all ' + shown.length + ' &#x203A;</button>' : '');
   }
@@ -839,6 +853,7 @@ var GLOSS = {
       (fav ? '<div class="favrow">' + fav + '</div>' : '') +
       (o.refs && o.refs.length ? '<div class="reflinkrow">' + o.refs.map(function (r) {
         return r.menu ? '<button class="refbtn" data-lmenu=\'' + esc(JSON.stringify({ t: r.t, items: r.menu })) + '\'>' + esc(r.t) + '</button>'
+          : r.pnm ? '<button class="refbtn" data-pnm="' + esc(r.pnm) + '">' + esc(r.t) + '</button>'
           : '<button class="refbtn" data-go="' + r.go + '">' + esc(r.t) + '</button>';
       }).join('') + '</div>' : '') +
       (chips ? '<div class="chips">' + chips + '</div>' : '') +
@@ -1082,6 +1097,46 @@ var GLOSS = {
       var b = document.getElementById('expban');
       if (b) b.remove();
     }
+  });
+
+  // ---- part-number change popup: old number -> new number, with the stub card's note as the explanation ----
+  var PNM_AFTER = null;
+  function pnMoveShow(stub, after) {
+    pnMoveClose(true);
+    var cur = recOf(BYPN[nrm(stub.moved)]) || {};
+    var b = document.createElement('div');
+    b.id = 'pnmove';
+    b.dataset.route = pnRoute(stub.moved); // the popup belongs to the current card: any other route closes it
+    b.setAttribute('role', 'dialog'); b.setAttribute('aria-modal', 'true'); b.setAttribute('aria-labelledby', 'pnm-h');
+    b.innerHTML = '<div class="pnm-card">' +
+      '<button class="pnm-x" data-pnm-close="1" aria-label="Dismiss">&#x2715;</button>' +
+      '<div class="pnm-eyebrow" id="pnm-h">Part number changed</div>' +
+      '<div class="pnm-map"><div class="pnm-pn"><span>Old</span><b class="mono">' + esc(stub.sku) + '</b></div>' +
+      '<div class="pnm-arrow" aria-hidden="true">&#x2192;</div>' +
+      '<div class="pnm-pn now"><span>New</span><b class="mono">' + esc(stub.moved) + '</b></div></div>' +
+      '<div class="pnm-name">' + esc(cur.name || cur.t || '') + '</div>' +
+      (stub.note ? '<p class="pnm-note">' + esc(stub.note) + '</p>' : '') +
+      '<button class="pnm-ok" data-pnm-close="1">Got it</button></div>';
+    document.body.appendChild(b);
+    PNM_AFTER = after || null;
+    var ok = b.querySelector('.pnm-ok');
+    if (ok) { try { ok.focus({ preventScroll: true }); } catch (e0) { try { ok.focus(); } catch (e1) {} } }
+  }
+  function pnMoveClose(silent) {
+    var b = document.getElementById('pnmove');
+    if (b) b.remove();
+    var cb = PNM_AFTER; PNM_AFTER = null;
+    if (cb && !silent) { try { cb(); } catch (e) {} }
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    if (t.id === 'pnmove' || t.closest('[data-pnm-close]')) { pnMoveClose(false); return; }
+    var pm = t.closest('[data-pnm]');
+    if (pm) { var st = movedOf(pm.getAttribute('data-pnm')); if (st) pnMoveShow(st); }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && document.getElementById('pnmove')) pnMoveClose(false);
   });
 
   // ---- sharing suite ----
@@ -1558,7 +1613,7 @@ var GLOSS = {
     'Cannulas & portal access': ['Dri-Lok cannula', 'FlowPort', 'GateWay flexible cannula', 'Portal entry kit', 'Transport', 'Samurai blades'],
     'Guardian/DARTs + HipCheck': ['Guardian + DARTs', 'Hip Check'],
     'Pump & fluid management': ['CrossFlow arthroscopy pump', 'FloSteady arthroscopy pump'],
-    'Reamers & drilling': ['VersiTomic Flexible Reaming System', 'VersiTomic Low Profile Reaming System', 'VersiTomic RetroReamer', 'MicroFX OCD Osteochondral Drilling System', 'Phoenix Microfracture Drill'],
+    'Reamers & drilling': ['VersiTomic Flexible Reaming System', 'VersiTomic Low Profile Reaming System', 'VersiTomic RetroReamer', 'MicroFX OCD Osteochondral Drilling System', 'Phoenix Microfracture Drill', 'ACL/PCL instrumentation'],
     'PRP disposables': ['RegenKit THT (A-PRP)'],
     'Reposables': [],
     'Suture passing systems': ['ArthroTunneler system', 'G-Force tenodesis system', 'InJector II capsule closure', 'SharpShooter meniscal repair system', 'SlingShot capsule restoration system', 'NanoPass suture management system', 'Champion SlingShot suture passer', 'Champion+ Slider suture passer', 'VersiPass suture passer', 'Champion suture passer']
@@ -1787,7 +1842,7 @@ var GLOSS = {
         var e = l.sku ? BYPN[nrm(l.sku)] : null;
         var tgtHidden = e && e.kind === 'item' && D.items[e.idx].hidden;
         if (!it.hidden && !tgtHidden) return;
-        var entry = l.go ? { t: l.t, go: l.go } : (e ? { t: l.t, go: pnRoute(l.sku) } : null);
+        var entry = l.go ? { t: l.t, go: l.go } : (e ? (movedOf(l.sku) ? { t: l.t, pnm: l.sku } : { t: l.t, go: pnRoute(l.sku) }) : null);
         if (entry) (tgtHidden ? refs : links).push(entry);
       });
     } else {
@@ -1796,7 +1851,7 @@ var GLOSS = {
         if (l.menu) { refs.push({ t: l.t, menu: l.menu }); return; }
         var e = l.sku ? BYPN[nrm(l.sku)] : null;
         var tgtHidden = e && e.kind === 'item' && D.items[e.idx].hidden;
-        var entry = l.go ? { t: l.t, go: l.go } : (e ? { t: l.t, go: pnRoute(l.sku) } : null);
+        var entry = l.go ? { t: l.t, go: l.go } : (e ? (movedOf(l.sku) ? { t: l.t, pnm: l.sku } : { t: l.t, go: pnRoute(l.sku) }) : null);
         if (entry) (tgtHidden ? refs : links).push(entry);
       });
     }
@@ -1830,6 +1885,8 @@ var GLOSS = {
   function pnScreen(sku) {
     var e = BYPN[nrm(sku)] || BYPNZ[nrm(sku).replace(/^0+/, '')]; // leading zeros optional (0295724120 = 295724120)
     if (!e) return home();
+    var mv = movedOf(sku);
+    if (mv) { location.replace(pnRoute(mv.moved)); pnMoveShow(mv); return; } // retired number: current card + change popup
     if (e.kind === 'item') { noteRecent(D.items[e.idx].sku, D.items[e.idx].t || D.items[e.idx].name); return itemCard(D.items[e.idx]); }
     if (e.kind === 'probe') { noteRecent(D.probes[e.idx].sku, D.probes[e.idx].name); return probeCard(D.probes[e.idx]); }
     noteRecent(D.shavers[e.idx].sku, D.shavers[e.idx].name);
@@ -1911,7 +1968,7 @@ var GLOSS = {
     if (open) html += '</div>';
     render(html);
   }
-  var SHFAMS = ['Formula', 'CrossBlade', 'TPS'];
+  var SHFAMS = ['Formula', 'CrossBlade', 'TPS', 'Parallel Portal'];
   function shDia(s) {
     var d = '';
     (s.specs || []).some(function (p) { if (p[0] === 'Diameter') { d = p[1]; return true; } return false; });
@@ -6590,6 +6647,8 @@ var GLOSS = {
     window.scrollTo(0, 0);
     var xb = document.getElementById('expban');
     if (xb && Date.now() - (+xb.dataset.born || 0) > 1500) xb.remove();
+    var pmv = document.getElementById('pnmove');
+    if (pmv && dec(h) !== dec(pmv.dataset.route || '')) pnMoveClose(false); // Back / any navigation away dismisses it
     hideWN(false);
     CURREFRESH = null;
     homeBtn.classList.add('away');
@@ -6942,6 +7001,13 @@ var GLOSS = {
         }
         var it = recOf(entry);
         stopScan();
+        if (it && it.hidden && it.moved && BYPN[nrm(it.moved)]) {
+          // a retired number still in circulation (old box): open the current card and explain the change
+          var cur = recOf(BYPN[nrm(it.moved)]);
+          location.hash = pnRoute(it.moved);
+          pnMoveShow(it, function () { foundToast(r.p, cur && (cur.t || cur.name)); });
+          return;
+        }
         location.hash = pnRoute(r.sku);
         foundToast(r.p, it && (it.t || it.name));
       } else if (r.p.gtin || nrm(txt).length >= 4) {
