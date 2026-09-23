@@ -362,6 +362,18 @@ main{padding-bottom:calc(var(--sab) + 96px);}
 .schip.sort.on{border-style:solid;}
 .showall{display:block; width:100%; margin:8px 0 14px; min-height:44px; border:1px solid var(--line); background:var(--panel); color:var(--amber); font-weight:700; font-size:14px; border-radius:12px; cursor:pointer;}
 .schip.on{border-color:var(--amber); color:#1E1E1E; background:var(--amber);}
+.sfrow{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:4px 2px 2px;}
+.sfsel{position:relative; display:inline-flex; align-items:center; gap:6px; border:1.5px solid #5a564e; background:var(--panel);
+  color:var(--bone); border-radius:999px; padding:0 26px 0 12px; min-height:36px; font-size:12.5px; cursor:pointer;}
+.sfsel .sfk{color:var(--muted); font-weight:600; white-space:nowrap;}
+.sfsel select{appearance:none; -webkit-appearance:none; background:transparent; border:0; color:inherit; font:inherit; font-weight:700;
+  padding:8px 0; max-width:10.5em; text-overflow:ellipsis; cursor:pointer; outline-offset:2px;}
+.sfsel select option{color:#1E1E1E; background:#FFFFFF;}
+.sfsel::after{content:'\25BE'; position:absolute; right:11px; top:50%; transform:translateY(-50%); pointer-events:none; font-size:11px; color:var(--muted);}
+.sfsel.on{border-color:var(--amber);}
+.sfsel.on .sfk, .sfsel.on::after{color:var(--amber);}
+.sfcount{font-size:12px; color:var(--muted);}
+.sfclear{border:0; background:none; color:var(--amber); font-weight:700; font-size:12.5px; text-decoration:underline; padding:8px 4px; cursor:pointer;}
 .fchip{border:1.5px solid #A8A29A; background:#3E3E3E; color:#FFFFFF;
   font-weight:700; font-size:12.5px; border-radius:999px; padding:8px 13px;}
 .fchip.on{border-color:var(--amber); color:#1E1E1E; background:var(--amber);}
@@ -1169,7 +1181,7 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.140.js"></script>
+<script src="app-4.141.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
 </body>
 </html>

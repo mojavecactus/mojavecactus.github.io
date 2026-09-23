@@ -186,8 +186,16 @@ all.forEach(i => (i.specs || []).forEach(([k, v]) => {
 {
   const BY = {};
   all.forEach(i => { BY[nrm(i.sku)] = 1; });
+  // Retired part numbers whose physical stock can still be scanned: the barcode keeps resolving to the OLD
+  // number (cycle counts record what is on the shelf) even though the catalog only shows the replacement.
+  // No crosswalk — these simply stay out of the catalog. Samurai CAT00227/CAT02421 -> CAT00229/CAT02423 (2026).
+  const RETIRED = new Set(['CAT00227', 'CAT02421']);
   let dangling = 0;
-  Object.entries(G).forEach(([g, sku]) => { if (!BY[nrm(sku)]) { dangling++; FAIL('gtin -> unknown sku: ' + g + ' -> ' + sku); } });
+  Object.entries(G).forEach(([g, sku]) => {
+    if (BY[nrm(sku)]) return;
+    if (RETIRED.has(nrm(sku))) { WARN('gtin -> retired sku (kept for scanning, no card): ' + g + ' -> ' + sku); return; }
+    dangling++; FAIL('gtin -> unknown sku: ' + g + ' -> ' + sku);
+  });
   const mapped = new Set(Object.values(G).map(nrm));
   const un = all.filter(i => !mapped.has(nrm(i.sku)));
   WARN('skus without gtin mapping: ' + un.length);

@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.140';
+  var APPVER = '4.141';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -523,18 +523,114 @@ var GLOSS = {
       (sl === 'Sliding' ? ' sliding' : '') + (/^Non-sliding/.test(sl) ? ' nonsliding locked' : '');
     var raw = (it.name || '') + ' ' + it.sku + ' ' + it.fam + ' ' + (it.sub || '') + ' ' + it.cat + ' ' + extra;
     INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(it.sku), buckets: bucketsOf(it),
-      it: it, sub: it.cat + ' · ' + it.fam, route: pnRoute(it.sku) });
+      it: it, rec: it, sub: it.cat + ' · ' + it.fam, route: pnRoute(it.sku) });
   });
   D.probes.forEach(function (p) {
     var raw = p.name + ' ' + p.sku + ' probe wand serfas arthro ' + p.fam;
     INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(p.sku), buckets: ['Arthroscopy'],
-      it: { t: p.name, sku: p.sku, uom: p.uom, tags: p.tags }, sub: 'SERFAS RF Wands · ' + p.fam, route: pnRoute(p.sku) });
+      it: { t: p.name, sku: p.sku, uom: p.uom, tags: p.tags }, rec: p, sub: 'SERFAS RF Wands · ' + p.fam, route: pnRoute(p.sku) });
   });
   D.shavers.forEach(function (s) {
     var raw = s.name + ' ' + s.sku + ' shaver blade bur';
     INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(s.sku), buckets: ['Arthroscopy'],
-      it: { t: s.name, sku: s.sku, uom: s.uom, tags: s.tags }, sub: 'Shaver blades', route: pnRoute(s.sku) });
+      it: { t: s.name, sku: s.sku, uom: s.uom, tags: s.tags }, rec: s, sub: 'Shaver blades', route: pnRoute(s.sku) });
   });
+  INDEX.forEach(function (e) { e.skuz = e.skun.replace(/^0+/, ''); });
+
+  // ---- search spec filters (field-based: they read the card's own fields, never the free-text haystack) ----
+  var SPECF = {};
+  var FACETLBL = { dia: 'Diameter', len: 'Length', mat: 'Material', atype: 'Anchor type', needle: 'Needle', strands: 'Strands', stype: 'Suture', ssize: 'Size', slen: 'Length' };
+  var BUCKETFACETS = {
+    Implants: ['dia', 'len', 'mat', 'atype', 'needle', 'strands', 'stype'],
+    Suture: ['ssize', 'slen', 'needle', 'stype'],
+    Instruments: ['dia'], Disposables: ['dia'], Arthroscopy: ['dia'], Biologics: [], Capital: []
+  };
+  function spv(r, k) { var v = null; (r.specs || []).some(function (s) { if (s[0] === k) { v = String(s[1]); return true; } return false; }); return v; }
+  function numLbl(n, unit) { return (Math.round(n * 100) / 100) + unit; }
+  function mmVal(str) { // first mm (or cm) measurement in a field value
+    var m = /(\d+(?:\.\d+)?)\s*(mm|cm)\b/i.exec(String(str || ''));
+    if (!m) return null;
+    var n = parseFloat(m[1]); var mm = m[2].toLowerCase() === 'cm' ? n * 10 : n;
+    return { k: 'mm:' + (Math.round(mm * 100) / 100), l: numLbl(n, m[2].toLowerCase()), n: mm };
+  }
+  function inVal(str) {
+    var m = /(\d+(?:\.\d+)?)\s*(″|"|in\b)/.exec(String(str || ''));
+    return m ? { k: 'in:' + parseFloat(m[1]), l: parseFloat(m[1]) + '″', n: parseFloat(m[1]) } : null;
+  }
+  function one(v) { return v ? [v] : []; }
+  function sizeOrder(sz) { // suture sizes: 4-0 < 2-0 < #0 < #2 < #5 < 1.2mm tape …
+    var m;
+    if ((m = /^(\d+(?:\.\d+)?)mm$/.exec(sz))) return 1000 + parseFloat(m[1]);
+    if ((m = /^#?(\d+)-0$/.exec(sz))) return -parseInt(m[1], 10);
+    if ((m = /^#(\d+)/.exec(sz))) return parseInt(m[1], 10);
+    return 500;
+  }
+  var FACETFN = {
+    dia: function (r, b) {
+      if (b === 'Implants') {
+        var v = spv(r, 'Anchor size') || spv(r, 'Diameter') || spv(r, 'Anchor diameter') || (/^\d+(\.\d+)?mm$/.test(r.sz || '') ? r.sz : '');
+        return one(mmVal(v));
+      }
+      var w = spv(r, 'Diameter') || spv(r, 'Drill diameter') || spv(r, 'Drill bit diameter') || spv(r, 'Cutting-head diameter') ||
+        (b === 'Arthroscopy' ? spv(r, 'Outer diameter') : '') || (/^\d+(\.\d+)?mm$/.test(r.sz || '') ? r.sz : '');
+      return one(mmVal(w));
+    },
+    len: function (r) { return one(mmVal(spv(r, 'Length') || spv(r, 'Total length') || spv(r, 'Anchor length'))); },
+    mat: function (r) {
+      var m = spv(r, 'Material'); if (!m) return [];
+      var l = /β-TCP|biocomposite/i.test(m) ? 'Biocomposite' : /HA \(25%\)\/PLLA|HA\/PLLA/i.test(m) ? 'HA/PLLA' : /PLA \+ poly/i.test(m) ? 'Bioabsorbable PLA/PCL' :
+        /PEEK/.test(m) ? 'PEEK' : /titanium/i.test(m) ? 'Titanium' : /polyester braided sheath/i.test(m) ? 'All-suture' : /PUUR|polyurethane/i.test(m) ? 'PUUR scaffold' : 'Other';
+      return [{ k: l, l: l }];
+    },
+    atype: function (r) {
+      var c = r.cat, l = c === 'Knotless Anchors' ? 'Knotless' : c === 'Iconix' ? (r.sub === 'Iconix Knotless' ? 'All-suture knotless' : 'All-suture') :
+        c === 'Corkscrew Anchors' ? 'Knotted suture anchor' : c === 'Screws' ? 'Screw' : c === 'NanoTack' ? 'NanoTack' :
+        c === 'Knee/Meniscus Anchors' ? 'Knee / meniscus fixation' : c === 'Artelon' ? 'Artelon' : 'Other';
+      return [{ k: l, l: l }];
+    },
+    needle: function (r, b) {
+      var n = spv(r, 'Needle');
+      if (b === 'Suture' || n) {
+        if (!n) return [];
+        if (/^Non-needled/i.test(n)) return [{ k: 'Non-needled', l: 'Non-needled' }];
+        var code = (/^(DA\s+)?([A-Z]{1,4}-?\d{0,3}(?:\s+Blunt)?)/.exec(n) || [])[2] || 'Needled';
+        if (/both ends|double-armed|^DA\s/i.test(n)) code += ' double-armed';
+        return [{ k: code, l: code }];
+      }
+      var t = (r.name || '') + ' ' + (r.ld || '') + ' ' + (r.sub || '') + ' ' + (spv(r, 'Suture') || '');
+      return /needle/i.test(t) && !/non-needled/i.test(t) ? [{ k: 'With needles', l: 'With needles' }] : [{ k: 'No needles', l: 'No needles' }];
+    },
+    strands: function (r) {
+      var t = (r.ld || '') + ' ' + (spv(r, 'Suture') || ''), n = 0, m, re = /(\d)\s*(?:strands?\b|×)/g;
+      while ((m = re.exec(r.ld || ''))) n += +m[1];
+      if (!n) { re.lastIndex = 0; while ((m = re.exec(spv(r, 'Suture') || ''))) n += +m[1]; }
+      if (!n) { if (/\b(one|single)\s+strand/i.test(t)) n = 1; else if (/\b(two|double)\s+strands?/i.test(t)) n = 2; else if (/\bthree\s+strands/i.test(t)) n = 3; }
+      return n ? [{ k: 'n' + n, l: n + (n === 1 ? ' strand' : ' strands'), n: n }] : [];
+    },
+    stype: function (r, b) {
+      if (b === 'Suture') { var f = String(r.fam || '').replace(/ suture( tape)?$/i, '').replace(/ suture and tape$/i, ''); return f ? [{ k: f, l: f }] : []; }
+      var t = (r.name || '') + ' ' + (r.ld || '') + ' ' + (spv(r, 'Suture') || ''), out = [];
+      if (/XBraid TT|tape/i.test(t)) out.push({ k: 'XBraid TT', l: 'XBraid TT tape' });
+      if (/XBraid S\b/.test(t)) out.push({ k: 'XBraid S', l: 'XBraid S' });
+      if (/Force Fiber/i.test(t)) out.push({ k: 'Force Fiber', l: 'Force Fiber' });
+      if (/polyester/i.test(spv(r, 'Suture') || '')) out.push({ k: 'Polyester', l: 'Polyester' });
+      return out;
+    },
+    ssize: function (r) { return r.sz ? [{ k: r.sz, l: r.sz, n: sizeOrder(r.sz) }] : []; },
+    slen: function (r) { return one(inVal(spv(r, 'Strand length') || spv(r, 'Total length') || spv(r, 'Loop length'))); }
+  };
+  function facetVals(h, k, b) {
+    h.fx = h.fx || {};
+    var key = k + '|' + b;
+    if (!h.fx[key]) { try { h.fx[key] = FACETFN[k](h.rec || h.it, b) || []; } catch (eF) { h.fx[key] = []; } }
+    return h.fx[key];
+  }
+  function specPass(h, b, skip) {
+    return Object.keys(SPECF).every(function (k) {
+      if (k === skip) return true;
+      return facetVals(h, k, b).some(function (v) { return v.k === SPECF[k]; });
+    });
+  }
   function editLE(a, b, maxD) {
     var la = a.length, lb = b.length;
     if (Math.abs(la - lb) > maxD) return false;
@@ -572,7 +668,7 @@ var GLOSS = {
       if (terms[i] === 'NON' && terms[i + 1] === 'SLIDING') { merged.push('NONSLIDING'); i++; }
       else merged.push(terms[i]);
     }
-    var qn = nrm(q);
+    var qn = nrm(q), qnz = qn.replace(/^0+/, '');
     function collect(allowFuzzy) {
       var out = [];
       for (var k = 0; k < INDEX.length; k++) {
@@ -585,12 +681,14 @@ var GLOSS = {
           }
           pos = e.hay.indexOf(t);
           if (pos !== -1) { score += 30 - Math.min(25, pos / 10); continue; }
+          // part numbers: leading zeros are optional (0242200025 finds 242200025, 295724120 finds 0295724120)
+          if (/^0+\d{5,}$/.test(t) && e.skuz.indexOf(t.replace(/^0+/, '')) === 0) { score += 30; continue; }
           if (allowFuzzy && termFuzzy(e, t)) { score += 6; continue; }
           ok = false; break;
         }
         if (!ok) continue;
-        if (e.skun === qn) score += 500;
-        else if (qn.length >= 4 && e.skun.indexOf(qn) === 0) score += 180;
+        if (e.skun === qn || (qnz.length >= 5 && e.skuz === qnz)) score += 500;
+        else if (qn.length >= 4 && (e.skun.indexOf(qn) === 0 || (qnz.length >= 5 && e.skuz.indexOf(qnz) === 0))) score += 180;
         e.score = score;
         out.push(e);
       }
@@ -626,6 +724,12 @@ var GLOSS = {
     var avail = SBUCKETS.filter(function (b) { return counts[b]; });
     if (SFILT && !counts[SFILT]) SFILT = null;
     var shown = SFILT ? hits.filter(function (h) { return (h.buckets || []).indexOf(SFILT) !== -1; }) : hits;
+    // spec filters belong to one bucket (Implants, Suture, …): the picked chip, or the only bucket in the results
+    var fb = SFILT || (avail.length === 1 ? avail[0] : null), fks = fb ? (BUCKETFACETS[fb] || []) : [];
+    Object.keys(SPECF).forEach(function (k) { if (fks.indexOf(k) === -1) delete SPECF[k]; });
+    var fbase = shown, fon = Object.keys(SPECF).length > 0;
+    if (fon) shown = shown.filter(function (h) { return specPass(h, fb, null); });
+    var frow = fks.length ? facetRowHTML(fbase, fb, fks, shown.length) : '';
     if (SSORT === 'sku') shown = shown.slice().sort(function (a, b) { return a.skun < b.skun ? -1 : a.skun > b.skun ? 1 : 0; });
     var chips = '<div class="schips">' +
       (avail.length > 1 ? '<button class="schip' + (!SFILT ? ' on' : '') + '" data-sf="">All &middot; ' + hits.length + '</button>' +
@@ -635,9 +739,38 @@ var GLOSS = {
       '<button class="schip sort' + (SSORT === 'sku' ? ' on' : '') + '" data-ssort="1" aria-pressed="' + (SSORT === 'sku') + '">' + (SSORT === 'sku' ? 'Part # A\u2013Z' : 'Best match') + ' &#x21C5;</button>' +
       '</div>';
     var CAP = SALL ? shown.length : 60;
-    return chips + '<div class="list" style="margin-top:8px">' +
+    if (!shown.length) return chips + frow + '<div class="empty">No results match these filters. <button class="footlink" data-sfclear="1">Clear filters</button></div>';
+    return chips + frow + '<div class="list" style="margin-top:8px">' +
       shown.slice(0, CAP).map(function (h) { return rowHTML(h.route, h.it, h.sub); }).join('') + '</div>' +
       (shown.length > CAP ? '<button class="showall" data-sall="1">Show all ' + shown.length + ' &#x203A;</button>' : '');
+  }
+  function facetRowHTML(base, b, fks, nShown) {
+    var html = '', any = false;
+    fks.forEach(function (k) {
+      var pool = base.filter(function (h) { return specPass(h, b, k); }), vals = {}, order = [];
+      pool.forEach(function (h) {
+        facetVals(h, k, b).forEach(function (v) {
+          if (!vals[v.k]) { vals[v.k] = { l: v.l, n: v.n, c: 0 }; order.push(v.k); }
+          vals[v.k].c++;
+        });
+      });
+      var act = SPECF[k];
+      if (order.length < 2 && !act) return; // nothing to choose between
+      order.sort(function (x, y) {
+        var a = vals[x], c = vals[y];
+        if (a.n !== undefined && c.n !== undefined && a.n !== c.n) return a.n - c.n;
+        return String(a.l).localeCompare(String(c.l));
+      });
+      if (act) any = true;
+      html += '<label class="sfsel' + (act ? ' on' : '') + '"><span class="sfk">' + esc(FACETLBL[k]) + '</span>' +
+        '<select data-sfk="' + k + '" aria-label="' + esc(FACETLBL[k]) + '"><option value="">Any</option>' +
+        order.map(function (vk) {
+          return '<option value="' + esc(vk) + '"' + (vk === act ? ' selected' : '') + '>' + esc(vals[vk].l) + ' (' + vals[vk].c + ')</option>';
+        }).join('') + '</select></label>';
+    });
+    if (!html) return '';
+    return '<div class="sfrow">' + html + (any ? '<span class="sfcount">' + nShown + ' match' + (nShown === 1 ? '' : 'es') + '</span>' +
+      '<button class="sfclear" data-sfclear="1">Clear filters</button>' : '') + '</div>';
   }
   try { SSORT = localStorage.getItem('tbx_ssort') === 'sku' ? 'sku' : 'rel'; } catch (e0) {}
   var VT_FROM = null;
@@ -1318,9 +1451,13 @@ var GLOSS = {
     if (ss) { SSORT = SSORT === 'sku' ? 'rel' : 'sku'; try { localStorage.setItem('tbx_ssort', SSORT); } catch (e7) {} content.innerHTML = resultsHTML(); return; }
     var sa = e.target.closest && e.target.closest('[data-sall]');
     if (sa) { SALL = true; content.innerHTML = resultsHTML(); return; }
+    var sfc = e.target.closest && e.target.closest('[data-sfclear]');
+    if (sfc) { SPECF = {}; content.innerHTML = resultsHTML(); return; }
     var sc = e.target.closest && e.target.closest('.schip');
     if (sc) {
-      SFILT = sc.getAttribute('data-sf') || null;
+      var nf = sc.getAttribute('data-sf') || null;
+      if (nf !== SFILT) SPECF = {};
+      SFILT = nf;
       content.innerHTML = resultsHTML();
       return;
     }
@@ -1417,14 +1554,14 @@ var GLOSS = {
   }
   var DISP_GROUPS = {
     'Adaptable disposables': ['Adaptable positioning system'],
-    'Anchor disposables': ['CinchLock knotless anchor', 'Gravity anchor', 'Iconix all-suture anchor', 'Knotilus+ knotless anchor', 'NanoTack suture anchor', 'Titanium wedge interference screws', 'AIR+', 'Biosteon HA/PLLA interference screws'],
+    'Anchor disposables': ['CinchLock knotless anchor', 'Gravity anchor', 'Iconix all-suture anchor', 'Knotilus+ knotless anchor', 'NanoTack suture anchor', 'Titanium wedge interference screws', 'AIR+', 'Biosteon HA/PLLA interference screws', 'TwinLoop Flex anchor'],
     'Cannulas & portal access': ['Dri-Lok cannula', 'FlowPort', 'GateWay flexible cannula', 'Portal entry kit', 'Transport', 'Samurai blades'],
     'Guardian/DARTs + HipCheck': ['Guardian + DARTs', 'Hip Check'],
     'Pump & fluid management': ['CrossFlow arthroscopy pump', 'FloSteady arthroscopy pump'],
     'Reamers & drilling': ['VersiTomic Flexible Reaming System', 'VersiTomic Low Profile Reaming System', 'VersiTomic RetroReamer', 'MicroFX OCD Osteochondral Drilling System', 'Phoenix Microfracture Drill'],
     'PRP disposables': ['RegenKit THT (A-PRP)'],
     'Reposables': [],
-    'Suture passing systems': ['ArthroTunneler system', 'G-Force tenodesis system', 'InJector II capsule closure', 'SharpShooter meniscal repair system', 'SlingShot capsule restoration system', 'NanoPass suture management system', 'Champion SlingShot suture passer', 'Champion+ Slider suture passer', 'VersiPass suture passer']
+    'Suture passing systems': ['ArthroTunneler system', 'G-Force tenodesis system', 'InJector II capsule closure', 'SharpShooter meniscal repair system', 'SlingShot capsule restoration system', 'NanoPass suture management system', 'Champion SlingShot suture passer', 'Champion+ Slider suture passer', 'VersiPass suture passer', 'Champion suture passer']
   };
   var ALLO_GROUPS = {
     'PRP': ['RegenKit THT (A-PRP)'],
@@ -1432,7 +1569,9 @@ var GLOSS = {
     'GraftJacket': ['GraftJacket Now Ultra-Thick'],
     'Evergen': ['Tendon', 'Meniscus', 'Fresh Osteochondral', 'Chips and Cubes', 'Cortical Bone Blocks',
       'Ilium Tricortical', 'Structural Bone', 'UniCort Dowels', 'Wedges',
-      'Matrix HD acellular human dermis', 'Fortiva porcine dermis']
+      'Matrix HD acellular human dermis', 'Fortiva porcine dermis'],
+    'Alamo': ['Alamo tendons', 'Alamo fascia lata', 'Alamo cancellous bone'],
+    'AlloSource': ['AlloSource tendons', 'AlloSource fascia lata']
   };
   var CAP_GROUPS = {
     'Arthroscopy capital': ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'FloSteady arthroscopy pump', 'Shaver handpieces'],
@@ -1636,7 +1775,10 @@ var GLOSS = {
         if (rel.some(function (x) { return x.it.cat === 'Disposables'; }))
           links.push({ t: 'Associated disposables', go: '#/instr/' + encodeURIComponent(it.sku) + '/Disposables' });
         if (rel.some(function (x) { return x.it.cat === 'Capital'; }))
-          links.push({ t: 'Associated capital', go: it.sub
+          links.push({ t: 'Associated capital', go: (it.instr && it.instr.incl && it.instr.incl.length)
+            // explicit list (e.g. shaver handpieces -> their consoles): show exactly those, not the item's own family
+            ? '#/instr/' + encodeURIComponent(it.sku) + '/Capital'
+            : it.sub
             ? '#/sub/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) + '/' + encodeURIComponent(it.sub)
             : '#/fam/' + encodeURIComponent('Capital') + '/' + encodeURIComponent(it.fam) });
       }
@@ -1686,7 +1828,7 @@ var GLOSS = {
     } catch (e) {}
   }
   function pnScreen(sku) {
-    var e = BYPN[nrm(sku)];
+    var e = BYPN[nrm(sku)] || BYPNZ[nrm(sku).replace(/^0+/, '')]; // leading zeros optional (0295724120 = 295724120)
     if (!e) return home();
     if (e.kind === 'item') { noteRecent(D.items[e.idx].sku, D.items[e.idx].t || D.items[e.idx].name); return itemCard(D.items[e.idx]); }
     if (e.kind === 'probe') { noteRecent(D.probes[e.idx].sku, D.probes[e.idx].name); return probeCard(D.probes[e.idx]); }
@@ -6418,7 +6560,7 @@ var GLOSS = {
     var raw = location.hash || '#/';
     var qi = raw.indexOf('?');
     var query = qi > -1 ? raw.slice(qi + 1) : '';
-    if (qparam(query, 'q') !== CURQ) SALL = false;
+    if (qparam(query, 'q') !== CURQ) { SALL = false; SPECF = {}; }
     CURQ = qparam(query, 'q');
     if (qInput && qInput.value !== CURQ) qInput.value = CURQ;
     var h = qi > -1 ? raw.slice(0, qi) : raw;
@@ -6431,6 +6573,19 @@ var GLOSS = {
       var cats = (D.catOrder || []).slice().sort(function (a, b) { return b.length - a.length; });
       for (var i = 0; i < cats.length; i++) { if (s.indexOf(cats[i] + '/') === 0) return [cats[i], s.slice(cats[i].length + 1)]; }
       var k = s.indexOf('/'); return k > -1 ? [s.slice(0, k), s.slice(k + 1)] : [s, ''];
+    };
+    // Split an encoded cat/fam[/sub] path on its literal '/' separators BEFORE decoding, so a name that
+    // itself contains '/' (encoded as %2F, e.g. the "A/M portal guides" sub) stays in one piece.
+    // Falls back to the decode-first split for hand-typed links with raw slashes.
+    var splitParts = function (s, want) {
+      var raw = s.split('/'), cats = D.catOrder || [];
+      for (var n = 1; n <= raw.length - (want - 1); n++) {
+        var cat = raw.slice(0, n).map(dec).join('/');
+        if (cats.indexOf(cat) === -1) continue;
+        var rest = raw.slice(n).map(dec);
+        if (rest.length === want - 1) return [cat].concat(rest);
+      }
+      return null;
     };
     window.scrollTo(0, 0);
     var xb = document.getElementById('expban');
@@ -6470,8 +6625,15 @@ var GLOSS = {
     if ((m = h.match(/^#\/top\/(implants|arthroscopy)$/))) return topScreen(m[1]);
     if ((m = h.match(/^#\/cat\/(.+)$/))) return catScreen(dec(m[1]));
     if ((m = h.match(/^#\/dgrp\/(.+)$/))) return dispGroupScreen(dec(m[1]));
-    if ((m = h.match(/^#\/fam\/(.+)$/))) { var fp = splitCatRest(m[1]); return famScreen(fp[0], fp[1]); }
-    if ((m = h.match(/^#\/sub\/(.+)$/))) { var sp = splitCatRest(m[1]); var j = sp[1].lastIndexOf('/'); return subScreen(sp[0], dec(sp[1].slice(0, j)), dec(sp[1].slice(j + 1))); }
+    if ((m = h.match(/^#\/fam\/(.+)$/))) { var fp = splitParts(m[1], 2) || splitCatRest(m[1]); return famScreen(fp[0], fp[1]); }
+    if ((m = h.match(/^#\/sub\/(.+)$/))) {
+      var sp3 = splitParts(m[1], 3);
+      if (sp3) return subScreen(sp3[0], sp3[1], sp3[2]);
+      var sp = splitCatRest(m[1]), famHit = '';
+      D.items.forEach(function (it) { if (it.fam && it.fam.length > famHit.length && sp[1].indexOf(it.fam + '/') === 0) famHit = it.fam; });
+      if (famHit) return subScreen(sp[0], famHit, sp[1].slice(famHit.length + 1));
+      var j = sp[1].lastIndexOf('/'); return subScreen(sp[0], dec(sp[1].slice(0, j)), dec(sp[1].slice(j + 1)));
+    }
     if ((m = h.match(/^#\/pn\/(.+)$/))) return pnScreen(dec(m[1]));
     if ((m = h.match(/^#\/item\/(\d+)$/))) return legacyRedirect('item', +m[1]);
     if ((m = h.match(/^#\/instr\/([^\/]+)(?:\/(Capital|Disposables|Instruments))?$/))) {
@@ -6505,9 +6667,17 @@ var GLOSS = {
   // ---- bottom search wiring ----
   content = document.getElementById('content');
   qInput = document.getElementById('q');
+  document.addEventListener('change', function (e) {
+    var sel = e.target && e.target.closest ? e.target.closest('select[data-sfk]') : null;
+    if (!sel) return;
+    var k = sel.getAttribute('data-sfk');
+    if (sel.value) SPECF[k] = sel.value; else delete SPECF[k];
+    SALL = false;
+    content.innerHTML = resultsHTML();
+  });
   qInput.addEventListener('input', function () {
     CURQ = qInput.value.trim();
-    if (!CURQ) SFILT = null;
+    if (!CURQ) { SFILT = null; SPECF = {}; }
     var base = (location.hash || '#/').split('?')[0];
     history.replaceState(null, '', base + (CURQ ? '?q=' + encodeURIComponent(CURQ) : ''));
     if (CURQ) {
@@ -6762,8 +6932,15 @@ var GLOSS = {
       try { if (navigator.vibrate) navigator.vibrate(60); } catch (ev) {}
       var r = resolveCode(txt);
       if (r.sku) {
-        var entry = BYPN[nrm(r.sku)];
-        var it = entry ? (recOf(entry)) : null;
+        var entry = BYPN[nrm(r.sku)] || BYPNZ[nrm(r.sku).replace(/^0+/, '')];
+        if (!entry) {
+          // A barcode that still resolves to a part number with no card (e.g. a retired number kept so
+          // Cycle Count can still count old stock): say so instead of "Found" and a jump to Home.
+          stopScan();
+          toastMsg(r.sku + ' — no ToolBox card for this part number', 3200);
+          return;
+        }
+        var it = recOf(entry);
         stopScan();
         location.hash = pnRoute(r.sku);
         foundToast(r.p, it && (it.t || it.name));
