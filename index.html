@@ -320,10 +320,11 @@ button.tile, .rowitem{cursor:pointer; width:100%;}
 .ledger .lv{white-space:pre-line; color:var(--bone);}
 .ledger .lhead{margin:16px 2px 4px; padding-bottom:5px; font-size:11.5px; font-weight:700; color:#7CCFE8;
   letter-spacing:.1em; text-transform:uppercase; opacity:.9; border-bottom:1px solid var(--line);}
-.reflinkrow{display:grid; grid-template-columns:repeat(auto-fit, minmax(96px, 1fr)); gap:8px; margin:14px 0 2px;}
+.reflinkrow{display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px;}
 .refbtn{border:1.5px solid var(--amber); background:rgba(253,181,21,.08); color:var(--amber);
-  font-weight:800; font-size:12.5px; line-height:1.25; letter-spacing:.2px; border-radius:8px;
-  min-height:60px; padding:8px 6px; display:flex; align-items:center; justify-content:center; text-align:center;}
+  font-family:inherit; font-weight:700; font-size:13.5px; line-height:1.25; letter-spacing:.1px; border-radius:10px;
+  min-height:40px; padding:8px 14px; display:inline-flex; align-items:center; gap:6px; text-align:left; cursor:pointer;}
+.refbtn::after{content:"\203A"; font-size:17px; line-height:1;}
 .refbtn:active{background:rgba(253,181,21,.18);}
 .note{margin-top:14px; font-size:13.5px; color:var(--bone); background:var(--panel2);
   border-left:3px solid var(--amber); border-radius:0 10px 10px 0; padding:10px 12px;}
