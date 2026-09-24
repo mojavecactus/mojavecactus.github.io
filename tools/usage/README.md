@@ -13,14 +13,14 @@ screens are recorded by screen name only. The cycle-count scanner is not tracked
 - Dashboard `#/usage`: five quick taps on the version number at the foot of Home (or the footer "Usage" link
   once a device has the key). Needs the **admin key**, which is not in the payload; a device holding it is
   flagged and left out of the numbers unless "Include my devices" is ticked.
-- Hub (`usage-hub.js` → `Usage.gs`, `usage-core.js` → `UsageCore.gs`) lives in the "TBX Backorder Hub" project
-  (same deployment URL; Code.gs hands `u_*` actions to `usageHandle`). Data: spreadsheet "SM ToolBox — Usage",
-  tab Events (ts · device · session · type · key · extra, all plain text). Keys and ids: owner's private
-  project doc `claude/usage-state.md`.
+- Hub: standalone Apps Script project "TBX Usage Hub" on the syksmtoolbox account (kept separate from the
+  backorder hub) — `usage-main.js` → `Code.gs` (doGet/doPost), `usage-hub.js` → `Usage.gs`, `usage-core.js` →
+  `UsageCore.gs`, all verbatim. Data: spreadsheet "SM ToolBox — Usage", tab Events (ts · device · session · type ·
+  key · extra, all plain text). Keys and ids: owner's private project doc `claude/usage-state.md`.
 
 Tests
-- `node tools/usage/test.js` — core (Eastern time, ingest validation, live/stats) + the hub in a vm with fake
-  Apps Script services. `BO_CODE=<path to Code.gs>` also loads the backorder code to check the dispatch.
+- `node tools/usage/test.js` — core (Eastern time, ingest validation, live/stats) + the hub project (all three
+  files, as Apps Script would load them) in a vm with fake Apps Script services.
 - `APP_PW=<pw> node tools/usage/app-test.js` — the real bundle in jsdom with the hub faked (borrows jsdom from
   `tools/bo/node_modules` or `tools/cc-test/node_modules`).
 - `APP_PW=<pw> node tools/usage/shots.js` — phone-width screenshots of the dashboard over synthetic data

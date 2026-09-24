@@ -1,5 +1,5 @@
 // SM ToolBox — usage core: pure functions shared by the usage hub and the tests.
-// Pasted VERBATIM into the syksmtoolbox Apps Script project (the "TBX Backorder Hub") as UsageCore.gs —
+// Pasted VERBATIM into the syksmtoolbox Apps Script project "TBX Usage Hub" as UsageCore.gs —
 // keep the two identical (the hub has no build step). No Apps Script services in here.
 //
 // One row per event in the hub's Events tab:  ts (ISO, UTC) · device · session · type · key · extra

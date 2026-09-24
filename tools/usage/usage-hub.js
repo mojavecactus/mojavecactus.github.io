@@ -1,10 +1,9 @@
-// SM ToolBox — Usage hub (anonymous in-app usage). Pasted VERBATIM into the syksmtoolbox Apps Script project
-// "TBX Backorder Hub" as Usage.gs, next to UsageCore.gs (= tools/usage/usage-core.js). The project's Code.gs
-// hands every action that starts with "u_" to usageHandle() on its first line, before any backorder work, so
-// the two features share a deployment URL and authorization but no data: usage lives in its own spreadsheet.
+// SM ToolBox — Usage hub (anonymous in-app usage). Pasted VERBATIM as Usage.gs in the standalone syksmtoolbox
+// Apps Script project "TBX Usage Hub", next to UsageCore.gs (= tools/usage/usage-core.js) and Code.gs
+// (= tools/usage/usage-main.js, the doGet/doPost entry points). Separate from the backorder hub on purpose.
 //
 // First run (from the editor): usageSetup() → creates "SM ToolBox — Usage" (tab Events), the write key and the
-// admin key (Script Properties USAGE_*), and logs them. Deploy a new version of the web app afterwards.
+// admin key (Script Properties USAGE_*), and logs them. Then deploy the web app (Execute as me · Anyone).
 //
 // API (POST text/plain JSON, like the other hubs):
 //   {action:'u_ev', key: writeKey, d: deviceId, a: 0|1, b: batchId, e: [[ms, type, key, extra, session], …]}

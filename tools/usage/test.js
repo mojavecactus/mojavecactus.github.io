@@ -1,6 +1,5 @@
-// Usage core + hub tests. The hub (usage-hub.js) runs in a vm with fake Apps Script services, the way the
-// real project would run it next to the backorder hub (pass BO_CODE=<path to Code.gs> to load that too and
-// check the u_* dispatch and that the backorder actions are untouched).
+// Usage core + hub tests. The hub (usage-hub.js + usage-main.js) runs in a vm with fake Apps Script services,
+// the way the standalone "TBX Usage Hub" project runs it.
 //   node tools/usage/test.js
 const fs = require('fs'), path = require('path'), vm = require('vm');
 const U = require('./usage-core.js');
@@ -231,28 +230,28 @@ function fakeGas() {
   check('hub: unexpected errors come back as {ok:false, err:server}', errOut.ok === false && errOut.err === 'server', errOut);
 }
 
-// ---------- optional: the real backorder Code.gs + bo-core in the same global scope ----------
-if (process.env.BO_CODE) {
+// ---------- the whole hub project as Apps Script loads it: UsageCore.gs + Usage.gs + Code.gs in one global scope ----------
+{
   const G = fakeGas();
-  const files = [[path.join(__dirname, '..', 'bo', 'bo-core.js'), 'Core.gs'], [process.env.BO_CODE, 'Code.gs'], [path.join(__dirname, 'usage-core.js'), 'UsageCore.gs'], [path.join(__dirname, 'usage-hub.js'), 'Usage.gs']];
-  const names = {};
-  const dupes = [];
+  const files = [['usage-core.js', 'UsageCore.gs'], ['usage-hub.js', 'Usage.gs'], ['usage-main.js', 'Code.gs']];
+  const names = {}, dupes = [];
   files.forEach(([f, n]) => {
-    const src = fs.readFileSync(f, 'utf8');
+    const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
     (src.match(/^(?:function\s+([A-Za-z0-9_$]+)|var\s+([A-Za-z0-9_$]+))/gm) || []).forEach(m => {
       const k = m.replace(/^(function|var)\s+/, '');
       if (names[k] && names[k] !== n) dupes.push(k + ' (' + names[k] + ' + ' + n + ')'); names[k] = n;
     });
     vm.runInContext(src, G.ctx, { filename: n });
   });
-  check('project: no global name collisions across Core/Code/UsageCore/Usage', dupes.length === 0, dupes);
+  check('project: no global name collisions across UsageCore/Usage/Code', dupes.length === 0, dupes);
   G.ctx.usageSetup();
-  const h = (p) => JSON.parse(G.ctx.handle(p).getContent());
-  check('project: handle() routes u_* to usage before any backorder work (no backorder sheet needed)', h({ action: 'u_ping' }).ok === true && h({ action: 'u_live', key: 'x' }).err === 'key');
-  check('project: doPost JSON body reaches usage', JSON.parse(G.ctx.doPost({ postData: { contents: JSON.stringify({ action: 'u_ping' }) } }).getContent()).v === 1);
-  check('project: doGet ?action=u_ping reaches usage', JSON.parse(G.ctx.doGet({ parameter: { action: 'u_ping' } }).getContent()).ok === true);
-  let boPing = null; try { boPing = h({ action: 'ping' }); } catch (e) { boPing = { err: String(e.message) }; }
-  check('project: the backorder ping still answers as before', boPing && boPing.ok === true && boPing.ver === 1, boPing);
+  const post = (o) => JSON.parse(G.ctx.doPost({ postData: { contents: JSON.stringify(o) } }).getContent());
+  check('project: doPost JSON body reaches usageHandle', post({ action: 'u_ping' }).v === 1);
+  check('project: doGet ?action=u_ping answers', JSON.parse(G.ctx.doGet({ parameter: { action: 'u_ping' } }).getContent()).ok === true);
+  check('project: doPost with a broken body falls back to the query string', JSON.parse(G.ctx.doPost({ postData: { contents: '{nope' }, parameter: { action: 'u_ping' } }).getContent()).ok === true);
+  const wk = G.props.USAGE_WKEY, ak = G.props.USAGE_AKEY, now = Date.now();
+  check('project: ingest through doPost', post({ action: 'u_ev', key: wk, d: 'abcdefghij', b: 'projbatch001', e: [[now - 1000, 'card', '3910500580', '', 'sess0001']] }).n === 1);
+  check('project: live through doPost', post({ action: 'u_live', key: ak }).today.cards === 1);
 }
 
 const failed = results.filter(r => !r.ok).length;
