@@ -49,6 +49,8 @@ a new password.
 3. Edit data.js / gtin.js / whatsnew.js and/or app assets. **After any change under `img/` or `guide/pages/`**
    (add, replace, re-encode, delete): `node tools/img-manifest.mjs` — it rewrites `img-manifest.json` and stamps
    `IMG_MANIFEST` in sw.js (verify.mjs fails until you do). `--diff <old manifest>` shows what phones will download.
+   Then `node tools/img-dims.mjs` — it rewrites `img-dims.js`, the photo sizes that keep a lone card photo's box in place
+   while it loads (verify.mjs fails until you do; `--check` only checks).
 4. `node tools/encrypt-data.mjs <team-password>`.
 5. Round-trip check (encrypt-data.mjs already compares the payload with the files before writing it): decrypt the
    fresh payload in a temp dir and sha256-compare data.js / gtin.js against the working copies — they come back
@@ -192,6 +194,14 @@ take `APP_PW` open `payload.enc.json` themselves through `tools/payload-lib.cjs`
     called. Pass `--port` to keep to an agreed port range.
   - WebKit (the iPhone engine) needs a Playwright WebKit build: set `PLAYWRIGHT_BROWSERS_PATH` to the folder
     holding it. Never run `playwright install` into system paths for this.
+- `APP_PW=<catalog pw> [ENGINE=chromium|webkit] node tools/motion-test/run.js [--base <live build>] [--shots <dir>] [--only <re>]`
+  (Playwright, hubs faked, service worker blocked) — release 7 motion (g4 spec §15 T1–T11): the launch overlay's life cycle,
+  once per launch, heal safety, Reduce Motion (nothing moves), the compositor-only lint of index.html, cycle count / F&A
+  untouched, tile → page and card ↔ row View Transitions (with and without the API), the morph starting at the tapped row,
+  Back returning to the same place, photos and the report's placeholders not moving the text, button feedback, the logo
+  and the About drawer. T1 timings are informational (`--base` compares with the live build, the two taking turns; the
+  default median of 9 still moves ±20 ms on a shared machine: `--only T1-boot --runs 21` on an idle one); `--shots` saves
+  phone-size screenshots.
 - `tools/nav-test/` — navigation (Back keeps your place, bottom-bar Back, lists, report) and the cycle-count / F&A fence.
   No decrypted data needed.
   - `APP_PW=<catalog pw> [ENGINE=chromium|webkit] [PORT=n] node tools/nav-test/e2e.js [jobRegex]` (Playwright) — search →

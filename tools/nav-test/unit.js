@@ -52,8 +52,8 @@ const BO = { ok: true, ver: 1, asOf: '2026-09-21', reportId: '2026-09-21', weekO
 
   // ---- P46: #/bo?bq= filters; words in any order; the filter + section survive Back ----
   const C = await bootSite(SITE, { hash: '#/bo?bq=3910500393', bo: () => Promise.resolve(BO) });
-  const $ = s => C.w.document.querySelector(s), boRows = () => C.w.document.querySelectorAll('#bo-body .bo-row').length;
-  for (let i = 0; i < 40 && !$('#bo-body .grouphead'); i++) await sleep(50); // first load: the fetch + the refresh spinner's 600 ms
+  const $ = s => C.w.document.querySelector(s), boRows = () => C.w.document.querySelectorAll('#bo-body .bo-row:not(.skrow)').length; // R7: .skrow = loading placeholder
+  for (let i = 0; i < 40 && !$('#bo-body .grouphead:not(.sk)'); i++) await sleep(50); // first load: the fetch + the refresh spinner's 600 ms
   check('P46 #/bo?bq=<part> opens the report filtered to that part', $('#bo-q') && $('#bo-q').value === '3910500393' && boRows() === 1, { q: $('#bo-q') && $('#bo-q').value, rows: boRows() });
   // (not "guide iconix": the old whole-string match already found that by accident across the joined description + title)
   const qi = $('#bo-q'); qi.value = 'guide 3910500393'; qi.dispatchEvent(new C.w.Event('input')); await sleep(20);

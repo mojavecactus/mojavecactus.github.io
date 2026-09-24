@@ -49,8 +49,8 @@ async function boot(o) {
   check('P24 ✕ keeps the keyboard up when the box had focus', t.d.activeElement === t.q && t.q.value === '');
   t.q.blur();
   // ---- P6: clearing re-runs the screen underneath (it restored a saved HTML shell before) ----
-  await t.go('#/bo'); for (let i = 0; i < 40 && !t.C().querySelector('.bo-row'); i++) await sleep(50);
-  const boRows = () => t.C().querySelectorAll('.bo-row').length;
+  await t.go('#/bo'); for (let i = 0; i < 40 && !t.C().querySelector('.bo-row:not(.skrow)'); i++) await sleep(50); // R7: .skrow = loading placeholder
+  const boRows = () => t.C().querySelectorAll('.bo-row:not(.skrow)').length;
   const before = boRows(); t.type('dc'); t.d.getElementById('qclear').click(); await sleep(60);
   check('P6 clearing a search on the Backorder Report repaints the report', before > 0 && boRows() === before && /Backorder/.test(t.d.getElementById('title').textContent), { before, after: boRows() });
   const bq = t.d.getElementById('bo-q'); bq.value = 'zzzz-none'; bq.dispatchEvent(new t.w.Event('input')); await sleep(20);

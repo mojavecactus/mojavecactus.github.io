@@ -41,7 +41,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.149';
+  var APPVER = '4.150';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -270,8 +270,8 @@ var GLOSS = {
   function boTileHTML() {
     if (!boOn()) return '';
     return '<button class="tile tile-bo" data-go="#/bo">' +
-      '<span class="tico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9CC9FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>' +
-      '<span class="tl"><b>Backorder Report</b><span class="n">' + boTileSub() + '</span></span>' +
+      '<span class="tico">' + catSvg('bo') + '</span>' +
+      '<span class="tl"><b><span class="tlt">Backorder Report</span></b><span class="n">' + boTileSub() + '</span></span>' +
       '<span class="ct">&#x203A;</span></button>';
   }
   function boEntryHTML(kind, r) {
@@ -311,7 +311,8 @@ var GLOSS = {
       '<button id="bo-refresh" class="ct-help bo-rf" type="button" aria-label="Refresh">' + ICON.refresh + '</button></div>' +
       '<input id="bo-q" class="cc-in" type="search" autocomplete="off" placeholder="Filter by part number or description…" aria-label="Filter the report" value="' + esc(q) + '">' +
       '<div class="bo-chips" id="bo-chips" role="group" aria-label="Report sections"></div>' +
-      '</div><div id="bo-body"></div><div class="bo-src" id="bo-src">Updated automatically from the weekly Inventory Report email.</div>');
+      boSkelHead() + '</div><div id="bo-body"></div><div class="bo-src" id="bo-src">Updated automatically from the weekly Inventory Report email.</div>');
+    afterPaint(function () { // R7: a View Transition (N2 / N11c) paints a frame after render() — wire the new screen then
     NAV.extra = function () { return { bq: q, bs: sec }; }; // this entry's record keeps the live filter (the URL may lag by 300 ms)
     function subLine() {
       var d = BO.data, s = '';
@@ -347,9 +348,11 @@ var GLOSS = {
       if (sub) sub.innerHTML = esc(subLine()) + (d && d.highspot ? '<span class="bo-dot"> · </span><a class="bo-hs" href="' + esc(d.highspot) + '" target="_blank" rel="noopener">Highspot&nbsp;&#x203A;</a>' : '');
       var qiD = document.getElementById('bo-q'); if (qiD) qiD.hidden = !d; if (chips) chips.hidden = !d; // P15: nothing to filter until a report exists
       var src = document.getElementById('bo-src'); if (src) src.hidden = !d;
+      var loading = !d && (BO.busy || !BO.err); // N14: never fetched yet or fetching now → placeholders (not the retry state)
+      var skh = document.getElementById('bo-skh'); if (skh) skh.hidden = !loading;
       if (!d) {
         if (chips) chips.innerHTML = '';
-        body.innerHTML = BO.busy ? '<div class="cc-empty">Loading the report…</div>'
+        body.innerHTML = loading ? boSkelHTML()
           : BO.err === 'offline' ? emptyHTML(ICON.offline, 'Offline', 'No report is saved on this phone yet — open this once with signal and it works offline after that.', '')
           : emptyHTML(ICON.box, 'Couldn’t reach the report hub', 'Check your signal and try again.', '<button class="footlink" data-bo-retry="1">Try again &#x203A;</button>');
         return;
@@ -374,7 +377,7 @@ var GLOSS = {
       section('bo', 'On backorder', 'Nothing on backorder');
       section('ctl', 'Inventory controlled', 'No inventory-controlled products');
       section('clr', 'Recently cleared', 'Nothing cleared recently');
-      body.innerHTML = html;
+      swapIn(body, html);
     }
     BO.redraw = draw;
     draw();
@@ -399,6 +402,35 @@ var GLOSS = {
     if (bodyEl) bodyEl.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('[data-bo-retry]')) refresh(); });
     CURREFRESH = function () { return new Promise(function (res) { refresh(res); }); }; // P48: pull down to refresh (the refresh arrow spins too)
     if (!BO.data || Date.now() - BO.at > BO_STALE_MS) refresh();
+    });
+  }
+  // R7 N14 — while the first report loads: placeholders made of the real markup (filter box, chips, a section and its
+  // rows, text hidden), so nothing jumps when it arrives; the report then crossfades in once (later refreshes are instant)
+  function boSkelHead() {
+    return '<div id="bo-skh" aria-hidden="true" hidden><input class="cc-in skt" type="search" disabled tabindex="-1" aria-hidden="true">' +
+      '<div class="bo-chips"><button type="button" class="bochip skt" disabled tabindex="-1">All · 000</button><button type="button" class="bochip skt" disabled tabindex="-1">Backorder · 00</button>' +
+      '<button type="button" class="bochip skt" disabled tabindex="-1">Controlled · 00</button></div></div>';
+  }
+  function boSkelHTML() {
+    var row = '<div class="rowitem bo-row skrow" aria-hidden="true"><div class="rl"><div class="bo-top"><span class="bopill bo skt">Backorder</span><span class="bo-sku mono skt">3910500000</span></div>' +
+      '<b class="ti"><span class="skt">Product name placeholder</span></b><span class="ld bo-meta"><span class="skt">Since Sep 7 · clears about Oct 15</span></span></div></div>';
+    return '<div class="grouphead bo-gh bo sk" aria-hidden="true"><span class="skt">On backorder · 00</span></div><div class="list">' + row + row + row + row + '</div>';
+  }
+  function swapIn(el, html) { // N14: the first data fades in over its placeholder (220 ms), which fades out (120 ms) and goes
+    if (!el.querySelector('.skrow') || !el.animate || motionRM()) { el.innerHTML = html; return; }
+    var old = document.createElement('div'), nu = document.createElement('div');
+    old.className = 'sk-old'; old.setAttribute('aria-hidden', 'true');
+    while (el.firstChild) old.appendChild(el.firstChild);
+    nu.innerHTML = html; el.classList.add('sk-stack'); el.appendChild(old); el.appendChild(nu);
+    try {
+      old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+      nu.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    } catch (e) {}
+    setTimeout(function () {
+      if (old.parentNode === el) el.removeChild(old);
+      if (nu.parentNode === el) { while (nu.firstChild) el.insertBefore(nu.firstChild, nu); el.removeChild(nu); }
+      el.classList.remove('sk-stack');
+    }, 240);
   }
 
   // ---- Usage (anonymous): what gets opened, searched and scanned → the syksmtoolbox usage hub ----
@@ -751,6 +783,11 @@ var GLOSS = {
     if (ty === 'error') return ['hit an error <span class="ug-dim">' + esc(k) + (x ? ' · ' + esc(x) : '') + '</span>', ''];
     return [esc(ty) + ' ' + esc(k), ''];
   }
+  function ugSkelHTML() { // R7 N14: the live card's shape while it loads (hero number + six tiles, text hidden)
+    var t = '<div class="ug-tile skrow"><span class="skt">People</span><b class="skt">00</b></div>';
+    return '<div class="ug-hero skrow" aria-hidden="true"><b class="skt">00</b><span class="skt">people using it right now</span></div>' +
+      '<div class="ug-sub" aria-hidden="true"><span class="skt">Today so far</span></div><div class="ug-tiles" aria-hidden="true">' + t + t + t + t + t + t + '</div>';
+  }
   function usageGate(msg) {
     render('<div class="card ug-gate"><div class="ug-gt">Team usage</div>' +
       '<div class="cc-sub">Live numbers on how the team uses ToolBox. Enter the admin key once on this device — it isn’t part of the app, so nobody else can open this.</div>' +
@@ -793,7 +830,7 @@ var GLOSS = {
       var upd = document.getElementById('ug-upd');
       if (upd) upd.textContent = UGD.busyL && !L ? 'loading…' : UGD.errL && !L ? '' : UGD.liveAt ? 'updated ' + sinceText(UGD.liveAt) + (UGD.errL ? ' · hub unreachable' : '') : '';
       if (!L) {
-        body.innerHTML = UGD.busyL ? '<div class="cc-empty">Loading…</div>' :
+        body.innerHTML = UGD.busyL ? ugSkelHTML() :
           emptyHTML(ICON.offline, UGD.errL === 'offline' ? 'Offline' : 'Couldn’t reach the usage hub', 'Check your signal and tap Refresh.', '');
         feed.innerHTML = ''; return;
       }
@@ -804,14 +841,14 @@ var GLOSS = {
         hrs.push(v); lbl.push(h % 6 === 0 ? ugHourLbl(h) : '');
         tips.push(ugHourLong(h) + ' · ' + (v == null ? 'still ahead' : v + (v === 1 ? ' person' : ' people')));
       }
-      body.innerHTML =
+      swapIn(body,
         '<div class="ug-hero"><b>' + L.now.n5 + '</b><span>' + (L.now.n5 === 1 ? 'person' : 'people') + ' using it right now' +
           (L.now.n15 > L.now.n5 ? '<br><em>' + L.now.n15 + ' in the last 15 minutes</em>' : '') + '</span></div>' +
         '<div class="ug-sub">Today so far</div>' +
         ugTiles([['People', L.today.devices], ['Sessions', L.today.sessions], ['Cards opened', L.today.cards], ['Searches', L.today.searches], ['Scans', L.today.scans], ['App opens', L.today.opens]]) +
         (L.today.zero ? '<div class="ug-note">' + L.today.zero + ' search' + (L.today.zero === 1 ? '' : 'es') + ' today found nothing — see the list below.</div>' : '') +
         '<div class="ug-sub">People by hour, today (Eastern)</div>' + ugColumns(hrs, lbl, tips, { hi: L.hourNow }) +
-        ugTable(['Hour', 'People'], hrs.map(function (v, i) { return [ugHourLong(i), v == null ? '—' : v]; }).slice(0, L.hourNow + 1));
+        ugTable(['Hour', 'People'], hrs.map(function (v, i) { return [ugHourLong(i), v == null ? '—' : v]; }).slice(0, L.hourNow + 1)));
       var R = L.recent || [];
       var FEED = UGD.more.feed ? 40 : 12;
       feed.innerHTML = R.length ? '<div class="ug-rows">' + R.slice(0, FEED).map(function (r) {
@@ -1127,7 +1164,16 @@ var GLOSS = {
   }
 
   // ---- copy ----
-  function copy(text) { copyToClip(text).then(function () { toastMsg('Copied', 1200); }); } // P18: through the toast queue
+  function copy(text, btn) { // P18: through the toast queue; R7 N12: the card's Copy icon turns into a check mark for 1.2 s instead
+    copyToClip(text).then(function () {
+      if (btn && btn.classList && btn.classList.contains('cd-copy')) {
+        btn.classList.add('done'); btn.setAttribute('aria-label', 'Copied');
+        clearTimeout(btn.__done); btn.__done = setTimeout(function () { btn.classList.remove('done'); btn.setAttribute('aria-label', 'Copy part number'); }, 1200);
+        return;
+      }
+      toastMsg('Copied', 1200);
+    });
+  }
 
   document.addEventListener('click', function (e) {
     var gp = document.getElementById('glosspanel');
@@ -1162,7 +1208,7 @@ var GLOSS = {
       if (CURVIEW) CURVIEW();
       return;
     }
-    var b = e.target.closest('[data-copy]'); if (b) { copy(b.getAttribute('data-copy')); return; }
+    var b = e.target.closest('[data-copy]'); if (b) { copy(b.getAttribute('data-copy'), b); return; }
     var uf = e.target.closest('[data-unfav-route]');
     if (uf) {
       var rt = uf.getAttribute('data-unfav-route');
@@ -1209,7 +1255,12 @@ var GLOSS = {
     if (fv) {
       var f = JSON.parse(fv.getAttribute('data-fav'));
       toggleFav(f);
-      if (fv.classList.contains('cd-ico')) { var favNow = isFav(f.route); fv.classList.toggle('on', favNow); fv.setAttribute('aria-pressed', String(favNow)); toastMsg(favNow ? 'Added to Favorites' : 'Removed from Favorites', 1600); return; }
+      if (fv.classList.contains('cd-ico')) {
+        var favNow = isFav(f.route); fv.classList.toggle('on', favNow); fv.setAttribute('aria-pressed', String(favNow));
+        fv.classList.remove('pop', 'unpop'); void fv.offsetWidth; fv.classList.add(favNow ? 'pop' : 'unpop'); // N12: pop + burst / shrink
+        clearTimeout(fv.__pop); fv.__pop = setTimeout(function () { fv.classList.remove('pop', 'unpop'); }, 460);
+        toastMsg(favNow ? 'Added to Favorites' : 'Removed from Favorites', 1600); return;
+      }
       fv.classList.toggle('on', isFav(f.route));
       fv.innerHTML = isFav(f.route) ? ICON.starOn + 'Favorited' : ICON.star + 'Favorite';
       return;
@@ -1222,6 +1273,7 @@ var GLOSS = {
       // variant chips ('chip link') swap the card in place, so Back exits to the list, not the prior variant
       var ti = nav.classList.contains('rowitem') && /^#\/pn\//.test(go) ? nav.querySelector('.ti') : null;
       VT_FROM = ti || null;
+      VT_CAT = (!ti && !CURQ && nav.classList.contains('tile') && CATGO[go]) ? nav : null;
       if (nav.classList.contains('link')) { history.replaceState(null, '', go); route(); }
       else location.hash = go;
     }
@@ -1822,36 +1874,170 @@ var GLOSS = {
     } catch (eS) {}
   }
 
-  var VT_FROM = null;
-  function vtOK() {
-    return !!document.startViewTransition && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  // ---- R7 screen changes: N2 (a Home tile becomes its page, Back reverses), N11 (a card opens from its row with its
+  // photo and returns to your place), N11a (the old snapshot is taken where you tapped: scroll happens after it) ----
+  // A View Transition morphs a few named pieces; everything else swaps at once (::view-transition-*(root) in index.html).
+  // Names go on old elements before the call and on new ones inside the update callback, and are cleared when it
+  // finishes. Without the API (iOS < 18) or with Reduce Motion the screen swaps with today's #content.vt fade (the landing
+  // page still gets its header icon). The callback runs a frame after render(): a screen whose code touches its own new
+  // DOM after render() puts that code in afterPaint(). Only catalog rows and Home tiles set a pending transition, so
+  // cycle count / F&A never take these paths.
+  var VT_FROM = null, VT_CAT = null, VT_BACK = null, SCROLL_TOP = false, CAT_ON = null, CAT_LAST = null, RENDER_GEN = 0, PAINT_Q = null;
+  var CATGO = { '#/top/arthroscopy': 'arth', '#/cat/Allografts%20%26%20Biologics': 'allo', '#/cat/Disposables': 'disp', '#/top/implants': 'impl',
+    '#/cat/Instruments': 'inst', '#/cat/Capital': 'cap', '#/cat/Suture': 'sut', '#/bo': 'bo' };
+  function motionRM() { // M0: one Reduce Motion check (TBX_RM in index.html), with its own fallback
+    try { return window.TBX_RM ? !!window.TBX_RM() : !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
   }
-  function render(browseHTML) {
+  function vtOK() { return !!document.startViewTransition && !motionRM(); }
+  function afterPaint(fn) { if (PAINT_Q) PAINT_Q.push(fn); else fn(); }
+  function catHead() { // N2: a Home tile's landing page carries the tile's icon in its header
+    if (CURQ || !title) return null;
+    var k = CATGO[(location.hash || '#/').split('?')[0]];
+    if (!k) return null;
+    if (!title.querySelector('.hico')) title.innerHTML = '<span class="hico k-' + k + '" aria-hidden="true">' + catSvg(k) + '</span><span class="tt">' + title.innerHTML + '</span>';
+    CAT_LAST = { k: k, html: title.innerHTML };
+    return k;
+  }
+  function vtView(el) { // fully on screen between the header and the bottom bar
+    if (!el || !el.getClientRects().length) return false;
+    var r = el.getBoundingClientRect(), bb = document.getElementById('bottombar'), bot = window.innerHeight;
+    if (bb && bb.offsetHeight) bot = Math.min(bot, bb.getBoundingClientRect().top);
+    return r.top >= navHdr() - 1 && r.bottom <= bot + 1;
+  }
+  function vtSeen(el) { // at least partly on screen below the header
+    if (!el || !el.getClientRects().length) return false;
+    var r = el.getBoundingClientRect(); return r.bottom > navHdr() + 8 && r.top < window.innerHeight - 8;
+  }
+  function vtGhost(row, bg) { // N11: a square at the row's end — the photo lifts off it (open) or shrinks back into it (Back)
+    var r = row.getBoundingClientRect(), g = document.createElement('i'), z = Math.round(r.height);
+    g.className = 'vt-ghost'; g.setAttribute('aria-hidden', 'true');
+    g.style.cssText = 'left:' + Math.round(r.right - z) + 'px;top:' + Math.round(r.top) + 'px;width:' + z + 'px;height:' + z + 'px' + (bg ? ';background:' + bg : '');
+    document.body.appendChild(g); return g;
+  }
+  function navRing(row) { // N11c: the row you came back to is marked for a moment (static for 1 s with Reduce Motion)
+    if (!row) return;
+    row.classList.remove('nav-ring'); void row.offsetWidth; row.classList.add('nav-ring');
+    clearTimeout(row.__ring); row.__ring = setTimeout(function () { row.classList.remove('nav-ring'); }, 1000);
+  }
+  function backRow(sku) { // the row of the card you came back from, if it is on screen
+    var go = pnRoute(sku), rows = content.querySelectorAll('.rowitem[data-go]');
+    for (var i = 0; i < rows.length; i++) if (rows[i].getAttribute('data-go') === go && vtView(rows[i])) return rows[i];
+    return null;
+  }
+  // One transition: before(name, temp) names the old pieces (temp() = an element that exists only in the old snapshot);
+  // the callback paints, runs the screen's afterPaint work, then after(name, t) names the new pieces (it may return a
+  // promise, e.g. a photo decode, or skip the morph). Returns false when no transition started (the caller paints).
+  function vtRun(mode, gen, paint, before, after) {
+    var root = document.documentElement, named = [], temps = [], q = PAINT_Q = [];
+    function name(el, n) { if (el) { el.style.viewTransitionName = n; named.push(el); } return el; }
+    function temp(el) { temps.push(el); return el; }
+    function drop() { temps.forEach(function (el) { if (el.parentNode) el.parentNode.removeChild(el); }); temps = []; }
+    function clear() { drop(); named.forEach(function (el) { el.style.viewTransitionName = ''; }); named = []; if (root.getAttribute('data-vt') === mode) root.removeAttribute('data-vt'); }
+    function flush() { var f = q; q = []; if (PAINT_Q === f) PAINT_Q = null; f.forEach(function (fn) { try { fn(); } catch (e) { setTimeout(function () { throw e; }, 0); } }); }
+    try {
+      before(name, temp);
+      root.setAttribute('data-vt', mode);
+      content.classList.remove('vt', 'vt-rise', 'vt-fade');
+      var t = document.startViewTransition(function () {
+        drop();
+        if (gen !== RENDER_GEN) { q = []; if (PAINT_Q === q) PAINT_Q = null; return; } // a newer screen took over: this one never paints
+        try { paint(true); } catch (eP) { setTimeout(function () { throw eP; }, 0); }
+        flush();
+        try { return after(name, t); } catch (eA) { return; }
+      });
+      t.finished.then(clear, clear);
+      return true;
+    } catch (e) {
+      clear(); if (PAINT_Q === q) PAINT_Q = null;
+      return false;
+    }
+  }
+  function render(browseHTML, opt) {
     LAST_BROWSE = browseHTML;
-    var paint = function () {
+    var gen = ++RENDER_GEN, isHome = !!(opt && opt.home);
+    PAINT_Q = null;
+    var paint = function (sync) {
       content.classList.remove('homeview');
       if (CURQ) { if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML; title.innerHTML = 'Search'; }
+      CAT_ON = catHead();
       content.innerHTML = CURQ ? resultsHTML() : browseHTML;
-      // P35: Back / Forward land where the entry was left — once this frame is painted, then following late content
-      if (NAV.pending) { var pr = NAV.pending; NAV.pending = null; (window.requestAnimationFrame || setTimeout)(function () { try { navRestore(pr); } catch (eNr) {} }); }
+      if (isHome) content.classList.add('homeview');
+      if (SCROLL_TOP) { SCROLL_TOP = false; window.scrollTo(0, 0); } // N11a: scroll after the old snapshot, never before it
+      // P35: Back / Forward land where the entry was left — once this frame is painted, then following late content.
+      // Inside a View Transition at once, so its new snapshot already shows the restored place (N11c, N2 back).
+      if (NAV.pending) { var pr = NAV.pending; NAV.pending = null; if (sync) { try { navRestore(pr); } catch (eNs) {} } else (window.requestAnimationFrame || setTimeout)(function () { try { navRestore(pr); } catch (eNr) {} }); }
     };
-    var from = VT_FROM; VT_FROM = null;
-    if (from && from.isConnected && vtOK()) {
-      // Row -> card: the tapped title and the new h1 share a transition name for the morph.
-      from.style.viewTransitionName = 'tbx-title';
-      content.classList.remove('vt'); // no fade-in on top of the morph (re-adding it later replays it = flash)
-      var t = document.startViewTransition(function () {
-        paint();
-        var h = content.querySelector('.card h1'); if (h) h.style.viewTransitionName = 'tbx-title';
-      });
-      t.finished.then(function () {
-        var h2 = content.querySelector('.card h1'); if (h2) h2.style.viewTransitionName = '';
-      }, function () {});
-      return;
+    var from = VT_FROM, cat = VT_CAT, back = VT_BACK, wasCat = CAT_ON, catWas = CAT_LAST;
+    VT_FROM = null; VT_CAT = null; VT_BACK = null;
+    if (vtOK()) {
+      // N2: the tile's icon and name move into the header, the page rises in underneath
+      if (cat && cat.isConnected && !CURQ && CATGO[(location.hash || '').split('?')[0]] && vtRun('cat', gen, paint, function (name) {
+        name(cat.querySelector('.tico'), 'tbx-cat-ico'); name(cat.querySelector('.tlt'), 'tbx-cat-title');
+      }, function (name) {
+        name(title.querySelector('.hico'), 'tbx-cat-ico'); name(title.querySelector('.tt'), 'tbx-cat-title');
+        content.classList.add('vt-rise'); setTimeout(function () { content.classList.remove('vt-rise'); }, 400);
+      })) return;
+      // N11b: row -> card — the title morphs into the heading, the row's end lifts off as the photo, the card fills in
+      if (from && from.isConnected) {
+        var row = from.closest ? from.closest('.rowitem') : null, hero = !CURQ && !!row && browseHTML.indexOf('class="pc-hero"') > -1;
+        if (vtRun('card', gen, paint, function (name, temp) {
+          name(from, 'tbx-title');
+          if (hero) name(temp(vtGhost(row, 'var(--panel)')), 'tbx-hero');
+        }, function (name) {
+          name(content.querySelector('.card h1'), 'tbx-title');
+          var pc = content.querySelector('#pcard');
+          if (pc) { pc.classList.add('vt-in'); setTimeout(function () { pc.classList.remove('vt-in'); }, 420); }
+          var hb = hero ? content.querySelector('.pc-hero') : null, im = hb && hb.querySelector('img');
+          if (!hb) return;
+          name(hb, 'tbx-hero');
+          // the photo is usually decoded already (pointerdown on the row started it); never wait more than 120 ms
+          if (im && im.decode) return Promise.race([im.decode().then(null, function () {}), new Promise(function (r) { setTimeout(r, 120); })]);
+        })) return;
+      }
+      // N2 back: Home after a landing page — the header icon and name fly back into their tile (if it is on screen)
+      if (isHome && wasCat && catWas && !CURQ) {
+        var homeTitle = title.innerHTML;
+        if (vtRun('home', gen, function (sync) { title.innerHTML = homeTitle; paint(sync); }, function (name) {
+          title.innerHTML = catWas.html;
+          name(title.querySelector('.hico'), 'tbx-cat-ico'); name(title.querySelector('.tt'), 'tbx-cat-title');
+        }, function (name, t) {
+          var tile = null, tl = content.querySelectorAll('.tile[data-go]');
+          for (var i = 0; i < tl.length; i++) if (CATGO[tl[i].getAttribute('data-go')] === catWas.k) tile = tl[i];
+          if (!tile || !vtView(tile)) { try { t.skipTransition(); } catch (eS) {} return; }
+          name(tile.querySelector('.tico'), 'tbx-cat-ico'); name(tile.querySelector('.tlt'), 'tbx-cat-title');
+          content.classList.add('vt-fade'); setTimeout(function () { content.classList.remove('vt-fade'); }, 300);
+        })) return;
+        title.innerHTML = homeTitle;
+      }
+      // N11c: Back from a card to its list — the list is restored first, then the title (and photo) fly back to its row
+      if (back && vtSeen(back.h1) && (CURQ || browseHTML.indexOf('data-go="' + pnRoute(back.sku) + '"') > -1)) {
+        var hOld = back.hero && vtSeen(back.hero) ? back.hero : null;
+        if (vtRun('back', gen, paint, function (name) {
+          name(back.h1, 'tbx-title'); if (hOld) name(hOld, 'tbx-hero');
+        }, function (name, t) {
+          var r0 = backRow(back.sku), g = null;
+          if (!r0) { try { t.skipTransition(); } catch (eS) {} return; }
+          name(r0.querySelector('.ti'), 'tbx-title');
+          if (hOld) g = name(vtGhost(r0, ''), 'tbx-hero');
+          var fin = function () { if (g && g.parentNode) g.parentNode.removeChild(g); navRing(r0); };
+          t.finished.then(fin, fin);
+        })) return;
+      }
     }
-    paint();
-    content.classList.remove('vt'); void content.offsetWidth; content.classList.add('vt');
+    paint(false);
+    content.classList.remove('vt', 'vt-rise', 'vt-fade'); void content.offsetWidth; content.classList.add('vt');
+    if (back) (window.requestAnimationFrame || setTimeout)(function () { try { navRing(backRow(back.sku)); } catch (eB) {} }); // after the restore
   }
+  // N11b: the card photo starts decoding while the finger is still on the row
+  document.addEventListener('pointerdown', function (e) {
+    try {
+      var r = e.target && e.target.closest ? e.target.closest('.rowitem[data-go^="#/pn/"]') : null;
+      if (!r || !vtOK()) return;
+      var en = BYPN[nrm(decodeURIComponent(r.getAttribute('data-go').slice(5)))], rec = en ? recOf(en) : null, src = rec && rec.imgs && rec.imgs[0];
+      if (!src) return;
+      var im = new Image(); im.src = src; if (im.decode) im.decode().then(null, function () {});
+    } catch (x) {}
+  }, { passive: true, capture: true });
   function mark(s) {
     var e = esc(s);
     GKEYS.forEach(function (k) {
@@ -2052,6 +2238,14 @@ var GLOSS = {
   }
   // P32 — swipeable photo strip below the spec table ("1/4" counter); tap opens the viewer on that photo.
   function isSmallPhoto(o, im) { return !o.imgFull && (im.indexOf('img/serfas-') === 0 || im.indexOf('img/shaver-') === 0); }
+  // R7 N14 — a lone photo sits in a slide as tall as the photo: its box comes from img-dims.js (built by tools/img-dims.mjs)
+  // so the text below never moves when it arrives. The width reproduces today's max-width / max-height result exactly.
+  function photoBox(src, sm) {
+    var d = window.TBX_IMGD && window.TBX_IMGD[src];
+    if (!d || !(d[0] > 0 && d[1] > 0)) return '';
+    var w = d[0], h = d[1];
+    return ' width="' + w + '" height="' + h + '" style="width:' + (sm ? Math.round(Math.min(110, w, 150 * w / h)) + 'px' : 'min(100%, ' + w + 'px, ' + Math.round(418 * w / h) + 'px)') + '"';
+  }
   function photosHTML(o) {
     var imgs = o.imgs || [], n = imgs.length; if (!n) return '';
     return '<section class="cd-photos" id="cd-photos" tabindex="-1" aria-label="Photos"><div class="pgal" data-n="' + n + '">' +
@@ -2060,7 +2254,7 @@ var GLOSS = {
         var sm = isSmallPhoto(o, im);
         return '<button type="button" class="pgal-s' + (sm ? ' sm' : '') + '" data-i="' + i + '" data-src="' + esc(im) + '" aria-label="' +
           (n > 1 ? 'Photo ' + (i + 1) + ' of ' + n : 'Photo') + ', open full screen">' +
-          photoImgHTML(im, 'Product reference photo', 'class="photo' + (sm ? ' photo-sm' : '') + '" loading="lazy" decoding="async"') +
+          photoImgHTML(im, 'Product reference photo', 'class="photo' + (sm ? ' photo-sm' : '') + '" loading="lazy" decoding="async"' + (n === 1 ? photoBox(im, sm) : '')) +
           '<span class="pgal-z" aria-hidden="true">' + CI.zoom + '</span></button>';
       }).join('') + '</div>' + (n > 1 ? '<span class="pgal-n" aria-hidden="true">1/' + n + '</span>' : '') + '</div></section>';
   }
@@ -2149,7 +2343,7 @@ var GLOSS = {
       return specCardV1(o);
     }
   }
-  function cardRM() { return !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  function cardRM() { return motionRM(); }
   // N13 — collapsible blocks (status details, "N more"): grid-template-rows 0fr → 1fr, which animates in iOS Safari 16+
   // (older versions just open); the tapped control stays under the finger (Safari has no CSS scroll anchoring).
   function keepInView(anchor, change) {
@@ -2359,15 +2553,26 @@ var GLOSS = {
     var fams = ['CrossFire 2 resection platform', 'CrossFlow arthroscopy pump', 'FloSteady arthroscopy pump', 'Shaver handpieces'];
     return D.items.filter(function (i) { return !i.hidden && i.cat === 'Capital' && fams.indexOf(i.fam) !== -1; });
   }
-  var TILE_ICONS = {
-    'Arthroscopy': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l6-6"/><path d="M8 13l3 3 9-9-3-3-9 9z"/><path d="M14 4l6 6"/><circle cx="18.5" cy="5.5" r="1" fill="#FDB515" stroke="none"/></svg>',
-    'Allografts & Biologics': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c0-5 1.5-8 4.5-10.5"/><path d="M20 4.5c0 5.2-3.2 8.5-8 8.5 0-5.2 3.2-8.5 8-8.5z"/><path d="M4.5 8c3.4 0 5.5 2.3 5.5 6-3.4 0-5.5-2.3-5.5-6z"/></svg>',
-    'Disposables': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h12a1.5 1.5 0 0 1 1.5 1.5v15a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20V5A1.5 1.5 0 0 1 6 3.5z"/><path d="M4.5 8h15" stroke-dasharray="2 1.6"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>',
-    'Implants': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3h5"/><path d="M12 3v2.5"/><path d="M9 5.5h6v10l-3 5.5-3-5.5v-10z"/><path d="M9 8.5h6M9 11.5h6M9 14.5h6"/></svg>',
-    'Instruments': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.7 6.3a5 5 0 0 1-6.6 6.6L7 20a2.1 2.1 0 0 1-3-3l7.1-7.1a5 5 0 0 1 6.6-6.6L14.5 6.5l3 3 3.2-3.2z"/></svg>',
-    'Suture': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3.5" width="9" height="12" rx="1.5"/><path d="M7.5 7h9M7.5 10h9M7.5 13h9"/><path d="M12 15.5c0 3 6.5 2 6.5 5.5"/></svg>',
-    'Capital': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="9" rx="1.5"/><path d="M8 14v3.5M16 14v3.5"/><circle cx="8" cy="19.5" r="1.3"/><circle cx="16" cy="19.5" r="1.3"/><path d="M9 8.5h6"/></svg>'
+  // R7 N10 — one line style (24 grid, 1.8 stroke, round caps and joins, currentColor, a 22% duotone mass) and a product
+  // silhouette per category; the accent is the chip's class (.tico.k-<key> in index.html) and counts stay amber. The same
+  // glyphs head each landing page (N2). Backorder keeps its blue tile, Inventory its amber one.
+  var CATSVG = {
+    allo: '<g transform="rotate(-45 12 12) translate(0 -1.2) scale(.92) translate(1.04 1.04)"><path class="f" d="M8.02 10.9H15.98A2.3 2.3 0 1 1 18.67 12A2.3 2.3 0 1 1 15.98 13.1H8.02A2.3 2.3 0 1 1 5.33 12A2.3 2.3 0 1 1 8.02 10.9Z"/><path d="M8.02 10.9H15.98A2.3 2.3 0 1 1 18.67 12A2.3 2.3 0 1 1 15.98 13.1H8.02A2.3 2.3 0 1 1 5.33 12A2.3 2.3 0 1 1 8.02 10.9Z"/></g><path class="f" d="M17.6 13.6c1.5 1.8 2.4 3.1 2.4 4.3a2.4 2.4 0 0 1-4.8 0c0-1.2.9-2.5 2.4-4.3z"/><path d="M17.6 13.6c1.5 1.8 2.4 3.1 2.4 4.3a2.4 2.4 0 0 1-4.8 0c0-1.2.9-2.5 2.4-4.3z"/>',
+    arth: '<path d="M3.4 3.4l8.3 8.3"/><path d="M9.2 9.2l2.6-2.6"/><circle cx="12.6" cy="5.8" r="1.25" fill="currentColor" stroke="none"/><g transform="rotate(45 16 16)"><rect x="10.8" y="14.9" width="1.8" height="2.2" rx=".4"/><rect class="f" x="12.6" y="13.2" width="7.4" height="5.6" rx="1.8"/><rect x="12.6" y="13.2" width="7.4" height="5.6" rx="1.8"/></g><path d="M19.2 19.2c.9 1 1.2 2 .9 2.9"/>',
+    cap: '<rect class="f" x="3.5" y="4" width="17" height="11" rx="2"/><rect x="3.5" y="4" width="17" height="11" rx="2"/><rect x="6" y="6.6" width="7.6" height="5.8" rx="1"/><path d="M16.6 7.4v.01M16.6 11.2v.01" stroke-width="2.4"/><path d="M8 15v3.6M16 15v3.6M5.5 18.6h13"/><circle cx="6.8" cy="20.8" r="1.25" fill="currentColor" stroke="none"/><circle cx="17.2" cy="20.8" r="1.25" fill="currentColor" stroke="none"/>',
+    disp: '<circle class="f" cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="8.3"/><path d="M9.7 9.6a2.4 2.4 0 0 1 4.6 1c0 .9-.5 1.5-1.3 2.2l-3.3 2.9h4.8"/><path d="M6.2 6.2l11.6 11.6"/>',
+    impl: '<path d="M9.3 10h5.4v5.6L12 21l-2.7-5.4z"/><path d="M9.3 12.4h5.4M9.3 14.8h5.4M10.1 17.2h3.8"/><path class="f" d="M10.4 10C9.1 6.4 9.9 3.2 12 3.2s2.9 3.2 1.6 6.8z"/><path d="M10.4 10C9.1 6.4 9.9 3.2 12 3.2s2.9 3.2 1.6 6.8"/>',
+    inst: '<circle cx="5.2" cy="16.2" r="2.1"/><circle cx="7.8" cy="18.8" r="2.1"/><path d="M6.7 14.7l5.1-2.9M9.3 17.3l2.9-5.1"/><path class="f" d="M11.2 11.2l9.1-7.5-7.5 9.1z"/><path d="M11.2 11.2l9.1-7.5-7.5 9.1z"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',
+    sut: '<path fill="currentColor" stroke="currentColor" stroke-width=".5" stroke-linejoin="round" d="M3.4 12.6A8.4 8.4 0 0 1 20 10.6L17.4 11.9A5.9 5.9 0 0 0 3.4 12.6Z"/><path d="M18.9 11.6c1.5 2.3 1.4 5-.6 6.5-2 1.5-4.8.8-5.5-1.1-.6-1.8 1-3.2 2.7-2.5 2 .8 1.6 4.2-.4 5.8-1.5 1.1-3.4 1.4-5.4 1.2"/>',
+    bo: '<path class="f" d="M3.5 8.2L10.5 5l7 3.2v7.1l-7 3.3-7-3.3z"/><path d="M13 17.5l-2.5 1.1-7-3.3V8.2L10.5 5l7 3.2v3.6"/><path d="M3.5 8.2l7 3.2 7-3.2M10.5 11.4v7.2"/><circle class="cb" cx="17.4" cy="17.4" r="4.3"/><circle cx="17.4" cy="17.4" r="3.5"/><path d="M17.4 15.6v1.9l1.3.9"/>',
+    inv: '<rect class="f" x="5" y="4.6" width="14" height="16.4" rx="2"/><rect x="5" y="4.6" width="14" height="16.4" rx="2"/><path d="M9 4.6V3.6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M8.1 10.4l1.4 1.4 2.6-2.6M13.9 10.6h2.2M8.1 15.6l1.4 1.4 2.6-2.6M13.9 15.8h2.2"/>'
   };
+  function catSvg(k) {
+    return CATSVG[k] ? '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + CATSVG[k] + '</svg>' : '';
+  }
+  var CATKEY = { 'Arthroscopy': 'arth', 'Allografts & Biologics': 'allo', 'Disposables': 'disp', 'Implants': 'impl', 'Instruments': 'inst', 'Suture': 'sut', 'Capital': 'cap' };
+  var TILE_ICONS = {};
+  Object.keys(CATKEY).forEach(function (l) { TILE_ICONS[l] = catSvg(CATKEY[l]); });
   var WN_SHOWN = false;
   function wnSeen() { try { localStorage.setItem('tbx_wn_seen', String((window.TBX_WN || {}).v || 1)); } catch (e) {} }
   function hideWN(markSeen) {
@@ -2948,13 +3153,13 @@ var GLOSS = {
     tileDefs.sort(function (a, b) { return a.label.localeCompare(b.label); });
     var tiles = tileDefs.map(function (t) {
       return '<button class="tile" data-go="' + t.go + '">' +
-        '<span class="tico">' + (TILE_ICONS[t.label] || '') + '</span>' +
-        '<span class="tl"><b>' + esc(t.label) + '</b><span class="n">' + plural(t.n, 'item') + '</span></span>' +
+        '<span class="tico k-' + (CATKEY[t.label] || '') + '">' + (TILE_ICONS[t.label] || '') + '</span>' +
+        '<span class="tl"><b><span class="tlt">' + esc(t.label) + '</span></b><span class="n">' + plural(t.n, 'item') + '</span></span>' +
         '<span class="ct">&#x203A;</span></button>';
     }).join('');
     tiles += boTileHTML();
     tiles += '<button class="tile tile-inv" data-act="otherteams">' +
-      '<span class="tico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#141414" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span>' +
+      '<span class="tico">' + catSvg('inv') + '</span>' +
       '<span class="tl"><b>Inventory Management</b><span class="n">Territory Cycle Counts</span></span>' +
       '<span class="ct">&#x203A;</span></button>';
     var fv = favs(), fsort = 'recent';
@@ -2979,10 +3184,8 @@ var GLOSS = {
       '<br><button class="footlink" data-go="#/about">About &amp; tips &#x203A;</button>' +
       '<span class="footsep">&middot;</span>' +
       '<button class="footlink" data-act="checkupd">Check for updates</button>' +
-      (ugOn() && ugAdmin() ? '<span class="footsep">&middot;</span><button class="footlink" data-go="#/usage">Usage</button>' : '') + '</div>');
-    content.classList.add('homeview');
-    homeBtn.classList.remove('away');
-    showWN();
+      (ugOn() && ugAdmin() ? '<span class="footsep">&middot;</span><button class="footlink" data-go="#/usage">Usage</button>' : '') + '</div>', { home: true });
+    afterPaint(function () { homeBtn.classList.remove('away'); showWN(); });
   }
   function topScreen(which) {
     backBtn.hidden = false;
@@ -3280,17 +3483,166 @@ var GLOSS = {
     noteRecent(D.shavers[e.idx].sku, D.shavers[e.idx].name);
     return shaverCard(D.shavers[e.idx]);
   }
+  // ---- R7 N3: a logo with a little life. Four variations on compositor layers (never SVG internals), shuffled per launch
+  // and taken in turn per tap; taps during one are ignored. Reduce Motion: a soft glow (opacity only). The layer markup
+  // matches #brand / #lkbadge in index.html (the part shapes are the #lg-* symbols there). ----
+  var LOGO = (function () {
+    var L = ['tile', 'shadow', 'wrench', 'lid', 'body', 'latch', 'halo', 'core', 'glint', 'spark'], ORDER = ['wrench', 'latch', 'peek', 'glint'], vi = 0;
+    for (var i = ORDER.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t0 = ORDER[i]; ORDER[i] = ORDER[j]; ORDER[j] = t0; }
+    var EO = 'cubic-bezier(.2,.8,.2,1)';
+    function html(cls) {
+      return '<div class="lg' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><div class="lg-in">' + L.map(function (k) {
+        return k === 'tile' ? '<i class="L l-tile"></i>' : k === 'glint' ? '<i class="L l-glint"><b></b></i>' : '<i class="L l-' + k + '"><svg viewBox="0 0 512 512"><use href="#lg-' + k + '"/></svg></i>';
+      }).join('') + '</div></div>';
+    }
+    function parts(lg) {
+      function q(s) { return lg.querySelector(s); }
+      return { inn: q('.lg-in'), wrench: q('.l-wrench'), lid: q('.l-lid'), latch: q('.l-latch'), halo: q('.l-halo'), core: q('.l-core'), glintL: q('.l-glint'), glint: q('.l-glint b'), spark: q('.l-spark') };
+    }
+    function A(el, kf, o) { try { if (!el || !el.animate) return null; if (!o.fill) o.fill = 'none'; return el.animate(kf, o); } catch (e) { return null; } }
+    var VAR = {
+      wrench: function (p) { // the lid peeks, a wrench rises out of the box, turns once and drops back
+        A(p.lid, [{ transform: 'none' }, { transform: 'rotate(-10deg)', offset: .18 }, { transform: 'rotate(-10deg)', offset: .74 }, { transform: 'rotate(1.5deg)', offset: .88 }, { transform: 'none' }], { duration: 700, easing: 'ease-in-out' });
+        A(p.core, [{ opacity: 0 }, { opacity: .85, offset: .18 }, { opacity: .85, offset: .74 }, { opacity: 0, offset: .86 }, { opacity: 0 }], { duration: 700 });
+        A(p.wrench, [{ opacity: 1, transform: 'none', easing: 'cubic-bezier(.2,.7,.3,1)' }, { opacity: 1, transform: 'translateY(-46%) rotate(150deg) scale(1.3)', offset: .36, easing: 'linear' },
+          { opacity: 1, transform: 'translateY(-46%) rotate(330deg) scale(1.3)', offset: .56, easing: 'cubic-bezier(.5,0,.7,.4)' }, { opacity: 1, transform: 'translateY(-2%) rotate(360deg)', offset: .84 }, { opacity: 0, transform: 'rotate(360deg)' }], { duration: 700 });
+        return 700;
+      },
+      latch: function (p) { // the latch clicks: it pops, the lid dips, the box squashes, a spark
+        A(p.latch, [{ opacity: 1, transform: 'scale(.6,.15)' }, { opacity: 1, transform: 'scale(1.5)', offset: .28 }, { opacity: 1, transform: 'scale(1.15)', offset: .42 }, { opacity: 1, transform: 'scale(1.15)', offset: .74 }, { opacity: 0, transform: 'none' }], { duration: 560, easing: 'ease-out' });
+        A(p.lid, [{ transform: 'none' }, { transform: 'translateY(1.4%)', offset: .3 }, { transform: 'none', offset: .52 }, { transform: 'none' }], { duration: 560 });
+        A(p.inn, [{ transform: 'none' }, { transform: 'scale(1.045,.95)', offset: .3 }, { transform: 'scale(.99,1.01)', offset: .5 }, { transform: 'none', offset: .66 }, { transform: 'none' }], { duration: 560 });
+        A(p.spark, [{ opacity: 0, transform: 'scale(0)' }, { opacity: 0, transform: 'scale(0)', offset: .3 }, { opacity: 1, transform: 'scale(1.8) rotate(45deg)', offset: .44 }, { opacity: 0, transform: 'scale(.5) rotate(90deg)', offset: .72 }, { opacity: 0, transform: 'scale(0)' }], { duration: 560 });
+        return 560;
+      },
+      peek: function (p) { // the lid lifts on its hinge with the seam aglow, then closes with a small overshoot
+        A(p.lid, [{ transform: 'none', easing: EO }, { transform: 'rotate(-14deg)', offset: .3 }, { transform: 'rotate(-14deg)', offset: .62, easing: 'ease-in' }, { transform: 'rotate(2deg)', offset: .8 }, { transform: 'none' }], { duration: 660 });
+        A(p.core, [{ opacity: 0 }, { opacity: 1, offset: .28 }, { opacity: 1, offset: .62 }, { opacity: 0, offset: .8 }, { opacity: 0 }], { duration: 660 });
+        A(p.halo, [{ opacity: 0 }, { opacity: .85, offset: .3 }, { opacity: .85, offset: .62 }, { opacity: 0, offset: .8 }, { opacity: 0 }], { duration: 660 });
+        return 660;
+      },
+      glint: function (p) { // an amber glint sweeps the box as it swells a little
+        A(p.glintL, [{ opacity: 0 }, { opacity: 1, offset: .08 }, { opacity: 1, offset: .86 }, { opacity: 0 }], { duration: 600 });
+        A(p.glint, [{ transform: 'translateX(-130%) skewX(-18deg)' }, { transform: 'translateX(520%) skewX(-18deg)' }], { duration: 600, easing: 'cubic-bezier(.45,0,.55,1)' });
+        A(p.inn, [{ transform: 'none' }, { transform: 'scale(1.035)', offset: .45 }, { transform: 'none' }], { duration: 600, easing: 'ease-in-out' });
+        return 600;
+      },
+      rm: function (p) { // Reduce Motion: light only
+        A(p.halo, [{ opacity: 0 }, { opacity: .8, offset: .3 }, { opacity: 0 }], { duration: 380 });
+        A(p.core, [{ opacity: 0 }, { opacity: .9, offset: .3 }, { opacity: 0 }], { duration: 380 });
+        return 380;
+      }
+    };
+    function play(lg, name) { // returns the variation played ('' if busy or failed)
+      try {
+        if (!lg || lg.__busy) return '';
+        var v = motionRM() ? 'rm' : VAR[name] ? name : ORDER[vi++ % ORDER.length];
+        lg.__busy = true;
+        var ms = VAR[v](parts(lg));
+        setTimeout(function () { lg.__busy = false; }, ms + 20);
+        return v;
+      } catch (e) { if (lg) lg.__busy = false; return ''; }
+    }
+    return { html: html, play: play, parts: parts, A: A, order: ORDER };
+  })();
+  window.TBX_LOGO = LOGO;
+  (function () { // N3 on the Home header mark
+    var br = document.getElementById('brand');
+    if (br) br.addEventListener('click', function () { LOGO.play(br.querySelector('.lg')); });
+  })();
+  // ---- R7 N4: the toolbox drawer. Hold the About logo ~1 s: the lid lifts as you hold and a bar fills, then a small
+  // drawer slides out of the box with the credits. A quick tap plays N3; moving the finger or a scroll cancels. It closes
+  // on its handle, a tap outside, or leaving the screen. The Credits card below keeps the same text for VoiceOver.
+  // Add a credit line here ([label, text]) and it gets its own compartment. ----
+  var CREDITS = [['Built by', 'Nate Merrell'], ['Made for', 'the CT Sports Medicine Team']];
+  function drawerHTML() {
+    return '<div class="drw" id="ab-drw" hidden><button type="button" class="drw-front" aria-label="Close the credits drawer"><i></i></button>' +
+      '<div class="drw-tray" role="group" aria-label="Credits"><div class="drw-grid">' + CREDITS.map(function (c) {
+        return '<div class="drw-c"><span>' + esc(c[0]) + '</span><b>' + esc(c[1]) + '</b></div>'; }).join('') +
+      '</div><div class="drw-foot mono">v' + APPVER + ' · data updated ' + esc(D.built) + '</div></div></div>';
+  }
+  var HOLD = null, HOLD_MS = 900;
+  function holdStop(k) { // k: 'tap' (quick release → N3), 'cancel' (spring back), 'open' (the drawer took over)
+    var h = HOLD; if (!h) return; HOLD = null;
+    clearTimeout(h.timer);
+    var stop = function () { h.anims.forEach(function (a) { try { a.cancel(); } catch (e) {} }); };
+    if (k === 'open') { setTimeout(stop, 200); return; } // the drawer's own motion takes over from the held pose
+    stop();
+    if (k === 'tap') LOGO.play(h.lg);
+    else if (k === 'cancel' && !motionRM()) LOGO.A(LOGO.parts(h.lg).lid, [{ transform: 'translateY(-4%)' }, { transform: 'none' }], { duration: 180, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+  }
+  function drwOpen(btn) {
+    var card = btn.closest('.about-card'), d = card && card.querySelector('.drw'), lg = btn.querySelector('.lg');
+    if (!d || !d.hidden) return;
+    d.hidden = false; d.classList.add('open');
+    var rm = motionRM(), p = lg ? LOGO.parts(lg) : null;
+    if (rm) LOGO.A(d, [{ opacity: 0 }, { opacity: 1 }], { duration: 120 });
+    else {
+      if (p) {
+        LOGO.A(p.lid, [{ transform: 'translateY(-5.5%)' }, { transform: 'translateY(-7.8%)', offset: .25 }, { transform: 'none' }], { duration: 420, easing: 'cubic-bezier(.65,0,.35,1)' });
+        LOGO.A(p.core, [{ opacity: 1, transform: 'translateY(-2.75%) scaleY(3.9)' }, { opacity: 0, transform: 'none' }], { duration: 300, delay: 100 });
+        LOGO.A(p.halo, [{ opacity: .8 }, { opacity: 0 }], { duration: 300, delay: 100 });
+      }
+      LOGO.A(d, [{ opacity: 0, transform: 'translateY(-46px) scale(.26)' }, { opacity: 1, transform: 'translateY(-6px) scale(1.015)', offset: .72 }, { opacity: 1, transform: 'none' }], { duration: 360, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    }
+    var bar = card.querySelector('.holdbar'); if (bar) LOGO.A(bar, [{ opacity: 1 }, { opacity: 0 }], { duration: 160 });
+    try { d.querySelector('.drw-front').focus({ preventScroll: true }); } catch (e) {}
+  }
+  function drwClose(d) {
+    if (!d || d.hidden || d.__closing) return;
+    d.__closing = true; d.classList.remove('open');
+    var a = motionRM() ? LOGO.A(d, [{ opacity: 1 }, { opacity: 0 }], { duration: 100, fill: 'forwards' })
+      : LOGO.A(d, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-46px) scale(.26)' }], { duration: 240, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' });
+    setTimeout(function () { d.hidden = true; d.__closing = false; try { if (a) a.cancel(); } catch (e) {} }, motionRM() ? 110 : 250);
+  }
+  document.addEventListener('pointerdown', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('.about-hold') : null;
+    if (!btn || (e.button && e.button !== 0)) return;
+    holdStop('cancel');
+    var lg = btn.querySelector('.lg'), card = btn.closest('.about-card'), d = card && card.querySelector('.drw');
+    if (!lg || (d && !d.hidden)) return;
+    var p = LOGO.parts(lg), bar = card.querySelector('.holdbar'), bi = bar && bar.querySelector('.hb-fill'), anims = [];
+    function add(a) { if (a) anims.push(a); }
+    add(LOGO.A(bar, [{ opacity: 0 }, { opacity: 1 }], { duration: 120, fill: 'forwards' }));
+    add(LOGO.A(bi, [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: HOLD_MS, fill: 'forwards' })); // progress: stays with Reduce Motion
+    if (!motionRM()) {
+      add(LOGO.A(p.lid, [{ transform: 'none' }, { transform: 'translateY(-5.5%)' }], { duration: HOLD_MS, easing: 'cubic-bezier(.3,.1,.3,1)', fill: 'forwards' }));
+      add(LOGO.A(p.core, [{ opacity: 0, transform: 'none' }, { opacity: 1, transform: 'translateY(-2.75%) scaleY(3.9)' }], { duration: HOLD_MS, easing: 'ease-in', fill: 'forwards' }));
+    }
+    add(LOGO.A(p.halo, [{ opacity: 0 }, { opacity: .8 }], { duration: HOLD_MS, easing: 'ease-in', fill: 'forwards' }));
+    HOLD = { btn: btn, lg: lg, x: e.clientX, y: e.clientY, t: Date.now(), anims: anims, timer: setTimeout(function () {
+      var h = HOLD; if (!h) return; holdStop('open'); drwOpen(h.btn);
+    }, HOLD_MS) };
+    HOLD_PTR = true;
+  }, true);
+  var HOLD_DONE = 0, HOLD_PTR = false; // a click right after a press on the logo belongs to that press (it is not a keyboard tap)
+  document.addEventListener('pointermove', function (e) { if (HOLD && Math.sqrt(Math.pow(e.clientX - HOLD.x, 2) + Math.pow(e.clientY - HOLD.y, 2)) > 10) holdStop('cancel'); }, true);
+  document.addEventListener('pointerup', function () {
+    if (HOLD_PTR) { HOLD_PTR = false; HOLD_DONE = Date.now(); }
+    if (HOLD) { var quick = Date.now() - HOLD.t < 260; holdStop(quick ? 'tap' : 'cancel'); }
+  }, true);
+  document.addEventListener('pointercancel', function () { holdStop('cancel'); }, true);
+  window.addEventListener('scroll', function () { holdStop('cancel'); }, { passive: true });
+  document.addEventListener('contextmenu', function (e) { if (e.target && e.target.closest && e.target.closest('.about-hold')) e.preventDefault(); });
+  document.addEventListener('click', function (e) {
+    var t = e.target; if (!t || !t.closest) return;
+    var btn = t.closest('.about-hold');
+    if (btn) { if (Date.now() - HOLD_DONE > 700) LOGO.play(btn.querySelector('.lg')); return; } // a keyboard press: N3
+    var d = document.querySelector('.drw.open');
+    if (!d) return;
+    if (t.closest('.drw-front') || !t.closest('.drw')) drwClose(d);
+  });
   function aboutScreen() {
     setTitle('About', ''); backBtn.hidden = false;
     render(
-      '<div class="card about-card" style="text-align:center">' +
-        '<img class="about-logo" src="favicon.svg" alt="SportsMed Toolbox logo">' +
+      '<div class="card about-card ab-top" style="text-align:center">' +
+        '<div class="about-lg"><button type="button" class="about-hold" aria-label="SM ToolBox logo — hold for the credits">' + LOGO.html('appicon s96') + '</button><span class="holdbar" aria-hidden="true"><i class="hb-fill"></i></span></div>' +
         '<h1 style="margin:0">Sports<span style="color:var(--amber)">Med</span> Toolbox</h1>' +
         '<div style="color:var(--muted); font-size:13px; margin-top:5px">v' + APPVER + ' &middot; data updated ' + esc(D.built) + '</div>' +
         '<div class="ab-photos" id="ab-photos" hidden></div>' +
         '<div style="margin-top:6px"><button class="footlink" data-act="checkupd">Check for updates</button>' +
         '<span class="footsep">&middot;</span><button class="footlink" data-act="cyclecount">CT Team</button>' +
-        '</div>' +
+        '</div>' + drawerHTML() +
       '</div>' +
       '<div class="grouphead ab-gh">Tips</div>' +
       '<div class="card about-card">' +
@@ -8042,6 +8394,8 @@ var GLOSS = {
   }
   function route(ev) {
     var soft = !!(ev && ev.soft === true);
+    var leftCard = null; SCROLL_TOP = false; VT_BACK = null;
+    try { leftCard = !soft && content ? content.querySelector('#pcard') : null; } catch (eLc) {} // N11c: the card being left
     if (!soft) { try { ugRoute(); } catch (eUg) {} } // anonymous usage: log the screen / card before anything renders
     var raw = location.hash || '#/';
     var qi = raw.indexOf('?');
@@ -8051,6 +8405,7 @@ var GLOSS = {
     var navCT = routeIsCT(qi > -1 ? raw.slice(0, qi) : raw), rec = null;
     try { if (!soft && NAV.cur) navSave(NAV.cur); } catch (eN0) {}
     try { rec = navEnter(!navCT, soft); } catch (eN1) { rec = null; }
+    if (leftCard && rec && !navCT) VT_BACK = { sku: leftCard.getAttribute('data-sku') || '', h1: leftCard.querySelector('h1'), hero: leftCard.querySelector('.pc-hero') };
     NAV.pending = null; navCancel(); NAV.extra = null;
     try { if ('scrollRestoration' in history) history.scrollRestoration = navCT ? 'auto' : 'manual'; } catch (eN2) {}
     var qNew = qparam(query, 'q'), ST = null, rf = !soft && rec && rec.f ? rec.f : null;
@@ -8090,7 +8445,7 @@ var GLOSS = {
     } else {
       SOFT_Y = 0;
       if (rec && (rec.y > 0 || rec.a)) NAV.pending = rec; // P35: restored by render() once the screen is drawn
-      else { window.scrollTo(0, 0); if (rec && rec.sx) NAV.pending = rec; } // (at the top, but the chip rows were scrolled)
+      else { if (VT_FROM || VT_CAT) SCROLL_TOP = true; else window.scrollTo(0, 0); if (rec && rec.sx) NAV.pending = rec; } // (at the top, but the chip rows were scrolled); N11a: a pending morph scrolls after its old snapshot
     }
     try { closeOverlays(); } catch (eOv) {}
     var xb = document.getElementById('expban');
@@ -8231,7 +8586,7 @@ var GLOSS = {
     if (CURQ) {
       if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML;
       title.innerHTML = 'Search';
-      content.innerHTML = resultsHTML();
+      content.innerHTML = resultsHTML(); CAT_ON = null;
     } else {
       LAST_TITLE = '';
       route({ soft: true }); // P6/P24: redraw the screen underneath for real (the saved HTML was an empty shell on #/bo and #/usage)
@@ -8313,6 +8668,8 @@ var GLOSS = {
       if (window.requestAnimationFrame) requestAnimationFrame(function () { setTimeout(tbxReady, 0); });
       setTimeout(tbxReady, 1000);                   // no frames while the page is hidden: don't keep a waiting animation up
     } catch (eR0) {}
+    // N12: iOS applies :active only with a touch listener on the page; don't depend on pull-to-refresh having one
+    try { document.addEventListener('touchstart', function () {}, { passive: true }); } catch (eT) {}
     // P35: the entry on screen is saved when the app is hidden or reloaded (update banner), not only when it is left
     var navHide = function () { try { if (NAV.cur) navSave(NAV.cur); } catch (e) {} };
     window.addEventListener('pagehide', navHide);
@@ -9125,7 +9482,7 @@ var GLOSS = {
       var focused = document.activeElement && bar.contains(document.activeElement);
       var overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
       if (focused && overlap > 60) {
-        bar.style.transition = 'transform .15s ease';
+        bar.style.transition = motionRM() ? 'none' : 'transform .15s ease'; // M0
         bar.style.transform = 'translateY(-' + Math.round(overlap) + 'px)';
       } else {
         bar.style.transform = '';

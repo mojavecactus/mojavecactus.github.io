@@ -5,6 +5,7 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { check as manifestCheck, swList } from './img-manifest.mjs';
+import { check as dimsCheck } from './img-dims.mjs';
 
 const R = process.cwd();
 // The app bundle is versioned by filename (app-<ver>.js); index.html's script tag is the source of truth.
@@ -102,6 +103,10 @@ const MANIFEST = (() => {
     if (!MANIFEST[r]) FAIL('card image not in img-manifest.json (never saved offline): ' + r);
   });
   disk.forEach(f => { if (!refs.has(f)) FAIL('orphan image on disk (unreferenced by any card): ' + f); });
+  // R7 N14: every card photo has its size in img-dims.js (a lone photo keeps its box before it arrives)
+  dimsCheck(R).fails.forEach(f => FAIL(f));
+  const dimsJs = existsSync(R + '/img-dims.js') ? readFileSync(R + '/img-dims.js', 'utf8') : '';
+  refs.forEach(r => { if (dimsJs.indexOf('"' + r + '":[') < 0) FAIL('card image has no size in img-dims.js: ' + r); });
 }
 if (!EMERGENCY_SW) {
   const assets = swList(sw, 'ASSETS'), core = swList(sw, 'CORE');

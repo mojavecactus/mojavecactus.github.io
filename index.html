@@ -466,7 +466,6 @@ button.tile, .rowitem{cursor:pointer; width:100%;}
 #toast.act{pointer-events:auto; padding-right:8px; display:flex; align-items:center; gap:12px; white-space:nowrap;}
 #toast button{border:0; background:rgba(20,20,20,.16); color:#141414; font:inherit; font-weight:800; border-radius:999px; padding:6px 12px; cursor:pointer;}
 :focus-visible{outline:2px solid var(--amber); outline-offset:2px;}
-@media (prefers-reduced-motion: reduce){ #toast{transition:none;} }
 main{padding-bottom:calc(var(--sab) + 96px);}
 #bottombar{position:fixed; left:0; right:0; bottom:0; padding:10px 14px calc(var(--sab) + 10px);
   background:rgba(30,30,30,.92); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
@@ -602,16 +601,6 @@ html.authed #lock.lk-hold{opacity:1; visibility:visible;}
 #lock .lk-remember input{width:18px; height:18px; accent-color:var(--amber); margin:0;}
 #lock.shake .lk-card{animation:lkshake .3s;}
 @keyframes lkshake{0%,100%{transform:translateX(0)} 25%{transform:translateX(-7px)} 75%{transform:translateX(7px)}}
-#lock .lk-shackle{transform-origin:16px 9px; transition:transform .5s cubic-bezier(.34,1.56,.64,1);}
-#lock.open .lk-shackle{transform:translateY(-2.5px) rotate(-35deg);}
-#lock .lk-badge svg rect, #lock .lk-badge svg path{transition:stroke .35s;}
-#lock .lk-badge svg circle{transition:fill .35s;}
-#lock.open .lk-badge svg rect, #lock.open .lk-badge svg path{stroke:var(--green);}
-#lock.open .lk-badge svg circle{fill:var(--green);}
-#lock.open .lk-badge{animation:lkpop .55s cubic-bezier(.34,1.56,.64,1);}
-@keyframes lkpop{0%{transform:scale(1)} 45%{transform:scale(1.12)} 100%{transform:scale(1)}}
-@media (prefers-reduced-motion: reduce){ #lock.shake .lk-card{animation:none;} html.authed #lock{transition:none;}
-  #lock .lk-shackle{transition:none;} #lock.open .lk-badge{animation:none;} }
 
 /* gate hardening: app stays unrendered AND hidden until unlocked */
 html:not(.authed) #bar, html:not(.authed) main, html:not(.authed) #bottombar,
@@ -623,8 +612,6 @@ html:not(.authed) #fb-fab, html:not(.authed) #updbanner { display: none !importa
 .tile, .rowitem, .favbtn, .copy, .linkbtn, .fchip{transition:transform .08s ease;}
 .tile:active, .rowitem:active{transform:scale(.975);}
 .copy:active, .favbtn:active, .linkbtn:active, .fchip:active{transform:scale(.94);}
-@media (prefers-reduced-motion: reduce){ #content.vt{animation:none;}
-  .tile:active,.rowitem:active,.copy:active,.favbtn:active,.linkbtn:active,.fchip:active{transform:none;} }
 
 /* tile icons */
 .tile .tico{flex:none; width:44px; height:44px; border-radius:12px; display:flex;
@@ -660,7 +647,6 @@ html:not(.authed) #fb-fab, html:not(.authed) #updbanner { display: none !importa
 .clearrec:active{color:var(--bone);}
 .about-quote{margin:14px 18px 4px; text-align:center; color:#fff; font-style:italic; font-size:12.5px; line-height:1.6; opacity:.85;}
 .about-card{padding:12px 16px;}
-.about-card .about-logo{width:58px; height:58px; margin:0 auto 6px;}
 .about-card .tip{padding:8px 0; font-size:13.5px; line-height:1.48;}
 .ab-gh{margin:12px 2px 6px;}
 /* P2: the "Offline photos" line on About. P34: a card photo that really failed to load (cardPhotos in the bundle) */
@@ -1040,7 +1026,6 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 /* about */
 .footlink{border:0; background:none; color:var(--amber); font-weight:700; font-size:12.5px; padding:6px 8px; cursor:pointer;}
 .footsep{color:var(--muted); margin:0 2px;}
-.about-logo{width:72px; height:72px; margin:4px auto 10px; display:block;}
 .tip{font-size:14px; line-height:1.55; padding:10px 0; border-top:1px solid var(--line); text-align:left;}
 .tip:first-child{border-top:0; padding-top:2px;}
 .tip b{color:var(--amber);}
@@ -1208,10 +1193,11 @@ body.qr-on #fb-fab{visibility:hidden;}
 .h-dim{opacity:.5}
 .a-busy{background:rgba(90,200,120,.25) !important;border-color:rgba(90,200,120,.6) !important;color:var(--green-soft) !important}
 /* ---- polish: skeletons, empty states, pull-to-refresh, view transitions ---- */
-.skel{border-radius:12px; margin:8px 0; background:linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.11) 50%, rgba(255,255,255,.05) 75%); background-size:200% 100%; animation:skel 1.2s ease-in-out infinite;}
+/* R7 M0: the shimmer moves on the compositor (a band sliding over a static tint), same look and timing as before */
+.skel{position:relative; overflow:hidden; border-radius:12px; margin:8px 0; background:rgba(255,255,255,.05);}
+.skel::after{content:""; position:absolute; top:0; bottom:0; left:0; width:100%; background:linear-gradient(90deg, rgba(255,255,255,0) 25%, rgba(255,255,255,.06) 50%, rgba(255,255,255,0) 75%); transform:translateX(-100%); animation:skel 1.2s ease-in-out infinite;}
 .skel.row{height:58px} .skel.line{height:14px; width:60%} .skel.sm{height:34px}
-@keyframes skel{0%{background-position:100% 0}100%{background-position:-100% 0}}
-@media (prefers-reduced-motion: reduce){ .skel{animation:none;} }
+@keyframes skel{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
 .emp{text-align:center; padding:26px 12px 18px; color:var(--muted);}
 .emp .ei{font-size:30px; line-height:1; margin-bottom:8px; opacity:.85}
 .emp b{display:block; color:var(--bone); font-size:var(--fs-md); font-weight:700; margin-bottom:4px}
@@ -1250,9 +1236,10 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 .ug{--ug-bar:#BF8600; --ug-bar-hi:#FDB515;}
 .ug-live{position:relative; padding:16px;}
 .ug-lh{display:flex; align-items:center; gap:8px; padding-right:40px; min-height:32px;}
-.ug-dot{flex:none; width:9px; height:9px; border-radius:50%; background:var(--green); animation:ug-pulse 2s ease-out infinite;}
-@keyframes ug-pulse{0%{box-shadow:0 0 0 0 rgba(76,201,122,.55);}70%{box-shadow:0 0 0 8px rgba(76,201,122,0);}100%{box-shadow:0 0 0 0 rgba(76,201,122,0);}}
-@media (prefers-reduced-motion: reduce){.ug-dot{animation:none;}}
+.ug-dot{position:relative; flex:none; width:9px; height:9px; border-radius:50%; background:var(--green);}
+/* R7 M0: the live pulse is a scaling ring (compositor), not an animated box-shadow */
+.ug-dot::after{content:""; position:absolute; inset:0; border-radius:50%; background:rgba(76,201,122,.55); animation:ug-pulse 2s ease-out infinite;}
+@keyframes ug-pulse{0%{transform:scale(1); opacity:1;}70%{transform:scale(2.8); opacity:0;}100%{transform:scale(2.8); opacity:0;}}
 .ug-lt{font-size:var(--fs-xs); font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--green-soft);}
 .ug-upd{color:var(--muted); font-size:var(--fs-sm);}
 .ug-rf{top:14px; right:14px;}
@@ -1277,9 +1264,9 @@ body.fa2-wide .emp{text-align:left; padding:16px 2px}
 .ug-g.g1{top:0;} .ug-g.g2{top:50%;} .ug-g.g3{display:none;}
 .ug-col{position:relative; flex:1 1 0; min-width:0; height:100%; display:flex; align-items:flex-end; justify-content:center;
   margin:0; padding:0; border:0; background:none; cursor:pointer; -webkit-tap-highlight-color:transparent;}
-.ug-col i{display:block; width:100%; max-width:24px; background:var(--ug-bar); border-radius:4px 4px 0 0; transition:filter .12s;}
+.ug-col i{display:block; width:100%; max-width:24px; background:var(--ug-bar); border-radius:4px 4px 0 0; transition:background-color .12s;}
 .ug-col.hi i{background:var(--ug-bar-hi);}
-.ug-col.on i{filter:brightness(1.3);}
+.ug-col.on i{background:#F8AE00;} .ug-col.hi.on i{background:#FFEB1B;} /* = brightness(1.3), without a filter animation */
 .ug-col:focus{outline:none;} .ug-col:focus-visible{outline:2px solid var(--bone); outline-offset:1px; border-radius:4px;}
 .ug-col.none::after{content:''; position:absolute; bottom:-2px; left:50%; width:3px; height:3px; margin-left:-1.5px; border-radius:50%; background:#4A4A4A;}
 .ug-pk{position:absolute; left:50%; transform:translate(-50%, -4px); color:var(--bone); font-size:11px; font-weight:700; line-height:1; white-space:nowrap; pointer-events:none;}
@@ -1508,13 +1495,221 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
   display:flex; align-items:center; justify-content:center; pointer-events:none;}
 .pcard .cd-parts{margin:14px 0 0;}
 .pcard .cd-src .src{margin-top:12px;}
-@media (prefers-reduced-motion: reduce){ .coll, .coll.open{transition:none;} .st-l .st-c{transition:none;} }
+/* ==== R7 motion (g4 M0 N1 N2 N3 N4 N10 N11 N12 N14) ============================================================
+   One motion system: only transform and opacity animate (exceptions: colour changes <= 180 ms, spinners, direct
+   manipulation, the cycle-count progress bar and R6's collapsible). Every reduced-motion override lives in the ONE
+   @media block at the end of this <style>. Cycle count / F&A (body.ct-chrome-off) get no new motion. */
+:root{
+  --m-tap:90ms; --m-release:180ms; --m-quick:140ms; --m-exit:120ms; --m-base:220ms; --m-emph:300ms;
+  --m-launch:480ms; --m-hold:900ms; --m-shimmer:1200ms;
+  --e-out:cubic-bezier(.2,.8,.2,1); --e-in:cubic-bezier(.4,0,1,1); --e-inout:cubic-bezier(.65,0,.35,1); --e-spring:cubic-bezier(.34,1.56,.64,1);
+  --m-rise:10px; --m-press-lg:.975; --m-press-sm:.94;
+  /* N10 quiet category accents (glyph, 12% chip tint, 26% chip border); counts stay amber */
+  --cat-allo:#FA9EBD; --cat-arth:#54D0EC; --cat-cap:#B6D16E; --cat-disp:#69D6AA; --cat-impl:#FDB515; --cat-inst:#BFCCDB; --cat-sut:#CAACFF; --cat-bo:#9CC9FF;
+}
+@keyframes tbx-out{to{opacity:0}}
+@keyframes tbx-in{from{opacity:0}}
+@keyframes tbx-rise{from{opacity:0; transform:translateY(var(--m-rise))} to{opacity:1; transform:none}}
+@keyframes tbx-rise12{from{opacity:0; transform:translateY(12px)} to{opacity:1; transform:none}}
+/* ---- the layered logo: stacked HTML layers, one <svg><use/></svg> per part (compositor-animated, never SVG internals) */
+.lg{--sz:42px; position:relative; width:var(--sz); height:var(--sz); flex:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; pointer-events:none}
+.lg.s72{--sz:72px} .lg.s96{--sz:96px}
+.lg .lg-in, .lg .L{position:absolute; inset:0; display:block}
+.lg .L svg{display:block; width:100%; height:100%}
+.lg .l-tile{border-radius:22.5%; background:linear-gradient(#2D2D33, #151519); box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.lg:not(.appicon) .l-tile, .lg:not(.appicon) .l-shadow{display:none} /* .appicon = the app-icon tile behind the box */
+.lg .l-wrench, .lg .l-latch, .lg .l-halo, .lg .l-core, .lg .l-glint, .lg .l-spark{opacity:0}
+.lg .l-lid{transform-origin:82.5% 47.4%}
+.lg .l-latch{transform-origin:50% 51.8%}
+.lg .l-core, .lg .l-halo, .lg .l-spark{transform-origin:50% 48.37%}
+.lg .l-wrench{transform-origin:27.3% 62.5%}
+.lg .l-glint{overflow:hidden;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M89.4 201.3a25 25 0 0 1 25-25h283.2a25 25 0 0 1 25 25v41.6H89.4zM89.4 252.4h333.2v145.2a29.5 29.5 0 0 1-29.5 29.5H118.9a29.5 29.5 0 0 1-29.5-29.5z'/%3E%3C/svg%3E") center/100% 100% no-repeat;
+          mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M89.4 201.3a25 25 0 0 1 25-25h283.2a25 25 0 0 1 25 25v41.6H89.4zM89.4 252.4h333.2v145.2a29.5 29.5 0 0 1-29.5 29.5H118.9a29.5 29.5 0 0 1-29.5-29.5z'/%3E%3C/svg%3E") center/100% 100% no-repeat;}
+.lg .l-glint b{position:absolute; top:-10%; bottom:-10%; left:0; width:24%; background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.7), rgba(255,255,255,0)); transform:translateX(-130%) skewX(-18deg)}
+.lg.locked .l-latch{opacity:1}
+/* lock screen: the toolbox with its latch replaces the padlock (N1 start pose) */
+#lock .lk-badge{width:72px; height:72px; margin:0 auto 16px; border:0; background:none; border-radius:0; display:block}
+/* Home header: the mark in the empty left slot, only while Back is hidden (Home); a tap plays N3 */
+#bar .row{position:relative}
+#brand{position:absolute; left:0; top:50%; width:44px; height:44px; margin:-22px 0 0; padding:0; border:0; background:none; display:flex; align-items:center; justify-content:center; cursor:pointer}
+#back:not([hidden]) + #brand{display:none}
+/* ---- N1: the toolbox opens on launch (overlay never takes input; it runs beside boot and never delays it) */
+#launch{position:fixed; inset:0; z-index:101; pointer-events:none}
+#launch .lg{position:absolute}
+#launch .lg.ctr{left:50%; top:40%; margin:-36px 0 0 -36px}
+#launch .lg.go.locked .l-latch{animation:lx-latch 120ms var(--e-in) both}
+#launch .lg.go .l-lid{animation:lx-lid 200ms var(--e-out) 30ms both}
+#launch .lg.go .l-core{animation:lx-core 190ms var(--e-out) 40ms both}
+#launch .lg.go .l-halo{animation:tbx-in 160ms linear 60ms both}
+#launch .lg.ctr .l-lid{animation-delay:110ms} #launch .lg.ctr .l-core{animation-delay:120ms} #launch .lg.ctr .l-halo{animation-delay:140ms}
+#launch .lg.land{transform:translate(var(--dx, 0px), var(--dy, 0px)) scale(var(--s, 1)); transition:transform 280ms var(--e-inout)}
+#launch .lg.land .l-tile{animation:tbx-out 180ms var(--e-out) both}
+#launch .lg.land .l-shadow{animation:tbx-out 160ms linear both}
+#launch .lg.land .l-lid{animation:lx-lidc 240ms var(--e-inout) 40ms both}
+#launch .lg.land .l-core{animation:lx-corec 220ms var(--e-inout) 40ms both}
+#launch .lg.land .l-halo{animation:lx-haloc 200ms linear 40ms both}
+#launch .lg.fade{opacity:0; transition:opacity 120ms linear}
+@keyframes lx-latch{from{opacity:1; transform:none} to{opacity:0; transform:translateY(1.4%) scaleY(.2)}}
+@keyframes lx-lid{from{transform:none} to{transform:translateY(-7.8%)}}
+@keyframes lx-core{from{opacity:0; transform:none} to{opacity:1; transform:translateY(-3.9%) scaleY(5.2)}}
+@keyframes lx-lidc{from{transform:translateY(-7.8%)} to{transform:none}}
+@keyframes lx-corec{from{opacity:1; transform:translateY(-3.9%) scaleY(5.2)} to{opacity:0; transform:none}}
+@keyframes lx-haloc{from{opacity:1} to{opacity:0}}
+html.launching #brand{opacity:0}
+html.launching #bar::after{transform:scaleX(0)}
+html.launching.authed #lock .lk-card{opacity:0; transition:opacity 100ms var(--e-in)}
+/* landing: the lock (also R4's held lock, .lk-hold) gives way, the amber rule draws from the centre, Home settles */
+html.authed.launch-land #lock, html.authed.launch-land #lock.lk-hold{opacity:0; visibility:hidden}
+html.launch-land #bar::after{animation:tbx-rule 280ms var(--e-out) both}
+html.launch-land #content{animation:tbx-settle 260ms var(--e-out) both} /* the launch took #content's .vt off, so nothing replays after */
+@keyframes tbx-rule{from{transform:scaleX(0)} to{transform:none}}
+@keyframes tbx-settle{from{transform:translateY(var(--m-rise))} to{transform:none}}
+/* ---- N10: one line style, a product silhouette per category, a quiet accent (glyph + chip); counts stay amber */
+.tico svg .f, .hico svg .f{fill:currentColor; fill-opacity:.22; stroke:none}
+.tico svg .cb, .hico svg .cb{fill:var(--chip, #2A2A2A); stroke:none}
+.tile .tico.k-allo{color:var(--cat-allo); background:rgba(250,158,189,.12); border-color:rgba(250,158,189,.26)}
+.tile .tico.k-arth{color:var(--cat-arth); background:rgba(84,208,236,.12); border-color:rgba(84,208,236,.26)}
+.tile .tico.k-cap{color:var(--cat-cap); background:rgba(182,209,110,.12); border-color:rgba(182,209,110,.26)}
+.tile .tico.k-disp{color:var(--cat-disp); background:rgba(105,214,170,.12); border-color:rgba(105,214,170,.26)}
+.tile .tico.k-impl{color:var(--cat-impl); background:rgba(253,181,21,.12); border-color:rgba(253,181,21,.26)}
+.tile .tico.k-inst{color:var(--cat-inst); background:rgba(191,204,219,.12); border-color:rgba(191,204,219,.26)}
+.tile .tico.k-sut{color:var(--cat-sut); background:rgba(202,172,255,.12); border-color:rgba(202,172,255,.26)}
+.tile-bo .tico{color:var(--cat-bo); --chip:#254264}
+.tile-inv .tico{color:#141414; background:rgba(20,20,20,.08); border-color:rgba(20,20,20,.22)}
+/* the landing page's header carries its tile's icon (N2 lands here; it is also there without View Transitions) */
+#bar .t .hico{display:inline-block; width:22px; height:22px; margin-right:7px; vertical-align:-4px; --chip:var(--ink)}
+#bar .t .hico svg{display:block; width:22px; height:22px}
+.hico.k-allo{color:var(--cat-allo)} .hico.k-arth{color:var(--cat-arth)} .hico.k-cap{color:var(--cat-cap)} .hico.k-disp{color:var(--cat-disp)}
+.hico.k-impl{color:var(--cat-impl)} .hico.k-inst{color:var(--cat-inst)} .hico.k-sut{color:var(--cat-sut)} .hico.k-bo{color:var(--cat-bo)}
+/* ---- N12: every catalog press sinks fast and springs back (cycle count / F&A keep theirs) */
+body:not(.ct-chrome-off) .tile, body:not(.ct-chrome-off) .rowitem, body:not(.ct-chrome-off) .favbtn, body:not(.ct-chrome-off) .copy,
+body:not(.ct-chrome-off) .linkbtn, body:not(.ct-chrome-off) .fchip, body:not(.ct-chrome-off) .schip, body:not(.ct-chrome-off) .bochip,
+body:not(.ct-chrome-off) .navbtn, body:not(.ct-chrome-off) .rwact, body:not(.ct-chrome-off) .refbtn, body:not(.ct-chrome-off) .cd-ico,
+body:not(.ct-chrome-off) .rel, body:not(.ct-chrome-off) .cd-j, body:not(.ct-chrome-off) .qrc, body:not(.ct-chrome-off) .sfx,
+body:not(.ct-chrome-off) .nf-btn, body:not(.ct-chrome-off) #bb-back, body:not(.ct-chrome-off) #scanbtn{
+  transition:transform var(--m-release) var(--e-spring), background-color var(--m-quick) linear, color var(--m-quick) linear}
+body:not(.ct-chrome-off) .tile:active, body:not(.ct-chrome-off) .rowitem:active{transform:scale(var(--m-press-lg)); transition-duration:var(--m-tap); transition-timing-function:var(--e-out)}
+body:not(.ct-chrome-off) .favbtn:active, body:not(.ct-chrome-off) .copy:active, body:not(.ct-chrome-off) .linkbtn:active, body:not(.ct-chrome-off) .fchip:active,
+body:not(.ct-chrome-off) .schip:active, body:not(.ct-chrome-off) .bochip:active, body:not(.ct-chrome-off) .navbtn:active, body:not(.ct-chrome-off) .rwact:active,
+body:not(.ct-chrome-off) .refbtn:active, body:not(.ct-chrome-off) .cd-ico:active, body:not(.ct-chrome-off) .rel:active, body:not(.ct-chrome-off) .cd-j:active,
+body:not(.ct-chrome-off) .qrc:active, body:not(.ct-chrome-off) .sfx:active, body:not(.ct-chrome-off) .nf-btn:active, body:not(.ct-chrome-off) #bb-back:active,
+body:not(.ct-chrome-off) #scanbtn:active{transform:scale(var(--m-press-sm)); transition-duration:var(--m-tap); transition-timing-function:var(--e-out)}
+.bo-nolink:active, .skrow:active{transform:none !important}
+/* Copy → check mark in place (same 44 pt box, no toast); Favorite: the star pops with a six-dot burst, un-favorite shrinks */
+.cd-copy{position:relative}
+.cd-copy svg{transition:opacity var(--m-quick) var(--e-out), transform var(--m-release) var(--e-spring)}
+.cd-copy::after{content:""; position:absolute; left:50%; top:50%; width:7px; height:13px; margin:-9px 0 0 -4px; border:solid #7ED99B; border-width:0 2.6px 2.6px 0;
+  border-radius:1px; opacity:0; transform:rotate(45deg) scale(.6); transition:opacity var(--m-quick) var(--e-out), transform var(--m-release) var(--e-spring); pointer-events:none}
+.cd-copy.done svg{opacity:0; transform:scale(.7)}
+.cd-copy.done::after{opacity:1; transform:rotate(45deg)}
+.cd-fav{position:relative}
+.cd-fav.pop svg{animation:tbx-pop 320ms var(--e-spring)}
+.cd-fav.unpop svg{animation:tbx-unpop 180ms var(--e-out)}
+.cd-fav::after{content:""; position:absolute; left:50%; top:50%; width:4px; height:4px; margin:-2px 0 0 -2px; border-radius:50%; opacity:0; pointer-events:none;
+  box-shadow:0 -15px 0 var(--amber), 13px -7.5px 0 var(--amber), 13px 7.5px 0 var(--amber), 0 15px 0 var(--amber), -13px 7.5px 0 var(--amber), -13px -7.5px 0 var(--amber)}
+.cd-fav.pop::after{animation:tbx-burst 380ms var(--e-out) 60ms both}
+@keyframes tbx-pop{40%{transform:scale(1.45)}}
+@keyframes tbx-unpop{45%{transform:scale(.8)}}
+@keyframes tbx-burst{from{opacity:1; transform:scale(.3)} to{opacity:0; transform:none}}
+/* ---- N2 / N11: View Transitions (iOS 18+; older phones keep the #content.vt fade). Morphs <= 300 ms. */
+::view-transition-group(tbx-cat-ico), ::view-transition-group(tbx-cat-title){animation-duration:.3s; animation-timing-function:cubic-bezier(.65,0,.35,1)}
+::view-transition-old(tbx-cat-ico), ::view-transition-new(tbx-cat-ico){height:100%; object-fit:none}
+::view-transition-old(tbx-cat-ico){animation:tbx-out .18s cubic-bezier(.4,0,1,1) both}
+::view-transition-new(tbx-cat-ico){animation:tbx-in .3s cubic-bezier(.2,.8,.2,1) both}
+::view-transition-old(tbx-cat-title){animation:tbx-out .15s cubic-bezier(.4,0,1,1) both}
+::view-transition-new(tbx-cat-title){animation:tbx-in .3s cubic-bezier(.2,.8,.2,1) both}
+#content.vt-rise{animation:tbx-rise .22s cubic-bezier(.2,.8,.2,1) 40ms both}
+#content.vt-fade{animation:tbx-in .22s cubic-bezier(.2,.8,.2,1) both}
+/* N11b: the row's end lifts off as the card photo; the card fills in under the landing title */
+::view-transition-group(tbx-hero){animation-duration:.3s; animation-timing-function:cubic-bezier(.65,0,.35,1)}
+::view-transition-old(tbx-hero), ::view-transition-new(tbx-hero){height:100%}
+::view-transition-old(tbx-hero){animation:tbx-out .18s cubic-bezier(.2,.8,.2,1) 45ms both}
+::view-transition-new(tbx-hero){animation:tbx-in .3s cubic-bezier(.2,.8,.2,1) both}
+.vt-ghost{position:fixed; z-index:1; pointer-events:none; display:block; border-radius:0 12px 12px 0}
+.pcard.vt-in{animation:tbx-rise12 .21s cubic-bezier(.2,.8,.2,1) 90ms both}
+/* N11c: Back to the list — the title flies back to its row (crossfade 30–75%), the photo shrinks into the row's end */
+html[data-vt="back"]::view-transition-group(tbx-title){animation-duration:.3s; animation-timing-function:cubic-bezier(.65,0,.35,1)}
+html[data-vt="back"]::view-transition-old(tbx-title){animation:vt-x-out .3s linear both; opacity:1}
+html[data-vt="back"]::view-transition-new(tbx-title){animation:vt-x-in .3s linear both; height:auto; object-fit:fill}
+html[data-vt="back"]::view-transition-old(tbx-hero){animation:tbx-out .3s linear both}
+@keyframes vt-x-out{0%, 30%{opacity:1} 75%, 100%{opacity:0}}
+@keyframes vt-x-in{0%, 30%{opacity:0} 75%, 100%{opacity:1}}
+/* ... and the row you came from is marked for a moment */
+.rowitem.nav-ring{position:relative}
+.rowitem.nav-ring::after{content:""; position:absolute; inset:-2px; border-radius:13px; box-shadow:0 0 0 2px var(--amber); pointer-events:none; opacity:0; animation:tbx-ring .9s var(--e-out) both}
+@keyframes tbx-ring{0%{opacity:0} 20%, 55%{opacity:1} 100%{opacity:0}}
+/* ---- N14: placeholders shaped like their content (real markup, .skt text), one crossfade on first data */
+.skt{color:transparent !important; background:rgba(255,255,255,.075) !important; border-color:transparent !important; border-radius:6px; -webkit-box-decoration-break:clone; box-decoration-break:clone}
+.skt *{visibility:hidden}
+.skrow{position:relative; overflow:hidden; cursor:default}
+.skrow::after{content:""; position:absolute; top:0; bottom:0; left:0; width:60%; pointer-events:none;
+  background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.055), rgba(255,255,255,0)); transform:translateX(-110%); animation:tbx-shim var(--m-shimmer) var(--e-inout) infinite}
+@keyframes tbx-shim{to{transform:translateX(280%)}}
+.sk-stack{position:relative; z-index:0}
+.sk-stack > .sk-old{position:absolute; left:0; right:0; top:0; z-index:-1; pointer-events:none}
+/* ---- N4: hold the About logo ~1 s and a small drawer slides out with the credits */
+.about-card.ab-top{position:relative}
+.about-lg{display:flex; flex-direction:column; align-items:center; margin:4px 0 8px}
+.about-hold{display:block; width:96px; height:96px; margin:0; padding:0; border:0; border-radius:22px; background:none; cursor:pointer;
+  -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; touch-action:manipulation}
+.about-hold:focus-visible{outline:2px solid var(--amber); outline-offset:3px}
+.holdbar{display:block; width:96px; height:4px; margin:6px auto 0; border-radius:2px; background:#1b1b1b; overflow:hidden; opacity:0}
+.holdbar .hb-fill{display:block; height:100%; background:var(--amber); transform:scaleX(0); transform-origin:0 50%}
+.drw{position:absolute; left:14px; right:14px; top:124px; z-index:6; transform-origin:50% 0; text-align:left}
+.drw[hidden]{display:none}
+.drw-front{display:flex; align-items:center; justify-content:center; width:100%; height:32px; margin:0; padding:0; border:0; border-radius:10px 10px 4px 4px; cursor:pointer;
+  background:linear-gradient(#FDC940, #F5AB0D); box-shadow:0 1px 0 rgba(255,255,255,.35) inset, 0 -1px 0 rgba(0,0,0,.25) inset}
+.drw-front i{display:block; width:62px; height:9px; border-radius:5px; background:#1D1D22; box-shadow:0 1px 0 rgba(255,255,255,.3)}
+.drw-tray{background:#161618; border:1px solid #4a4336; border-top:0; border-radius:0 0 12px 12px; padding:10px;
+  box-shadow:0 16px 34px rgba(0,0,0,.6), inset 0 8px 12px -8px rgba(0,0,0,.9)}
+.drw-grid{display:grid; grid-template-columns:1fr 1fr; gap:6px}
+.drw-c{background:#212124; border:1px solid #34322d; border-radius:8px; padding:9px 10px; min-height:62px}
+.drw-c span{display:block; font-size:10.5px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--amber)}
+.drw-c b{display:block; margin-top:3px; font-size:14px; line-height:1.3; font-weight:650; color:var(--bone)}
+.drw-foot{margin-top:8px; font-size:11px; color:var(--muted); text-align:center}
+/* ==== ONE reduced-motion policy (R7 M0): no translate / scale / rotate / morph; fades <= 120 ms; essential feedback stays
+   but does not move (scan flash, spinners, the N4 hold bar, the Copy check and star colours). View Transitions are off in JS
+   (vtOK), the launch and the logo check TBX_RM(). Every reduced-motion rule of this file lives here. */
+@media (prefers-reduced-motion: reduce){
+  /* moved here unchanged */
+  #toast{transition:none;}
+  #lock.shake .lk-card{animation:none;} html.authed #lock{transition:none;}
+  #content.vt{animation:none;}
+  .tile:active,.rowitem:active,.copy:active,.favbtn:active,.linkbtn:active,.fchip:active{transform:none;}
+  .skel::after{animation:none; opacity:0;}
+  .ug-dot::after{animation:none; opacity:0;}
+  .coll, .coll.open{transition:none;} .st-l .st-c{transition:none;}
+  /* what ignored Reduce Motion before */
+  #wncard, #pnmove, #tour, #expban{animation:none}
+  #wncard.bye{transform:none; transition:opacity 120ms}
+  .rowwrap{transition:opacity 120ms} .rowwrap.bye{transform:none}
+  .schip:active, .bochip:active, .navbtn:active, .rwact:active, .refbtn:active, .sfx:active, .qrc:active{transform:none}
+  .k-shake{animation:none}
+  .k-trow.k-lift{transform:none}
+  .fops-fill{transition:none}
+  /* R7 */
+  body:not(.ct-chrome-off) .tile:active, body:not(.ct-chrome-off) .rowitem:active, body:not(.ct-chrome-off) .favbtn:active, body:not(.ct-chrome-off) .copy:active,
+  body:not(.ct-chrome-off) .linkbtn:active, body:not(.ct-chrome-off) .fchip:active, body:not(.ct-chrome-off) .schip:active, body:not(.ct-chrome-off) .bochip:active,
+  body:not(.ct-chrome-off) .navbtn:active, body:not(.ct-chrome-off) .rwact:active, body:not(.ct-chrome-off) .refbtn:active, body:not(.ct-chrome-off) .cd-ico:active,
+  body:not(.ct-chrome-off) .rel:active, body:not(.ct-chrome-off) .cd-j:active, body:not(.ct-chrome-off) .qrc:active, body:not(.ct-chrome-off) .sfx:active,
+  body:not(.ct-chrome-off) .nf-btn:active, body:not(.ct-chrome-off) #bb-back:active, body:not(.ct-chrome-off) #scanbtn:active{transform:none}
+  .cd-copy svg, .cd-copy::after{transition:opacity 80ms linear}
+  .cd-copy::after, .cd-copy.done::after{transform:rotate(45deg)} .cd-copy.done svg{transform:none}
+  .cd-fav.pop svg, .cd-fav.unpop svg, .cd-fav.pop::after{animation:none}
+  html.launch-land #bar::after, html.launch-land #content, #content.vt-rise, #content.vt-fade, .pcard.vt-in{animation:none}
+  .rowitem.nav-ring::after{animation:none; opacity:1}
+  .skrow::after{animation:none; opacity:0}
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*){animation:none !important}
+}
 </style>
 </head>
 <body>
+<!-- R7: the logo parts (logo-layered.svg), shared by every logo; not display:none, gradients must render -->
+<svg id="lg-sprite" aria-hidden="true" focusable="false" width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden"><defs><linearGradient id="tbx-amber" x1="0" y1="112" x2="0" y2="427" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FFD55A"/><stop offset=".203" stop-color="#FDC940"/><stop offset=".438" stop-color="#FBBC20"/><stop offset=".724" stop-color="#F5AB0D"/><stop offset="1" stop-color="#EE9B00"/></linearGradient><linearGradient id="tbx-latch" x1="0" y1="229" x2="0" y2="265" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#E7A21A"/><stop offset="1" stop-color="#B97A00"/></linearGradient><linearGradient id="tbx-steel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F4F2EE"/><stop offset="1" stop-color="#B9B5AE"/></linearGradient><linearGradient id="tbx-glow-core" x1="89" y1="0" x2="423" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FDB515" stop-opacity="0"/><stop offset=".14" stop-color="#FFD66B"/><stop offset=".5" stop-color="#FFF6DC"/><stop offset=".86" stop-color="#FFD66B"/><stop offset="1" stop-color="#FDB515" stop-opacity="0"/></linearGradient><radialGradient id="tbx-glow-halo" cx="256" cy="247.6" r="190" gradientUnits="userSpaceOnUse" gradientTransform="translate(0 247.6) scale(1 .16) translate(0 -247.6)"><stop offset="0" stop-color="#FFC940" stop-opacity=".9"/><stop offset=".55" stop-color="#FDB515" stop-opacity=".35"/><stop offset="1" stop-color="#FDB515" stop-opacity="0"/></radialGradient><filter id="tbx-shadow-blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="15"/></filter><symbol id="lg-shadow" viewBox="0 0 512 512"><rect x="96" y="416" width="320" height="48" rx="24" fill="#000" opacity=".42" filter="url(#tbx-shadow-blur)"/></symbol><symbol id="lg-wrench" viewBox="0 0 512 512"><g transform="rotate(-45 140 320)"><path fill="url(#tbx-steel)" d="M79 314a18 18 0 1 1 0 12h13v-12z"/><path fill="url(#tbx-steel)" d="M110 313h58v14h-58z"/><path fill="url(#tbx-steel)" fill-rule="evenodd" d="M168 320a16 16 0 1 0 32 0a16 16 0 1 0-32 0zm8 0a8 8 0 1 1 16 0a8 8 0 1 1-16 0z"/></g></symbol><symbol id="lg-lid" viewBox="0 0 512 512"><path fill="url(#tbx-amber)" fill-rule="evenodd" d="M183.3 196V145.3a33 33 0 0 1 33-33h79.3a33 33 0 0 1 33 33V196zM211.9 176.3v-23.85a11.75 11.75 0 0 1 11.75-11.75h64.65a11.75 11.75 0 0 1 11.75 11.75v23.85z"/><path fill="url(#tbx-amber)" d="M89.4 201.3a25 25 0 0 1 25-25h283.2a25 25 0 0 1 25 25v41.6H89.4z"/></symbol><symbol id="lg-body" viewBox="0 0 512 512"><path fill="url(#tbx-amber)" d="M89.4 252.4h333.2v145.2a29.5 29.5 0 0 1-29.5 29.5H118.9a29.5 29.5 0 0 1-29.5-29.5z"/><path fill="#FFFFFF" d="M234.7 288.6a10.5 10.5 0 0 1 10.5-10.5h21.6a10.5 10.5 0 0 1 10.5 10.5v29.9h30a10.5 10.5 0 0 1 10.5 10.5v21.9a10.5 10.5 0 0 1-10.5 10.5h-30v29.8a10.5 10.5 0 0 1-10.5 10.5h-21.6a10.5 10.5 0 0 1-10.5-10.5v-29.8h-30a10.5 10.5 0 0 1-10.5-10.5v-21.9a10.5 10.5 0 0 1 10.5-10.5h30z"/></symbol><symbol id="lg-latch" viewBox="0 0 512 512"><rect x="234" y="229" width="44" height="36" rx="8" fill="url(#tbx-latch)"/><rect x="236" y="230.5" width="40" height="3" rx="1.5" fill="#FFE39A" opacity=".55"/><rect x="249" y="246" width="14" height="7" rx="3.5" fill="#1D1D22"/></symbol><symbol id="lg-halo" viewBox="0 0 512 512"><ellipse cx="256" cy="247.6" rx="200" ry="34" fill="url(#tbx-glow-halo)"/></symbol><symbol id="lg-core" viewBox="0 0 512 512"><rect x="89.4" y="242.9" width="333.2" height="9.5" fill="url(#tbx-glow-core)"/></symbol><symbol id="lg-spark" viewBox="0 0 512 512"><path d="M256 212l8 27.6 27.6 8-27.6 8-8 27.6-8-27.6-27.6-8 27.6-8z" fill="#FFF6DC"/></symbol></defs>
 <div id="lock" aria-label="Password required">
   <form class="lk-card" id="lockform">
-    <div class="lk-badge"><svg width="26" height="26" viewBox="0 0 24 24" fill="none"><rect x="4" y="10" width="16" height="10" rx="2.5" stroke="#FDB515" stroke-width="2"/><path class="lk-shackle" d="M8 10V7a4 4 0 0 1 8 0v3" stroke="#FDB515" stroke-width="2"/><circle cx="12" cy="15" r="1.6" fill="#FDB515"/></svg></div>
+    <div class="lk-badge" id="lkbadge"><div class="lg appicon s72 locked" aria-hidden="true"><div class="lg-in"><i class="L l-tile"></i><i class="L l-shadow"><svg viewBox="0 0 512 512"><use href="#lg-shadow"/></svg></i><i class="L l-wrench"><svg viewBox="0 0 512 512"><use href="#lg-wrench"/></svg></i><i class="L l-lid"><svg viewBox="0 0 512 512"><use href="#lg-lid"/></svg></i><i class="L l-body"><svg viewBox="0 0 512 512"><use href="#lg-body"/></svg></i><i class="L l-latch"><svg viewBox="0 0 512 512"><use href="#lg-latch"/></svg></i><i class="L l-halo"><svg viewBox="0 0 512 512"><use href="#lg-halo"/></svg></i><i class="L l-core"><svg viewBox="0 0 512 512"><use href="#lg-core"/></svg></i><i class="L l-glint"><b></b></i><i class="L l-spark"><svg viewBox="0 0 512 512"><use href="#lg-spark"/></svg></i></div></div></div>
     <div class="lk-title">Sports<em>Med</em> Toolbox</div>
     <div class="lk-sub">Enter the team password to continue</div>
     <div class="lk-field">
@@ -1530,6 +1725,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 <header id="bar">
   <div class="row">
     <button class="navbtn" id="back" aria-label="Back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button id="brand" type="button" aria-hidden="true" tabindex="-1"><div class="lg" aria-hidden="true"><div class="lg-in"><i class="L l-tile"></i><i class="L l-shadow"><svg viewBox="0 0 512 512"><use href="#lg-shadow"/></svg></i><i class="L l-wrench"><svg viewBox="0 0 512 512"><use href="#lg-wrench"/></svg></i><i class="L l-lid"><svg viewBox="0 0 512 512"><use href="#lg-lid"/></svg></i><i class="L l-body"><svg viewBox="0 0 512 512"><use href="#lg-body"/></svg></i><i class="L l-latch"><svg viewBox="0 0 512 512"><use href="#lg-latch"/></svg></i><i class="L l-halo"><svg viewBox="0 0 512 512"><use href="#lg-halo"/></svg></i><i class="L l-core"><svg viewBox="0 0 512 512"><use href="#lg-core"/></svg></i><i class="L l-glint"><b></b></i><i class="L l-spark"><svg viewBox="0 0 512 512"><use href="#lg-spark"/></svg></i></div></div></button>
     <div class="t" id="title">Sports<em>Med</em> Toolbox</div>
     <button class="navbtn" id="home" aria-label="Home"><svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"><path d="M4 11.5 12 4.5l8 7V20H4z"/></svg></button>
   </div>
@@ -1559,6 +1755,64 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 <button id="updbanner" hidden>Update ready &mdash; tap to refresh</button>
 <div id="glosspanel" hidden></div>
 <div id="toast" role="status">Copied</div>
+<div id="launch" aria-hidden="true"></div>
+<script src="img-dims.js" defer></script>
+<!-- R7 N1: the toolbox opens on launch. Independent of the gate and the bundle: it starts when #lock gets "open" (typed unlock) or at
+     load with a saved key (once per launch), runs beside boot and never delays it, lands on #brand after tbx-ready (fades on a non-Home
+     route), clears on tbx-boot-failed / a wrong saved key, 4 s cap. pointer-events:none; Reduce Motion = no launch. TBX_RM is global. -->
+<script>
+(function () {
+var W = window, D = document, R = D.documentElement, S = null;
+W.TBX_RM = function () { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+function later(f, ms) { return setTimeout(function () { try { f(); } catch (e) { end(); } }, ms); }
+function end() {
+var s = S; if (!s) return; S = null;
+try { clearTimeout(s.dog); clearTimeout(s.t); s.lg.parentNode.removeChild(s.lg); } catch (e) {}
+try { if (s.b) s.b.style.visibility = ''; R.classList.remove('launching', 'launch-land'); } catch (e) {}
+}
+function fade() { if (S && !S.gone) { S.gone = 1; S.lg.classList.add('fade'); S.t = later(end, 140); } }
+function land() {
+if (!S || S.gone) return;
+var lg = S.lg, m = D.querySelector('#brand .lg'), h = String(location.hash).split('?')[0], c = D.getElementById('content'), b, r, st = lg.style;
+if ((h && h != '#' && h != '#/') || !m || !m.getClientRects().length) return fade();
+S.gone = 1; b = lg.getBoundingClientRect(); r = m.getBoundingClientRect();
+st.setProperty('--dx', r.left + r.width / 2 - b.left - b.width / 2 + 'px');
+st.setProperty('--dy', r.top + r.height / 2 - b.top - b.height / 2 + 'px');
+st.setProperty('--s', r.width / b.width);
+if (c) c.classList.remove('vt');
+lg.classList.add('land'); R.classList.add('launch-land');
+S.t = later(end, 320);
+}
+function ready() { if (S && !S.gone) { clearTimeout(S.t); S.t = later(land, S.open - Date.now()); } }
+function begin(kind) {
+try {
+var typed = kind == 'typed', seen, P = W.performance, t0 = P ? P.now() : 0, b, lg, k;
+if (S || W['__tbxL' + kind] || W.__tbxBootErr || /^#\/(cc|ct|fa2?|teams?|signup)\b/.test(location.hash)) return;
+W['__tbxL' + kind] = 1;
+try { seen = sessionStorage.getItem('tbx_launch'); sessionStorage.setItem('tbx_launch', '1'); } catch (e) {}
+if ((!typed && seen) || W.TBX_RM()) return;
+b = D.getElementById('lkbadge'); lg = b.querySelector('.lg').cloneNode(true);
+S = { lg: lg, auto: !typed, open: Date.now() + (typed ? 220 : 300) };
+if (typed) { k = b.getBoundingClientRect(); lg.style.cssText = 'left:' + k.left + 'px;top:' + k.top + 'px'; S.b = b; b.style.visibility = 'hidden'; }
+lg.className = 'lg appicon s72 go ' + (typed ? 'locked' : 'ctr');
+D.getElementById('launch').appendChild(lg); R.classList.add('launching');
+S.dog = later(function () { S && !S.gone ? fade() : end(); }, 4000);
+if (P) W.__tbxLaunchCost = Math.round((P.now() - t0) * 10) / 10;
+if (W.__tbxReadyAt) ready();
+} catch (e) { end(); }
+}
+W.TBX_LAUNCH = { begin: begin, end: end };
+try {
+var lock = D.getElementById('lock'), MO = W.MutationObserver, cls = {attributes:true,attributeFilter:['class']};
+W.addEventListener('tbx-ready', function () { try { ready(); } catch (e) { end(); } });
+W.addEventListener('tbx-boot-failed', end);
+W.addEventListener('hashchange', fade);
+new MO(function () { if (lock.classList.contains('open')) begin('typed'); }).observe(lock, cls);
+new MO(function () { if (S && S.auto && !R.classList.contains('authed')) end(); }).observe(R, cls);
+if (R.classList.contains('authed')) begin('auto');
+} catch (e) { end(); }
+})();
+</script>
 <script>
 (function () {
   var form = document.getElementById('lockform');
@@ -1787,7 +2041,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 </script>
 <script src="lib/inflate.js" defer></script>
 <script src="lib/zxing-reader.js" defer></script>
-<script src="app-4.149.js"></script>
+<script src="app-4.150.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>
