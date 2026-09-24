@@ -59,6 +59,37 @@ a new password.
 - **Spec style:** metric values are written tight (`4mm`, not `4 mm`). verify.mjs enforces this.
 - **CACHE** bumps on every deploy. **APPVER** bumps whenever app logic changes (bundle rename).
   **What's New** entries are added only with wording provided by the owner; releases are
-  otherwise silent.
+  otherwise silent. Append new items at the **end** of `whatsnew.js` (oldest → newest); the app
+  shows the newest first.
 - One-shot migration scripts stay out of the repo (run them from a scratch directory);
   `tools/` is for durable tooling only.
+
+## Test suites
+
+Passwords come from the environment only — never write them into a file. jsdom is borrowed from
+`tools/cc-test/node_modules` or `tools/bo/node_modules` (`npm i jsdom@24` in either, once); Playwright
+from the global install. Suites marked *data.js* need the decrypted catalog (step 2 of the runbook).
+
+- `node tools/verify.mjs` — data checks; must print VERIFY PASSED.
+- `cd tools/cc-test && TZ=UTC APP_PW=<catalog pw> node run.js` — cycle-count sync engine (see its README).
+- `node tools/usage/test.js`, `APP_PW=<catalog pw> node tools/usage/app-test.js` — usage hub and dashboard.
+- `node tools/bo/test.js`, `cd tools/bo && APP_PW=<catalog pw> node app-test.js` — Backorder Report
+  (fixtures in `tools/bo/fixtures/`, gitignored).
+- `APP_PW=… CT_PW=… FA_PW=… FIXED=1 tools/fa2-test/launch.sh` — F&A (Playwright).
+- `tools/search-test/` (*data.js*):
+  - `node tools/search-test/run.js --out tools/search-test/before.json` on the bundle **before** a search
+    change, then `node tools/search-test/run.js --base tools/search-test/before.json --expect` on the new one.
+    The SPECIAL expectations must pass; every printed DIFF is a ranking change to review. The JSON is
+    derived from the catalog, so `tools/search-test/*.json` is gitignored — never commit it.
+  - `node tools/search-test/ui.js` — the search box: "1 item", the clear ✕, clearing re-runs the screen
+    underneath (Backorder Report, family chips), "No exact match — close spellings", "Ask Nate to add …".
+- `node tools/cards-test/release-a.cjs` (*data.js*) — product cards: navigation closes the photo viewer and
+  share sheet, the spec grid, shared/copied text carries the name, REF and link.
+- `tools/platform-test/` (Playwright; serves the repo root through its own Pages-like server):
+  - `APP_PW=<catalog pw> node tools/platform-test/boot-failsafe.js [--engine webkit]` — a start-up failure
+    keeps the saved login, never wipes caches offline or unregisters the service worker, and shows the
+    "ToolBox didn't open" card (13 checks).
+  - `APP_PW=<catalog pw> node tools/platform-test/lockdev.js [--engine webkit]` — "Lock this device" signs out
+    every login but keeps unsent scans and the rep's own data (4 checks).
+  - WebKit (the iPhone engine) needs a Playwright WebKit build: set `PLAYWRIGHT_BROWSERS_PATH` to the folder
+    holding it. Never run `playwright install` into system paths for this.

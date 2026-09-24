@@ -9,6 +9,8 @@ const { JSDOM } = require(require.resolve('jsdom', { paths: [path.join(__dirname
 const fs = require('fs'); const crypto = require('crypto');
 const U = require('./usage-core.js');
 const R = path.resolve(__dirname, '../..');
+// the bundle version under test (app-<ver>.js in index.html), so a version bump doesn't need test edits
+const VER = /app-([\d.]+)\.js/.exec(/<script src="(app[^"]*\.js)"/.exec(fs.readFileSync(R + '/index.html', 'utf8'))[1])[1];
 const results = []; const check = (n, ok, d) => { results.push({ n, ok: !!ok }); console.log((ok ? 'PASS ' : 'FAIL ') + n + (d !== undefined && !ok ? '  — ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 400) : '')); };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const HUB = 'https://script.google.com/macros/s/fake-usage/exec';
@@ -119,7 +121,7 @@ const typeQ = async (t, v) => { const q = t.$('#q'); q.value = v; q.dispatchEven
     check('boot: first batch ~2.5 s after boot', c1.length === 1 && c1[0].t >= 2400, c1.map(c => c.t));
     const b = c1[0].body;
     check('boot: batch shape (action, key, 10-char device, 12-char batch id, admin 0)', b.action === 'u_ev' && b.key === 'write-key' && /^[a-z0-9]{10}$/.test(b.d) && /^[a-z0-9]{12}$/.test(b.b) && b.a === 0, b);
-    check('boot: open event carries platform|mode|version', b.e[0][1] === 'open' && b.e[0][2] === 'boot' && b.e[0][3] === 'iPhone|web|4.142', b.e[0]);
+    check('boot: open event carries platform|mode|version', b.e[0][1] === 'open' && b.e[0][2] === 'boot' && b.e[0][3] === 'iPhone|web|' + VER, b.e[0]);
     check('boot: home view recorded', b.e.some(e => e[1] === 'view' && e[2] === 'home'));
     check('boot: device id + session persisted', t.w.localStorage.getItem('tbx_uid') === b.d && JSON.parse(t.w.localStorage.getItem('tbx_usess')).id === b.e[0][4]);
     await t.go('#/pn/3910500580');
@@ -228,7 +230,7 @@ const typeQ = async (t, v) => { const q = t.$('#q'); q.value = v; q.dispatchEven
   { const hub = Hub(); const now = Date.now(), t0 = U.etDayStart(now), iso = (ms) => new Date(Math.min(ms, now)).toISOString();
     const early = Math.max(t0 + 60000, now - 3 * 3600000);
     hub.extra = [
-      [iso(early), 'aaaaaaaaaa', 'sa', 'open', 'boot', 'iPhone|app|4.142'], [iso(early + 1000), 'aaaaaaaaaa', 'sa', 'card', '3910500580', ''],
+      [iso(early), 'aaaaaaaaaa', 'sa', 'open', 'boot', 'iPhone|app|' + VER], [iso(early + 1000), 'aaaaaaaaaa', 'sa', 'card', '3910500580', ''],
       [iso(early + 2000), 'aaaaaaaaaa', 'sa', 'search', 'zzkx', '0'], [iso(early + 3000), 'aaaaaaaaaa', 'sa', 'scan', '234020123', 'nocard'],
       [iso(now - 120000), 'bbbbbbbbbb', 'sb', 'open', 'boot', 'Android|web|4.141'], [iso(now - 60000), 'bbbbbbbbbb', 'sb', 'card', '3910500569', ''],
       [iso(now - 30000), 'bbbbbbbbbb', 'sb', 'search', 'nanotack', '12']
@@ -255,7 +257,7 @@ const typeQ = async (t, v) => { const q = t.$('#q'); q.value = v; q.dispatchEven
     check('dashboard: period report (7 days) with lists', /Most opened cards/.test(t.txt('#ug-period')) && /Searches that found nothing/.test(t.txt('#ug-period')) && /“zzkx”/.test(t.txt('#ug-period')), t.txt('#ug-period').slice(0, 300));
     check('dashboard: 7 daily columns + table', t.$$('#ug-period .ug-col').length === 7 && t.$$('#ug-period .ug-tbl tbody tr').length === 7);
     check('dashboard: scans breakdown lists the no-card part', /234020123/.test(t.txt('#ug-period')) && /Part number with no card\s*1/.test(t.txt('#ug-period')));
-    check('dashboard: phones & versions', /iPhone app/.test(t.txt('#ug-period')) && /Android browser/.test(t.txt('#ug-period')) && /App v4\.142\s*current/i.test(t.txt('#ug-period')));
+    check('dashboard: phones & versions', /iPhone app/.test(t.txt('#ug-period')) && /Android browser/.test(t.txt('#ug-period')) && new RegExp('App v' + VER.replace(/\./g, '\\.') + '\\s*current', 'i').test(t.txt('#ug-period')));
     t.$('[data-ug-days="30"]').click(); await sleep(120);
     const last = usageCalls(t).filter(c => c.body.action === 'u_stats').slice(-1)[0];
     check('filters: 30 days asks the hub for 30 and redraws', last && last.body.days === 30 && t.$$('#ug-period .ug-col').length === 30 && t.$('[data-ug-days="30"]').classList.contains('on'));
@@ -271,6 +273,10 @@ const typeQ = async (t, v) => { const q = t.$('#q'); q.value = v; q.dispatchEven
     check('feed: tapping a card row opens the card', /^#\/pn\//.test(t.w.location.hash));
     await t.go('#/usage'); await sleep(60);
     check('dashboard: reopens straight into the dashboard (key remembered)', !!t.$('.ug-hero'));
+    // P6: a catalog search typed over the dashboard and then cleared redraws it for real (it came back as an empty shell)
+    await typeQ(t, 'iconix'); await typeQ(t, ''); await sleep(200);
+    const nLive = usageCalls(t).filter(c => c.body.action === 'u_live').length; t.$('#ug-rf').click(); await sleep(200);
+    check('dashboard: clearing the search box redraws it and ↻ still works (P6)', !!t.$('.ug-hero') && t.$$('#ug-livebody .ug-tile').length === 6 && usageCalls(t).filter(c => c.body.action === 'u_live').length > nLive, t.txt('#content').slice(0, 160));
     t.$('#ug-forget').click(); await sleep(30);
     check('forget: key removed, gate back', !t.w.localStorage.getItem('tbx_uadm') && !!t.$('#ug-key'));
     const uev = t.events();

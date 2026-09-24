@@ -12,21 +12,122 @@
 <meta property="og:image" content="https://sportsmedtoolbox.com/icon-512.png">
 <meta name="twitter:card" content="summary">
 <script>
+/* P4 — start-up fail-safe. Lives in index.html because it has to work when the app bundle is what failed.
+   TBX_PROBE(ms): does OUR site answer? A HEAD request skips the service worker (it only serves GET), so the cached app
+     can't fake it, and behind a hospital captive portal the TLS handshake fails → false. navigator.onLine alone lies there.
+   TBX_FAIL(phase, err): keep the saved login, reset __tbxBooted, show the "ToolBox didn't open" card.
+   The 4-second watchdog below never wipes while offline, never unregisters the service worker, and only ever deletes
+   the app-shell cache (tbx-vNNN-…) — never the photo cache (tbx-photos-*) or queued feedback (tbx-fbq). */
 (function () {
+  var SHELL = /^tbx-v\d+-/;
+  window.TBX_PROBE = function (ms) {
+    if (navigator.onLine === false) return Promise.resolve(false);
+    return new Promise(function (res) {
+      var done = false, ac = null;
+      try { ac = new AbortController(); } catch (e) {}
+      var t = setTimeout(function () { if (!done) { done = true; try { if (ac) ac.abort(); } catch (e) {} res(false); } }, ms || 4000);
+      try {
+        fetch('./?probe=' + Date.now(), { method: 'HEAD', cache: 'no-store', signal: ac ? ac.signal : undefined }).then(function (r) {
+          if (!done) { done = true; clearTimeout(t); res(r.status > 0 && r.status < 500); }
+        }, function () { if (!done) { done = true; clearTimeout(t); res(false); } });
+      } catch (e) { done = true; clearTimeout(t); res(false); }
+    });
+  };
+  function unsent() {
+    var n = 0, fa = false;
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (/^tbx_.+_ops$/.test(k)) { try { n += (JSON.parse(localStorage.getItem(k) || '[]') || []).length; } catch (e) {} }
+      }
+      fa = !!localStorage.getItem('tbx_fa2_pend');
+    } catch (e) {}
+    return { n: n, fa: fa };
+  }
+  function appVer() { var s = document.querySelector('script[src^="app-"]'); var m = s && /app-([\d.]+)\.js/.exec(s.getAttribute('src')); return m ? m[1] : '?'; }
+  function update(btn) {
+    btn.disabled = true; btn.textContent = 'Checking…';
+    function reset(t) { btn.textContent = t; setTimeout(function () { btn.disabled = false; btn.textContent = 'Check for update'; }, 2600); }
+    if (!(navigator.serviceWorker && navigator.serviceWorker.getRegistration)) return reset('Not available here');
+    navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (!reg) throw 0;
+      return reg.update().then(function () {
+        return new Promise(function (res) {
+          var t0 = Date.now();
+          (function poll() { if (reg.waiting) return res(reg.waiting); if (!reg.installing || Date.now() - t0 > 60000) return res(null); setTimeout(poll, 500); })();
+        });
+      });
+    }).then(function (w) {
+      if (!w) return reset('No update yet');
+      btn.textContent = 'Updating…';
+      navigator.serviceWorker.addEventListener('controllerchange', function () { location.reload(); });
+      w.postMessage('SKIP_WAITING');
+      setTimeout(function () { location.reload(); }, 5000);
+    }).catch(function () { reset('Couldn’t check'); });
+  }
+  function card(info, online) {
+    var el = document.getElementById('booterr');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'booterr';
+      el.setAttribute('role', 'alertdialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-labelledby', 'be-t'); el.setAttribute('aria-describedby', 'be-b');
+      document.body.appendChild(el);
+    }
+    var u = unsent(), keep = ['your saved login'];
+    if (u.n) keep.push(u.n + ' unsent cycle-count scan' + (u.n === 1 ? '' : 's'));
+    if (u.fa) keep.push('your unsent F&A save');
+    var safe = keep.length === 1 ? 'Your saved login is safe on this phone.'
+      : 'Your saved login' + (keep.length === 3 ? ', ' + keep[1] + ' and ' + keep[2] : ' and ' + keep[1]) + ' are safe on this phone.';
+    var body = info.phase === 'fetch'
+      ? (online ? 'ToolBox couldn’t load its data. Check your connection and try again.'
+                : 'ToolBox needs signal once more to finish saving its data on this phone. Try again when you’re connected.')
+      : info.phase === 'stall'
+      ? (online ? 'ToolBox is taking too long to open.' : 'ToolBox is taking too long to open, and you’re offline.')
+      : (online ? 'Something in this version stopped ToolBox from opening. Checking for an update usually fixes it.'
+                : 'Something in this version stopped ToolBox from opening. Try again — or check for an update when you have signal.');
+    el.innerHTML = '<div class="be-card"><div class="be-ic" aria-hidden="true">!</div>' +
+      '<div class="be-t" id="be-t">ToolBox didn’t open</div>' +
+      '<div class="be-b" id="be-b"></div><div class="be-safe"></div>' +
+      '<button type="button" class="be-btn" id="be-retry">Try again</button>' +
+      (online ? '<button type="button" class="be-btn2" id="be-upd">Check for update</button>' : '') +
+      '<div class="be-code"></div></div>';
+    el.querySelector('.be-b').textContent = body;
+    el.querySelector('.be-safe').textContent = safe;
+    el.querySelector('.be-code').textContent = 'E-' + info.phase.toUpperCase() + ' · v' + appVer() + ' · ' + info.name + (info.msg ? ': ' + info.msg : '');
+    el.querySelector('#be-retry').onclick = function () { location.reload(); };
+    var ub = el.querySelector('#be-upd'); if (ub) ub.onclick = function () { update(ub); };
+    el.hidden = false;
+    try { el.querySelector('#be-retry').focus(); } catch (e) {}
+  }
+  window.TBX_FAIL = function (phase, e) {
+    window.__tbxBooted = false;                 // a later retry may boot again
+    window.__tbxBootPhase = 'failed';
+    var info = { phase: phase, name: (e && e.name) || 'Error', msg: String((e && e.message) || e || '').slice(0, 140) };
+    window.__tbxBootErr = info;
+    try { document.documentElement.classList.add('tbx-failed'); } catch (x) {}
+    try { window.dispatchEvent(new CustomEvent('tbx-boot-failed', { detail: info })); } catch (x) {}   // hook for start-up error reporting
+    try { console.error('[ToolBox] start failed (' + phase + ')', e); } catch (x) {}
+    function show() { window.TBX_PROBE(3000).then(function (on) { card(info, on); }); }
+    if (document.body) show(); else document.addEventListener('DOMContentLoaded', show);
+  };
   window.addEventListener('load', function () {
-    setTimeout(function () {
-      if (!document.documentElement.classList.contains('authed')) return;
+    var t0 = Date.now();
+    setTimeout(function check() {
+      if (!document.documentElement.classList.contains('authed') || window.__tbxBootErr) return;
       var c = document.getElementById('content');
       if (c && c.innerHTML && c.innerHTML.length > 10) return;
-      try {
-        if (sessionStorage.getItem('tbx_failsafe')) return;
-        sessionStorage.setItem('tbx_failsafe', '1');
-      } catch (e) {}
-      function go() { location.reload(); }
-      var jobs = [];
-      try { if (window.caches && caches.keys) jobs.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })); } catch (e) {}
-      try { if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })); } catch (e) {}
-      Promise.all(jobs).then(go, go);
+      var ph = window.__tbxBootPhase;
+      if (ph && ph !== 'booted' && ph !== 'failed' && Date.now() - t0 < 20000) return setTimeout(check, 1000);  // still starting on a slow phone: wait, don't wipe
+      var again = false;
+      try { again = !!sessionStorage.getItem('tbx_failsafe'); sessionStorage.setItem('tbx_failsafe', '1'); } catch (e) {}
+      window.TBX_PROBE(4000).then(function (on) {
+        if (!on || again) { window.TBX_FAIL('stall', new Error('blank after start (' + (ph || 'no phase') + ')')); return; }
+        function go() { location.reload(); }
+        try {
+          caches.keys().then(function (ks) {
+            return Promise.all(ks.filter(function (k) { return SHELL.test(k); }).map(function (k) { return caches.delete(k); }));
+          }).then(go, go);
+        } catch (e) { go(); }
+      });
     }, 4000);
   });
 })();
@@ -138,6 +239,9 @@
   --sab:calc(env(safe-area-inset-bottom, 0px) / var(--z));
   --hdr-pad:calc(10px / var(--z));
   --hdr-row:calc(56px / var(--z));
+  /* P18 landscape: side safe areas, same zoom rule as --sat/--sab */
+  --sal:calc(env(safe-area-inset-left, 0px) / var(--z));
+  --sar:calc(env(safe-area-inset-right, 0px) / var(--z));
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
 html,body{margin:0; background:var(--ink); color:var(--bone);
@@ -213,6 +317,7 @@ main{padding:16px 14px calc(var(--sab) + 28px); max-width:640px; margin:0 auto;}
 .bo-rf.spin{animation:bo-spin .8s linear infinite; opacity:.85;}
 @keyframes bo-spin{to{transform:rotate(360deg);}}
 .bo-chips{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; padding:2px 0 0;}
+.bo-chips[hidden]{display:none;}
 .bochip{flex:none; border:1.5px solid #5a564e; background:var(--panel); color:var(--bone); font:inherit; font-weight:700; font-size:12.5px; border-radius:999px; padding:7px 12px; cursor:pointer; white-space:nowrap; transition:transform .08s ease;}
 .bochip:active{transform:scale(.94);}
 .bochip.on{border-color:#9CC9FF; color:#0F1F33; background:#9CC9FF;}
@@ -290,7 +395,7 @@ button.tile, .rowitem{cursor:pointer; width:100%;}
 .warn{background:#3A2A14; border:1px solid #8a6420; border-left:4px solid var(--amber); color:#FFD98A; border-radius:10px; padding:11px 13px; font-size:13.5px; font-weight:600; line-height:1.4; margin:0 0 14px;}
 .rowitem .rl{flex:1; min-width:0;}
 .rowitem .rl b{display:block; font-size:15px; font-weight:600; line-height:1.3;}
-.rowitem .rl span{display:block; color:var(--muted); font-size:12.5px; margin-top:2px;
+.rowitem .rl > .ld{display:block; color:var(--muted); font-size:12.5px; margin-top:2px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .rowitem .pn{color:var(--amber); font-size:13px; flex:none;}
 .rowitem .ct{color:var(--muted); flex:none; font-size:18px;}
@@ -302,7 +407,7 @@ button.tile, .rowitem{cursor:pointer; width:100%;}
 .card .fam{color:var(--muted); font-size:13px; margin-bottom:14px;}
 .pnblock{display:flex; align-items:center; gap:12px; background:var(--panel2);
   border:1px dashed var(--line); border-radius:12px; padding:12px 14px; margin:0 0 14px;}
-.pnblock .num{flex:1; font-size:24px; letter-spacing:.5px; color:var(--amber); word-break:break-all;}
+.pnblock .num{flex:1; min-width:0; font-size:clamp(17px, 6vw, 24px); letter-spacing:.5px; color:var(--amber); white-space:nowrap;}
 .copy{border:0; background:var(--amber); color:#141414; font-weight:700; font-size:14px;
   border-radius:999px; padding:10px 16px; min-height:44px;}
 .copy:active{background:var(--amber-press);}
@@ -314,10 +419,11 @@ button.tile, .rowitem{cursor:pointer; width:100%;}
 .chip.k-sub{border-color:#6E5AA6; color:#C3B4EC; background:rgba(110,90,166,.14); font-weight:700;}
 .chip.k-grp{border-color:#4E8A5B; color:#9BD8A9; background:rgba(78,138,91,.14); font-weight:700;}
 .ledger{border-top:1px solid var(--line);}
-.ledger .lr{display:grid; grid-template-columns:42% 58%; gap:10px; padding:10px 2px;
+.ledger .lr{display:grid; grid-template-columns:minmax(0,42fr) minmax(0,58fr); gap:10px; padding:10px 2px;
   border-bottom:1px solid var(--line); font-size:14.5px;}
 .ledger .lk{color:var(--muted);}
 .ledger .lv{white-space:pre-line; color:var(--bone);}
+.ledger .lv, .ledger .lk{overflow-wrap:anywhere;}
 .ledger .lhead{margin:16px 2px 4px; padding-bottom:5px; font-size:11.5px; font-weight:700; color:#7CCFE8;
   letter-spacing:.1em; text-transform:uppercase; opacity:.9; border-bottom:1px solid var(--line);}
 .reflinkrow{display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px;}
@@ -349,6 +455,8 @@ main{padding-bottom:calc(var(--sab) + 96px);}
   bottom:calc(var(--sab) + 78px); z-index:40;
   background:var(--amber); color:#1E1E1E; font-weight:800; font-size:14px;
   border:none; border-radius:999px; padding:12px 18px; box-shadow:0 6px 24px rgba(0,0,0,.5);}
+/* P18: the update banner spans the screen (inside the side insets) instead of a half-width pill that wrapped under the bubble */
+body:not(.ct-chrome-off) #updbanner{left:max(14px, var(--sal, 0px)); right:max(14px, var(--sar, 0px)); transform:none; max-width:420px; margin:0 auto; text-align:center;}
 .chip.link{border-color:#B7B1A8; color:#FFFFFF; background:#3E3E3E; font-weight:700;}
 .vhead{margin-top:2px;}
 .fchips{display:flex; flex-wrap:wrap; gap:8px; margin:2px 2px 12px;}
@@ -380,6 +488,7 @@ main{padding-bottom:calc(var(--sab) + 96px);}
 .fchip.on{border-color:var(--amber); color:#1E1E1E; background:var(--amber);}
 .gterm{background:none; border:none; padding:0; font:inherit; color:inherit;
   border-bottom:1px dotted var(--amber); cursor:pointer;}
+.gnb{white-space:nowrap;}
 #glosspanel{position:fixed; left:12px; right:12px; bottom:calc(var(--sab) + 76px);
   z-index:45; background:#2E2C28; border:1px solid #6b5a2a; border-left:4px solid var(--amber);
   border-radius:12px; padding:13px 15px; color:var(--bone); font-size:14px; line-height:1.5;
@@ -396,6 +505,12 @@ main{padding-bottom:calc(var(--sab) + 96px);}
   width:46px; height:46px; border-radius:50%; border:1px solid #56524A; background:rgba(42,42,42,.94);
   color:var(--amber); font-size:20px; line-height:1; box-shadow:0 4px 14px rgba(0,0,0,.5);}
 #fb-fab:active{background:#333;}
+/* P12: fades out while the page moves (.15s), back in after 600 ms still (.25s); taps pass through while it is away */
+#fb-fab{transition:opacity .25s ease-in-out;}
+#fb-fab.fb-away{opacity:0; pointer-events:none; transition:opacity .15s ease-out;}
+body.gloss-on #fb-fab, body.upd-on #fb-fab, body.kb-on #fb-fab{opacity:0; pointer-events:none;}
+/* P12: the last content on catalog screens scrolls clear of the bubble (bar 72 + gap 6 + bubble 46 + 8) */
+body:not(.ct-chrome-off) #content:not(.homeview)::after{content:""; display:block; height:36px;}
 /* CT Team screens are purely functional: no feedback bubble */
 body.ct-chrome-off #fb-fab{display:none;}
 #fb-ov{position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.62);
@@ -785,7 +900,8 @@ body.cc-fixed .fops-screen.has-list #fops-list{flex:1 1 auto; min-height:0; max-
 #wncard.bye{opacity:0; transform:translateY(-10px); transition:opacity .25s, transform .25s;}
 #wncard .wn-h{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;}
 #wncard .wn-h span{color:var(--amber); font-weight:800; font-size:12.5px; letter-spacing:.12em; text-transform:uppercase;}
-#wndismiss{border:0; background:none; color:var(--muted); font-size:15px; padding:6px 8px; min-height:36px;}
+#wndismiss{border:0; background:none; color:var(--muted); font-size:15px; padding:0; min-width:44px; min-height:44px; margin:-6px -8px -6px 0;
+  display:flex; align-items:center; justify-content:center;} /* P17: a 44 pt target around the line close icon */
 .wn-i{display:block; width:100%; text-align:left; background:none; border:0; color:var(--bone);
   font:inherit; font-size:13.5px; line-height:1.45; padding:5px 0; border-top:1px solid var(--line);}
 .wn-i:first-of-type{border-top:0;}
@@ -893,7 +1009,32 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 
 /* barcode scanner */
 #bottombar{display:flex; gap:10px; align-items:center;}
-#bottombar .search{flex:1; margin:0;}
+/* P18 landscape: side safe areas + compact bars on catalog screens (CC / F&A untouched) */
+body:not(.ct-chrome-off) #bar{padding-left:max(14px, var(--sal, 0px)); padding-right:max(14px, var(--sar, 0px));}
+body:not(.ct-chrome-off) #bar::after{margin-left:calc(-1 * max(14px, var(--sal, 0px))); margin-right:calc(-1 * max(14px, var(--sar, 0px)));}
+body:not(.ct-chrome-off) main{padding-left:max(14px, var(--sal, 0px)); padding-right:max(14px, var(--sar, 0px));}
+#bottombar{padding-left:max(14px, var(--sal, 0px)); padding-right:max(14px, var(--sar, 0px));}
+body:not(.ct-chrome-off) #fb-fab{right:max(14px, var(--sar, 0px));}
+#glosspanel{left:max(12px, var(--sal, 0px)); right:max(12px, var(--sar, 0px));}
+@media (orientation:landscape) and (max-height:500px){
+  body:not(.ct-chrome-off){--hdr-row:calc(44px / var(--z)); --hdr-pad:calc(6px / var(--z));}
+  #bottombar{padding-top:6px; padding-bottom:calc(var(--sab) + 6px);}
+  #bottombar .search input{height:44px;} #bottombar #scanbtn{height:44px;}
+  body:not(.ct-chrome-off) main{padding-bottom:calc(var(--sab) + 72px);}
+  body:not(.ct-chrome-off) #fb-fab{bottom:calc(62px + var(--sab));}
+  body:not(.ct-chrome-off) #updbanner{bottom:calc(var(--sab) + 62px);}
+}
+/* P11 / P24: the search pill and its input may shrink, so the scan button stays on a 320 pt screen with the clear ✕ in */
+#bottombar .search{flex:1 1 auto; min-width:0; margin:0;}
+.search input{min-width:0; width:100%;}
+@media (max-width:359px){ #bottombar{gap:6px; padding-left:12px; padding-right:12px;} #bottombar #scanbtn{width:48px;}
+  #bottombar .search{padding:0 10px; gap:8px;} }
+/* P24: always-visible clear; the native iOS clear (focus-only) is hidden so there is only ever one ✕ */
+#q::-webkit-search-cancel-button{-webkit-appearance:none; appearance:none; display:none;}
+#qclear{flex:none; width:44px; height:44px; margin-right:-10px; border:0; border-radius:50%; background:none; color:var(--muted);
+  display:flex; align-items:center; justify-content:center; cursor:pointer;}
+#qclear[hidden]{display:none;}
+#qclear:active{background:var(--panel2); color:var(--bone);}
 #scanbtn{flex:none; width:52px; height:52px; border-radius:var(--radius); border:1px solid var(--line);
   background:var(--panel); color:var(--amber); display:flex; align-items:center; justify-content:center;}
 #scanbtn:active{background:var(--panel2);}
@@ -996,6 +1137,18 @@ button.wn-i{cursor:pointer;} button.wn-i:active{background:var(--panel2);}
 .emp b{display:block; color:var(--bone); font-size:var(--fs-md); font-weight:700; margin-bottom:4px}
 .emp span{display:block; font-size:var(--fs-sm); line-height:1.4}
 .emp .ea{margin-top:12px}
+/* P14 not-found screen, P17/P52 line icons */
+.ico{display:inline-block; vertical-align:-4px; flex:none;}
+.emp .ei .ico{width:30px; height:30px; color:var(--muted);}
+.nf-acts{display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:4px;}
+.nf-btn{display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px; border-radius:999px; border:1.5px solid var(--amber);
+  background:rgba(253,181,21,.08); color:var(--amber); font:inherit; font-weight:700; font-size:14px; cursor:pointer;}
+.nf-card .footlink{margin-top:10px;}
+.a2i{display:inline-flex; vertical-align:-5px; color:var(--amber);}
+/* P22 close spellings, P23 "Ask Nate to add …" */
+.sfuzzy{margin:6px 2px 4px; padding:9px 12px; border-radius:10px; background:#3A2A14; border:1px solid #8A6420; color:#FFD98A; font-size:13px; font-weight:700; line-height:1.4;}
+.askin{display:block; border:0; background:none; color:var(--amber); font:inherit; font-weight:700; font-size:13px; padding:6px 0 0; cursor:pointer; text-align:left;}
+.emp .ea .askn{display:block; margin:0 auto 4px; min-height:44px;}
 body.fa2-wide .emp{text-align:left; padding:16px 2px}
 #ptr{position:fixed; top:calc(var(--sat) + var(--hdr-pad) + var(--hdr-row) + 26px); left:50%; transform:translate(-50%,-40px); z-index:9; width:34px; height:34px; border-radius:50%; background:var(--panel); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--amber); font-size:18px; opacity:0; transition:opacity .15s; pointer-events:none;}
 #ptr.spin{animation:ptrspin .8s linear infinite}
@@ -1104,6 +1257,20 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 .ug-gmsg{min-height:18px; margin-top:10px; color:#FFB3AE; font-size:13px;}
 .foot .ugver{-webkit-user-select:none; user-select:none;}
 @media (max-width:360px){.ug-tiles{grid-template-columns:repeat(2, minmax(0, 1fr));} .ug-hero b{font-size:48px;}}
+/* P4 — "ToolBox didn't open" card (above the lock, below nothing) */
+#booterr{position:fixed; inset:0; z-index:300; display:flex; align-items:center; justify-content:center; padding:24px 16px calc(24px + var(--sab, env(safe-area-inset-bottom, 0px)));
+  background:var(--ink, #1E1E1E); color:var(--bone, #F4F2EE);}
+#booterr[hidden]{display:none;}
+#booterr .be-card{width:100%; max-width:340px; text-align:center;}
+#booterr .be-ic{width:52px; height:52px; margin:0 auto 16px; border-radius:16px; background:#3a2a12; color:var(--amber, #FDB515);
+  font:800 28px/52px -apple-system, system-ui, sans-serif;}
+#booterr .be-t{font-size:21px; font-weight:700;}
+#booterr .be-b{color:var(--bone, #F4F2EE); font-size:15px; line-height:1.5; margin:10px 0 8px;}
+#booterr .be-safe{color:#9BD9A8; font-size:14px; line-height:1.5; margin:0 0 20px;}
+#booterr .be-btn{width:100%; min-height:48px; border:0; border-radius:12px; background:var(--amber, #FDB515); color:#141414; font-weight:700; font-size:16px;}
+#booterr .be-btn2{width:100%; min-height:48px; margin-top:10px; border:1px solid #555; border-radius:12px; background:none; color:var(--bone, #F4F2EE); font-weight:600; font-size:15px;}
+#booterr .be-btn2:disabled{opacity:.7;}
+#booterr .be-code{margin-top:18px; color:var(--muted, #9A958C); font:12px/1.5 ui-monospace, Menlo, monospace; word-break:break-word; -webkit-user-select:text; user-select:text;}
 </style>
 </head>
 <body>
@@ -1130,7 +1297,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
   </div>
 </header>
 <main id="view"><div id="content"></div></main>
-<div id="bottombar"><div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#F4F2EE" stroke-width="2"/><path d="M20 20l-3.8-3.8" stroke="#F4F2EE" stroke-width="2" stroke-linecap="round"/></svg><input id="q" type="search" placeholder="Search name or part number" autocomplete="off" autocorrect="off" autocapitalize="off"></div><button id="scanbtn" aria-label="Scan a package barcode"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10.5 8v8M13.5 8v5M13.5 16v0M16.5 8v8"/></svg></button></div>
+<div id="bottombar"><div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#F4F2EE" stroke-width="2"/><path d="M20 20l-3.8-3.8" stroke="#F4F2EE" stroke-width="2" stroke-linecap="round"/></svg><input id="q" type="search" enterkeyhint="search" placeholder="Search name or part #" aria-label="Search name or part number" autocomplete="off" autocorrect="off" autocapitalize="off"><button type="button" id="qclear" aria-label="Clear search" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><button id="scanbtn" aria-label="Scan a package barcode"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10.5 8v8M13.5 8v5M13.5 16v0M16.5 8v8"/></svg></button></div>
 <div id="scan-ov" hidden>
   <video id="scan-video" autoplay muted playsinline></video>
   <div id="scan-top"><b>Scan a package barcode</b><span class="scan-actions"><button id="scan-torch" hidden aria-label="Flashlight"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H13z"/></svg></button><button id="scan-close" aria-label="Close scanner">&#x2715;</button></span></div>
@@ -1189,10 +1356,6 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
           km, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
       });
   }
-  function decryptWith(key, P) {
-    return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(P.iv) }, key, b64d(P.ct))
-      .then(function (buf) { return new TextDecoder().decode(buf); });
-  }
   // A password that isn't the primary one may still hold the content key in a wrap
   // (same salt, so one PBKDF2 covers every attempt). Resolves the content key or rejects.
   function unwrapWith(key, P) {
@@ -1205,13 +1368,21 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
     }
     return next();
   }
+  function phase(p) { window.__tbxBootPhase = p; }
+  function WrongKey(e) { this.name = 'WrongKey'; this.cause = e; }
+  // P4: never throws — a boot exception keeps the saved key, resets __tbxBooted and shows the error card.
+  function safeBoot(js) {
+    try { bootWith(js); return true; } catch (e) { window.TBX_FAIL(window.__tbxBootPhase === 'eval' ? 'decode' : 'boot', e); return false; }
+  }
   function bootWith(js) {
+    phase('eval');
     (0, eval)(js);
     document.documentElement.classList.add('authed');
     window.dispatchEvent(new Event('tbx-unlock'));
     // The app script can still be downloading when a stored key finishes decrypting
     // (fresh app file after an update, slow wifi): remember, and boot when it lands.
-    if (window.TBX_BOOT) window.TBX_BOOT(); else window.__tbxBootPending = true;
+    phase('boot');
+    if (window.TBX_BOOT) { window.TBX_BOOT(); phase('booted'); } else { window.__tbxBootPending = true; phase('app'); }
   }
   function clearKeys() {
     try { sessionStorage.removeItem('tbx_k2'); } catch (e) {}
@@ -1222,14 +1393,29 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
   var stored = null;
   try { stored = sessionStorage.getItem('tbx_k2') || localStorage.getItem('tbx_k2'); } catch (e) {}
   if (stored && window.crypto && crypto.subtle) {
+    // P4: only a key that can never work (wrong key: AES-GCM OperationError, or a key that won't even import) clears the
+    // saved login. Anything else (offline without data, a data or code bug) keeps it and shows the "didn't open" card.
+    phase('fetch');
     getPayload().then(function (P) {
-      return crypto.subtle.importKey('raw', b64d(stored), 'AES-GCM', false, ['decrypt'])
-        .then(function (key) { return decryptWith(key, P); });
+      phase('key');
+      return Promise.resolve().then(function () { return crypto.subtle.importKey('raw', b64d(stored), 'AES-GCM', false, ['decrypt']); })
+        .catch(function (e) { throw new WrongKey(e); })
+        .then(function (key) {
+          phase('decrypt');
+          return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(P.iv) }, key, b64d(P.ct))
+            .catch(function (e) { throw (e && e.name === 'OperationError') ? new WrongKey(e) : e; })
+            .then(function (buf) { phase('decode'); return new TextDecoder().decode(buf); });
+        });
     }).then(function (js) {
-      bootWith(js);
-    }).catch(function () {
-      clearKeys();
-      document.documentElement.classList.remove('authed');
+      safeBoot(js);
+    }).catch(function (e) {
+      if (e instanceof WrongKey) {               // the payload was re-encrypted (new salt) or the password changed
+        clearKeys();
+        document.documentElement.classList.remove('authed');
+        var sub = document.querySelector('#lock .lk-sub'); if (sub) sub.textContent = 'Your saved login has expired — enter the team password.';
+        return;
+      }
+      window.TBX_FAIL(window.__tbxBootPhase === 'fetch' ? 'fetch' : 'decode', e);   // offline without data, a data bug: keep the key
     });
   } else if (stored) {
     clearKeys();
@@ -1260,24 +1446,30 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
       return keyFromPassword(v, P);
     }).then(function (key) {
       K0 = key;
-      return decryptWith(key, P0).catch(function () {
-        return unwrapWith(key, P0).then(function (k2) { K0 = k2; return decryptWith(k2, P0); });
+      var raw = function (k) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(P0.iv) }, k, b64d(P0.ct)); };
+      return raw(key).catch(function () {
+        return unwrapWith(key, P0).then(function (k2) { K0 = k2; return raw(k2); });
       });
-    }).then(function (js) {
-      return crypto.subtle.exportKey('raw', K0).then(function (raw) {
-        var kb = b64e(raw);
+    }).then(function (buf) {
+      // P4: the password is proven once decrypt succeeds, so the key is stored before decode and boot; a failure after
+      // this point shows the "didn't open" card and is never reported as "Incorrect password".
+      return crypto.subtle.exportKey('raw', K0).then(function (rawk) {
+        var kb = b64e(rawk);
         try { sessionStorage.setItem('tbx_k2', kb); } catch (e2) {}
         try {
           if (rem && rem.checked) { localStorage.setItem('tbx_k2', kb); localStorage.setItem('tbx_rm', '1'); }
           else { localStorage.removeItem('tbx_k2'); localStorage.removeItem('tbx_rm'); }
         } catch (e3) {}
         pw.blur();
-        var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-        if (reduce) { bootWith(js); }
-        else {
-          lock.classList.add('open');
-          setTimeout(function () { bootWith(js); }, 700);
-        }
+        phase('decode');
+        Promise.resolve(new TextDecoder().decode(buf)).then(function (js) {
+          var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+          if (reduce) { safeBoot(js); }
+          else {
+            lock.classList.add('open');
+            setTimeout(function () { safeBoot(js); }, 700);
+          }
+        }, function (e) { window.TBX_FAIL('decode', e); });
       });
     }).catch(function (e4) {
       busy = false;
@@ -1296,7 +1488,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.142.js"></script>
-<script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; window.TBX_BOOT(); }</script>
+<script src="app-4.143.js"></script>
+<script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>

@@ -6,3 +6,4 @@ tools/bo/fixtures/
 tools/bo/shots/
 tools/bo/node_modules
 tools/usage/shots/
+tools/search-test/*.json

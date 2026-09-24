@@ -1,22 +1,21 @@
 (function () {
+  // P4: heal = delete the app-shell cache (tbx-vNNN-…) and reload — only when our own site answers (never offline, never
+  // behind a captive portal), never any other cache, and never unregister the service worker.
   function heal() {
+    if (window.__tbxBootErr) return;           // the start-up failure is already on screen (Try again); a reload can't fix a data bug
     try {
       if (sessionStorage.getItem('tbx_healed')) return;
       sessionStorage.setItem('tbx_healed', '1');
     } catch (e) {}
-    var jobs = [];
-    if (window.caches && caches.keys) {
-      jobs.push(caches.keys().then(function (ks) {
-        return Promise.all(ks.map(function (k) { return caches.delete(k); }));
-      }));
-    }
-    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
-      jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
-        return Promise.all(rs.map(function (r) { return r.unregister(); }));
-      }));
-    }
-    function go() { location.reload(); }
-    Promise.all(jobs).then(go, go);
+    var probe = window.TBX_PROBE ? window.TBX_PROBE(4000) : Promise.resolve(navigator.onLine !== false);
+    probe.then(function (on) {
+      if (!on) { if (window.TBX_FAIL && !window.__tbxRouted) window.TBX_FAIL('boot', new Error('start error while offline')); return; }
+      function go() { location.reload(); }
+      if (!(window.caches && caches.keys)) return go();
+      caches.keys().then(function (ks) {
+        return Promise.all(ks.filter(function (k) { return /^tbx-v\d+-/.test(k); }).map(function (k) { return caches.delete(k); }));
+      }).then(go, go);
+    });
   }
   // Auto-heal only covers a broken boot (cache/SW corruption). Once the app has
   // routed successfully, a runtime error is a bug, not a cache problem — wiping
@@ -40,13 +39,16 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.142';
+  var APPVER = '4.143';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
     window.__tbxHeal(); return;
   }
-  try { sessionStorage.removeItem('tbx_healed'); } catch (e) {}
+  try {   // P4: after a repair (shell cache deleted) ask the SW to re-download the whole shell so CC/F&A stay offline-ready
+    if ((sessionStorage.getItem('tbx_healed') || sessionStorage.getItem('tbx_failsafe')) && navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage('PRECACHE');
+    sessionStorage.removeItem('tbx_healed');
+  } catch (e) {}
   var FILT = {}, CURVIEW = null, CURCOUNT = null;
 var GLOSS = {
   "UHMWPE": "Ultra-high molecular weight polyethylene — the high-strength fiber used in modern surgical sutures like Force Fiber and XBraid.",
@@ -96,6 +98,7 @@ var GLOSS = {
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); } // P16: "1 item", "2 items"
   function skel(n, cls) { var o = ''; for (var i = 0; i < (n || 3); i++) o += '<div class="skel ' + (cls || 'row') + '"></div>'; return o; }
   function emptyHTML(icon, title, sub, action) {
     return '<div class="emp">' + (icon ? '<div class="ei">' + icon + '</div>' : '') + '<b>' + esc(title) + '</b>' +
@@ -306,7 +309,8 @@ var GLOSS = {
       '</div><div id="bo-body"></div>');
     function subLine() {
       var d = BO.data, s = '';
-      if (d && d.weekOf) s = 'Week of ' + boFmt(d.weekOf);
+      if (!d) return BO.busy ? 'Loading…' : BO.err === 'offline' ? 'Offline — not loaded yet' : BO.err ? 'Couldn’t reach the report hub' : 'Loading…'; // P15
+      if (d.weekOf) s = 'Week of ' + boFmt(d.weekOf);
       if (BO.busy) s += (s ? ' · ' : '') + 'refreshing…';
       else if (BO.at) s += (s ? ' · ' : '') + 'updated ' + boAgo(BO.at);
       if (BO.err === 'offline') s += ' · offline';
@@ -326,6 +330,7 @@ var GLOSS = {
       if (src) src.innerHTML = 'Updated automatically from the weekly Inventory Report email.' +
         (BO.data && BO.data.highspot ? '<br><a class="bo-hs" href="' + esc(BO.data.highspot) + '" target="_blank" rel="noopener">Full report on Highspot &#x203A;</a>' : '');
       var d = BO.data;
+      var qiD = document.getElementById('bo-q'); if (qiD) qiD.hidden = !d; if (chips) chips.hidden = !d; // P15: nothing to filter until a report exists
       if (!d) {
         if (chips) chips.innerHTML = '';
         body.innerHTML = BO.busy ? '<div class="cc-empty">Loading the report…</div>'
@@ -870,18 +875,7 @@ var GLOSS = {
   }
 
   // ---- copy ----
-  function copy(text) {
-    function done() { toast.classList.add('on'); setTimeout(function () { toast.classList.remove('on'); }, 1200); }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, function () { fallback(); });
-    } else { fallback(); }
-    function fallback() {
-      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed';
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); done(); } catch (e) {}
-      document.body.removeChild(ta);
-    }
-  }
+  function copy(text) { copyToClip(text).then(function () { toastMsg('Copied', 1200); }); } // P18: through the toast queue
 
   document.addEventListener('click', function (e) {
     var gp = document.getElementById('glosspanel');
@@ -890,9 +884,9 @@ var GLOSS = {
     if (gt) {
       var key = gt.getAttribute('data-g');
       gp.innerHTML = '<b>' + esc(key) + '</b>' + esc(GLOSS[key] || '');
-      gp.hidden = false; e.stopPropagation(); return;
+      gp.hidden = false; document.body.classList.add('gloss-on'); e.stopPropagation(); return;
     }
-    if (!gp.hidden) { gp.hidden = true; return; }
+    if (!gp.hidden) { gp.hidden = true; document.body.classList.remove('gloss-on'); if (e.target.closest('#glosspanel')) return; } // P18: close AND act on the tap
     var fc = e.target.closest('[data-filt]');
     if (fc) {
       var ft = fc.getAttribute('data-filt');
@@ -923,13 +917,13 @@ var GLOSS = {
       var wasFav = favs().filter(function (x) { return x.route === rt; })[0];
       try { localStorage.setItem('tbx_favs', JSON.stringify(favs().filter(function (x) { return x.route !== rt; }))); } catch (e2) {}
       try { ugEv('fav', (wasFav && wasFav.it && wasFav.it.sku) || decodeURIComponent(rt.replace(/^#\/pn\//, '')), 'off'); } catch (eUg) {}
-      uf.innerHTML = '&#9734;'; uf.classList.add('off');
       var uw = uf.closest('.rowwrap');
+      if (uw) { uf.innerHTML = '&#9734;'; uf.classList.add('off'); } else uf.hidden = true; // P14: "Remove from Favorites" on the not-found screen
       setTimeout(function () {
         if (uw) uw.classList.add('bye');
         setTimeout(function () { if (content.classList.contains('homeview')) home(); }, 280);
       }, 240);
-      if (wasFav) toastMsg('Removed from Favorites', 3000, { action: { label: 'Undo', fn: function () { toggleFav(wasFav); if (content.classList.contains('homeview')) home(); } } });
+      if (wasFav) toastMsg('Removed from Favorites', 3000, { action: { label: 'Undo', fn: function () { toggleFav(wasFav); if (content.classList.contains('homeview')) home(); else if (!uw) uf.hidden = false; } } });
       return;
     }
     var fso = e.target.closest('[data-fsort]');
@@ -1008,17 +1002,17 @@ var GLOSS = {
     var extra = (it.specs || []).map(function (s) { return s[1]; }).join(' ') + ' ' + (it.alt || []).join(' ') +
       (sl === 'Sliding' ? ' sliding' : '') + (/^Non-sliding/.test(sl) ? ' nonsliding locked' : '');
     var raw = (it.name || '') + ' ' + it.sku + ' ' + it.fam + ' ' + (it.sub || '') + ' ' + it.cat + ' ' + extra;
-    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(it.sku), buckets: bucketsOf(it),
+    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(it.sku), buckets: bucketsOf(it), raw: raw,
       it: it, rec: it, sub: it.cat + ' · ' + it.fam, route: pnRoute(it.sku) });
   });
   D.probes.forEach(function (p) {
     var raw = p.name + ' ' + p.sku + ' probe wand serfas arthro ' + p.fam;
-    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(p.sku), buckets: ['Arthroscopy'],
+    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(p.sku), buckets: ['Arthroscopy'], raw: raw,
       it: { t: p.name, sku: p.sku, uom: p.uom, tags: p.tags }, rec: p, sub: 'SERFAS RF Wands · ' + p.fam, route: pnRoute(p.sku) });
   });
   D.shavers.forEach(function (s) {
     var raw = s.name + ' ' + s.sku + ' shaver blade bur';
-    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(s.sku), buckets: ['Arthroscopy'],
+    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(s.sku), buckets: ['Arthroscopy'], raw: raw,
       it: { t: s.name, sku: s.sku, uom: s.uom, tags: s.tags }, rec: s, sub: 'Shaver blades', route: pnRoute(s.sku) });
   });
   INDEX.forEach(function (e) { e.skuz = e.skun.replace(/^0+/, ''); });
@@ -1143,34 +1137,115 @@ var GLOSS = {
     }
     return false;
   }
-  function searchAll(q) {
+  // ---- search matching (P1 plurals, P9 short and sized terms, P22 fuzzy flag) ----
+  // sParse turns the query into terms; each term is one of:
+  //   l  4+ letters, 3+ digits, or letters+digits (names, part numbers): a substring of the punctuation-free haystack, exactly
+  //      as before, plus a plural retry (…ies -> …y, …sses/…xes/…ches/…shes -> drop es, …s) before the term is rejected, and
+  //      a small bonus when it is a whole word ("Hip cannula" ranks above "Cannulated drill").
+  //   a  1-3 letters: 1-2 letters must be a whole word ("tt" no longer hits "LefT Trochlea"); 3 letters must start a word or a
+  //      CamelCase part ("oca" no longer hits "trOCAr"; "tap" still finds PunchTap); glued to its neighbour also counts
+  //      ("punch tap" = "Punchtap").
+  //   i  1-2 digits: a number with that integer part (6 -> 6, 6.5).   d  "4.7" -> 4.7, 4.75;  "2.0" -> exactly 2.
+  //   u  number+unit: exact, with "N.0" = "N" ("4mm" = "4.0mm"; "10mm" never hits 11.0mm or 110mm).   h "#2"   z "2-0"
+  // Each non-legacy term is one regex, compiled once per search and run on the entry's raw text: no index, nothing at boot.
+  // Older iOS: no lookbehind anywhere (Safari < 16.4 would throw on it).
+  var S_UNIT = { MM: 'mm', CM: 'cm', IN: 'in', INCH: 'in', INCHES: 'in', '\u2033': 'in', '"': 'in' };
+  var S_URX = { mm: 'mm\\b', cm: 'cm\\b', 'in': '(?:\u2033|"|in\\b|inch)' };
+  function sEsc(n) { return String(n).replace('.', '\\.'); }
+  function sCI(t) { return t.replace(/[A-Z]/g, function (c) { return '[' + c + c.toLowerCase() + ']'; }); } // TAP -> [Tt][Aa][Pp]
+  function sParse(q) {
     var AL = { LOCKED: 'NONSLIDING', FF: 'FORCEFIBER', BIO: 'BIOCOMPOSITE', BIOCOMP: 'BIOCOMPOSITE', AVK: 'ALPHAVENTKNOTLESS',
       AV: 'ALPHAVENT', XB: 'XBRAID', NANO: 'NANOTACK', FIBRE: 'FIBER', PT: 'PUNCHTAP', ICX: 'ICONIX' };
-    var terms = nrm(q).length ? q.toUpperCase().split(/\s+/).map(nrm).filter(Boolean)
-      .map(function (t) { return AL[t] || t; }) : [];
-    if (!terms.length) return [];
+    var s = String(q || '').replace(/(\d(?:\.\d+)?(?:mm|cm)?)\s*[xX\u00d7]\s*(?=\d)/g, '$1 ')     // 8x20, 8mm x 20mm -> two sizes
+      .replace(/(\d)\s+(mm|cm|inch(?:es)?|in|\u2033|")(?![A-Za-z])/gi, '$1$2');                    // "10 mm" -> "10mm"
+    var out = [], m;
+    s.split(/\s+/).forEach(function (raw) {
+      raw = raw.replace(/[,;:!?\-\u2013]+$/, '');
+      if (/\.$/.test(raw) && !/^\d+\.$/.test(raw)) raw = raw.slice(0, -1);
+      if (!raw) return;
+      var n, u, re = null, c;
+      if ((m = /^#?(\d+)-0$/.exec(raw))) { c = 'z'; re = '(?:^|[^\\d.])#?' + (+m[1]) + '\\s?-\\s?0(?!\\d)'; }
+      else if ((m = /^#(\d+)$/.exec(raw))) { c = 'h'; re = '#\\s?' + (+m[1]) + '(?!\\d|\\s?-\\s?0(?!\\d))'; }
+      else if ((m = /^(\d+(?:\.\d+)?)(mm|cm|inch(?:es)?|in|\u2033|")$/i.exec(raw))) {
+        c = 'u'; n = sEsc(String(parseFloat(m[1]))) + '(?:\\.0+)?'; u = S_URX[S_UNIT[m[2].toUpperCase()]];
+        re = '(?:^|[^\\d.])' + n + '\\s*' + u + (u.charAt(0) === 'm' || u.charAt(0) === 'c'
+          ? '|(?:^|[^\\d.])' + n + '\\s*(?:x|\u00d7|\\/|-|\u2013|to)\\s*\\d+(?:\\.\\d+)?\\s*' + u : '');   // 8.3 x 3.5mm: 8.3 is mm too
+      }
+      else if ((m = /^(\d+)\.(\d*)$/.exec(raw))) {
+        c = 'd';
+        if (!m[2]) re = '(?:^|[^A-Za-z0-9.])' + (+m[1]) + '(?:\\.\\d+)?(?!\\d)';                    // "4." while typing = "4"
+        else if (/^0+$/.test(m[2])) re = '(?:^|[^A-Za-z0-9.])' + (+m[1]) + '(?:\\.0+)?(?![\\d.])'; // "2.0" = exactly 2
+        else re = '(?:^|[^A-Za-z0-9.])' + (+m[1]) + '\\.' + m[2] + '\\d*(?!\\d)';                  // "4.7" = 4.7, 4.75
+      }
+      else if (/^\d{1,2}$/.test(raw)) { c = 'i'; re = '(?:^|[^A-Za-z0-9.])' + (+raw) + '(?:\\.\\d+)?(?!\\d)'; }
+      if (re) { out.push({ c: c, t: nrm(raw), rx: new RegExp(re, 'i') }); return; }
+      var t = nrm(raw); if (!t) return;
+      t = AL[t] || t;
+      // 1-3 letters typed on their own (not "g-lo", which is part of a hyphenated name) follow the word rules
+      if (/^[A-Z]{1,3}$/.test(t) && !/[A-Za-z][^A-Za-z]+[A-Za-z]/.test(raw)) {
+        var ci = sCI(t), camel = t.charAt(0) + t.slice(1).toLowerCase(), pl = t.length === 3 ? '(?:[Ee]?[Ss])?' : '';
+        out.push({ c: 'a', t: t,
+          rw: new RegExp('(?:(?:^|[^A-Za-z])' + ci + pl + '(?![A-Za-z]))' + (pl ? '|[a-z]' + camel + '(?:e?s)?(?![a-z])' : '')),  // whole word (3 letters: + plural, CamelCase part)
+          rp: new RegExp('(?:^|[^A-Za-z])' + ci + '|[A-Za-z]' + camel) });                          // start of a word or CamelCase part
+        return;
+      }
+      var cand = [t].concat(sStems(t));
+      out.push({ c: 'l', t: t, cand: cand, bw: cand.map(function (w) {                                  // whole-word bonus test per form
+        return /^[A-Z]{4,}$/.test(w) ? new RegExp('(?:(?:^|[^A-Za-z])' + sCI(w) + '|[a-z]' + w.charAt(0) + w.slice(1).toLowerCase() + ')(?:[Ee]?[Ss])?(?![a-z])') : null; }) });
+    });
     var merged = [];
-    for (var i = 0; i < terms.length; i++) {
-      if (terms[i] === 'NON' && terms[i + 1] === 'SLIDING') { merged.push('NONSLIDING'); i++; }
-      else merged.push(terms[i]);
+    for (var i = 0; i < out.length; i++) {
+      if (out[i].t === 'NON' && out[i + 1] && out[i + 1].t === 'SLIDING') { merged.push({ c: 'l', t: 'NONSLIDING', cand: ['NONSLIDING'], bw: [null] }); i++; }
+      else merged.push(out[i]);
     }
+    return merged;
+  }
+  function sStems(t) { // P1: SHAVERS -> SHAVER, BOXES -> BOX, ASSEMBLIES -> ASSEMBLY; never ACCESS -> ACCES
+    if (!/^[A-Z]{4,}S$/.test(t) || /SS$/.test(t)) return [];
+    var o = [];
+    if (/IES$/.test(t)) o.push(t.slice(0, -3) + 'Y');
+    if (/(SS|X|Z|CH|SH)ES$/.test(t)) o.push(t.slice(0, -2));
+    o.push(t.slice(0, -1));
+    return o;
+  }
+  function sPos(p) { return 30 - Math.min(25, p / 10); }
+  function sAt(e, m) { return nrm((e.raw || '').slice(0, m.index)).length; } // raw offset -> haystack offset (same scale as before)
+  function sHit(e, x, loose, prev, next) { // score for one term on one entry, or -1
+    var t = x.t, k, p, m, r = e.raw || '';
+    if (x.c === 'l') {
+      if (t === 'SLIDING') return (e.hay.indexOf('SLIDING') !== -1 && e.hay.indexOf('NONSLIDING') === -1) ? 20 : -1;
+      for (k = 0; k < x.cand.length; k++) {
+        p = e.hay.indexOf(x.cand[k]); if (p === -1) continue;
+        return sPos(p) - (k ? 2 : 0) + (x.bw[k] && x.bw[k].test(r) ? 4 : 0);
+      }
+      // part numbers: leading zeros are optional (0242200025 finds 242200025, 295724120 finds 0295724120)
+      if (/^0+\d{5,}$/.test(t) && e.skuz.indexOf(t.replace(/^0+/, '')) === 0) return 30;
+      return -1;
+    }
+    if (x.c === 'a') {
+      if ((m = x.rw.exec(r))) return sPos(sAt(e, m));
+      if ((t.length === 3 || loose) && (m = x.rp.exec(r))) return 1 + (sPos(sAt(e, m)) - 5) / 5;         // prefix only: always below a whole word
+      if (prev && /^[A-Z]+$/.test(prev.t) && (p = e.hay.indexOf(prev.t + t)) !== -1) return sPos(p) - 4;   // "punch tap" = PUNCHTAP
+      if (next && /^[A-Z]+$/.test(next.t) && (p = e.hay.indexOf(t + next.t)) !== -1) return sPos(p) - 4;
+      return -1;
+    }
+    if ((m = x.rx.exec(r))) return sPos(sAt(e, m));
+    if (loose && x.c === 'i' && (p = e.hay.indexOf(t)) !== -1) return sPos(p) - 6;                 // "39…" while typing a part number
+    return -1;
+  }
+  function searchAll(q) {
+    var terms = sParse(q);
+    if (!terms.length) return [];
     var qn = nrm(q), qnz = qn.replace(/^0+/, '');
-    function collect(allowFuzzy) {
+    function collect(mode) { // 0 strict, 1 loose (1-2 letter words as prefixes, 1-2 digit numbers as substrings), 2 fuzzy
       var out = [];
       for (var k = 0; k < INDEX.length; k++) {
         var e = INDEX[k], score = 0, ok = true;
-        for (var m = 0; m < merged.length; m++) {
-          var t = merged[m], pos;
-          if (t === 'SLIDING') {
-            if (e.hay.indexOf('SLIDING') !== -1 && e.hay.indexOf('NONSLIDING') === -1) { score += 20; continue; }
-            ok = false; break;
-          }
-          pos = e.hay.indexOf(t);
-          if (pos !== -1) { score += 30 - Math.min(25, pos / 10); continue; }
-          // part numbers: leading zeros are optional (0242200025 finds 242200025, 295724120 finds 0295724120)
-          if (/^0+\d{5,}$/.test(t) && e.skuz.indexOf(t.replace(/^0+/, '')) === 0) { score += 30; continue; }
-          if (allowFuzzy && termFuzzy(e, t)) { score += 6; continue; }
-          ok = false; break;
+        for (var m = 0; m < terms.length; m++) {
+          var sc = sHit(e, terms[m], mode === 1, terms[m - 1], terms[m + 1]);
+          if (sc < 0 && mode === 2 && terms[m].c === 'l' && termFuzzy(e, terms[m].t)) sc = 6;
+          if (sc < 0) { ok = false; break; }
+          score += sc;
         }
         if (!ok) continue;
         if (e.skun === qn || (qnz.length >= 5 && e.skuz === qnz)) score += 500;
@@ -1181,8 +1256,9 @@ var GLOSS = {
       out.sort(function (a, b) { return b.score - a.score; });
       return out;
     }
-    var res = collect(false);
-    if (!res.length) res = collect(true);
+    var res = collect(0);
+    if (!res.length && terms.some(function (x) { return (x.c === 'a' && x.t.length < 3) || x.c === 'i'; })) res = collect(1);
+    if (!res.length) { res = collect(2); res.fuzzy = res.length > 0; }
     return res;
   }
 
@@ -1198,6 +1274,10 @@ var GLOSS = {
       line2 + '</div>' + (tags ? '<div class="subtags">' + tags + '</div>' : '') + '</button>';
   }
   var SFILT = null, SSORT = 'rel', SALL = false;
+  function askHTML(q, inline) { // P23: only when the payload has somewhere to send feedback (same test TBX_FEEDBACK_INIT uses)
+    if (!D.fb || !(D.fb.url || D.fb.email) || !q) return '';
+    return '<button type="button" class="' + (inline ? 'askin' : 'footlink askn') + '" data-act="asknate" data-q="' + esc(q) + '">Ask Nate to add “' + esc(q) + '” &#x203A;</button>';
+  }
   var SBUCKETS = ['Arthroscopy', 'Biologics', 'Capital', 'Disposables', 'Implants', 'Instruments', 'Suture'];
   function resultsHTML() {
     var hits = searchAll(CURQ);
@@ -1206,7 +1286,7 @@ var GLOSS = {
       '</b> \u2014 same product, new part number. <span class="pnm-why">Why &#x203A;</span></button>' : '';
     if (!hits.length) {
       SFILT = null;
-      return mvn + emptyHTML('&#x1F50D;', 'No matches for \u201c' + CURQ + '\u201d', 'Try fewer letters or a part-number fragment \u2014 dashes are optional.', '<button class="footlink" data-act="scan">Scan the barcode instead &#x203A;</button>');
+      return mvn + emptyHTML('&#x1F50D;', 'No matches for \u201c' + CURQ + '\u201d', 'Try fewer letters or a part-number fragment \u2014 dashes are optional.', askHTML(CURQ) + '<button class="footlink" data-act="scan">Scan the barcode instead &#x203A;</button>');
     }
     var counts = {};
     hits.forEach(function (h) { (h.buckets || []).forEach(function (b) { counts[b] = (counts[b] || 0) + 1; }); });
@@ -1227,9 +1307,10 @@ var GLOSS = {
         }).join('') : '<span class="schip on" style="pointer-events:none">' + hits.length + ' result' + (hits.length === 1 ? '' : 's') + '</span>') +
       '<button class="schip sort' + (SSORT === 'sku' ? ' on' : '') + '" data-ssort="1" aria-pressed="' + (SSORT === 'sku') + '">' + (SSORT === 'sku' ? 'Part # A\u2013Z' : 'Best match') + ' &#x21C5;</button>' +
       '</div>';
+    var fz = hits.fuzzy ? '<div class="sfuzzy" data-sfuzzy="1" role="status">No exact match \u2014 close spellings' + askHTML(CURQ, true) + '</div>' : ''; // P22
     var CAP = SALL ? shown.length : 60;
     if (!shown.length) return mvn + chips + frow + '<div class="empty">No results match these filters. <button class="footlink" data-sfclear="1">Clear filters</button></div>';
-    return mvn + chips + frow + '<div class="list" style="margin-top:8px">' +
+    return mvn + fz + chips + frow + '<div class="list" style="margin-top:8px">' +
       shown.slice(0, CAP).map(function (h) { return rowHTML(h.route, h.it, h.sub); }).join('') + '</div>' +
       (shown.length > CAP ? '<button class="showall" data-sall="1">Show all ' + shown.length + ' &#x203A;</button>' : '');
   }
@@ -1262,6 +1343,18 @@ var GLOSS = {
       '<button class="sfclear" data-sfclear="1">Clear filters</button>' : '') + '</div>';
   }
   try { SSORT = localStorage.getItem('tbx_ssort') === 'sku' ? 'sku' : 'rel'; } catch (e0) {}
+  // ---- line icons (24 grid, 1.8 stroke, currentColor) for catalog UI; CC/F&A keep their own glyphs ----
+  var ICON = (function () {
+    function s(d) { return '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>'; }
+    return {
+      search: s('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.8-3.8"/>'),
+      scan: s('<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10.5 8v8M13.5 8v5M16.5 8v8"/>'),
+      share: s('<path d="M12 3.5v11"/><path d="M8.2 7.2L12 3.5l3.8 3.7"/><path d="M8 10.5H6.5a1.5 1.5 0 0 0-1.5 1.5v7a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H16"/>'),
+      more: s('<path d="M5.5 12h.01M12 12h.01M18.5 12h.01" stroke-width="3"/>'),
+      close: s('<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>')
+    };
+  })();
+
   var VT_FROM = null;
   function vtOK() {
     return !!document.startViewTransition && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -1295,8 +1388,9 @@ var GLOSS = {
     GKEYS.forEach(function (k) {
       var kk = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       var re = new RegExp('(^|[^\\w-])(' + kk + ')(?![\\w-])', 'i');
-      e = e.replace(re, function (m, p1, p2) {
-        return p1 + '<button class="gterm" data-g="' + esc(k) + '">' + p2 + '</button>';
+      e = e.replace(re, function (m, p1, p2) { // P18: an opening bracket stays on the term's line
+        var lead = /[(\[]$/.test(p1) ? p1.slice(-1) : '';
+        return p1.slice(0, p1.length - lead.length) + '<span class="gnb">' + lead + '<button class="gterm" data-g="' + esc(k) + '">' + p2 + '</button></span>';
       });
     });
     return e;
@@ -1351,17 +1445,30 @@ var GLOSS = {
   }
 
   // ---- instrumentation resolver ----
+  // P51: family index (fam -> item indexes, D.items order) and an exact-sku map, built once. instrFor used to walk every
+  // item twice per call; the "used with" reverse index calls it for all ~584 implants on the first instrument card.
+  var FAMIX = null, SKUIX = null;
+  function famIx() {
+    if (FAMIX) return FAMIX;
+    FAMIX = {}; SKUIX = {};
+    D.items.forEach(function (x, i) { (FAMIX[x.fam] = FAMIX[x.fam] || []).push(i); if (!(x.sku in SKUIX)) SKUIX[x.sku] = x; });
+    return FAMIX;
+  }
+  function famItems(fams) {
+    var ix = famIx(), all = [];
+    fams.forEach(function (f) { if (ix[f]) all = all.concat(ix[f]); });
+    if (fams.length > 1) all.sort(function (a, b) { return a - b; });
+    var out = [], last = -1;
+    all.forEach(function (i) { if (i !== last) out.push(D.items[i]); last = i; });
+    return out;
+  }
   function instrFor(it) {
     if (!it || !it.fam) return [];
     var ov = it.instr || {};
     if (ov.incl) {
+      famIx();
       var out0 = [];
-      ov.incl.forEach(function (sku) {
-        D.items.some(function (x) {
-          if (x.sku === sku) { out0.push({ it: x }); return true; }
-          return false;
-        });
-      });
+      ov.incl.forEach(function (sku) { if (SKUIX[sku]) out0.push({ it: SKUIX[sku] }); });
       return out0;
     }
     var fams = ov.fams || [ov.fam || it.fam];
@@ -1369,8 +1476,9 @@ var GLOSS = {
     var excl = ov.excl || [];
     var req = ov.req || '';
     var sibs = {};
-    D.items.forEach(function (x) {
-      if (fams.indexOf(x.fam) !== -1 && x.sz) sibs[x.sz] = 1;
+    var pool = famItems(fams);
+    pool.forEach(function (x) {
+      if (x.sz) sibs[x.sz] = 1;
     });
     var VARIANTS = { 'CinchLock knotless anchor': ['SS', 'Flex'] };
     var vtoks = VARIANTS[it.fam] || [];
@@ -1379,8 +1487,8 @@ var GLOSS = {
       if (new RegExp('\\b' + v + '\\b').test(it.name || '')) ownV = ownV || v;
     });
     var out = [];
-    D.items.forEach(function (x) {
-      if (x.hidden || fams.indexOf(x.fam) === -1) return;
+    pool.forEach(function (x) {
+      if (x.hidden) return;
       if (x.cat !== 'Disposables' && x.cat !== 'Instruments' && x.cat !== 'Capital') return;
       if (excl.indexOf(x.sku) !== -1) return;
       if (req && ((x.name || '') + ' ' + (x.ld || '')).indexOf(req) === -1) return;
@@ -1496,12 +1604,12 @@ var GLOSS = {
     'Suture': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7.5" y="3.5" width="9" height="12" rx="1.5"/><path d="M7.5 7h9M7.5 10h9M7.5 13h9"/><path d="M12 15.5c0 3 6.5 2 6.5 5.5"/></svg>',
     'Capital': '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="9" rx="1.5"/><path d="M8 14v3.5M16 14v3.5"/><circle cx="8" cy="19.5" r="1.3"/><circle cx="16" cy="19.5" r="1.3"/><path d="M9 8.5h6"/></svg>'
   };
-  var WN_TIMER = null, WN_SHOWN = false;
+  var WN_SHOWN = false;
+  function wnSeen() { try { localStorage.setItem('tbx_wn_seen', String((window.TBX_WN || {}).v || 1)); } catch (e) {} }
   function hideWN(markSeen) {
-    if (WN_TIMER) { clearTimeout(WN_TIMER); WN_TIMER = null; }
     var el = document.getElementById('wncard');
     if (!el) return;
-    if (markSeen) { try { localStorage.setItem('tbx_wn_seen', String((window.TBX_WN || {}).v || 1)); } catch (e) {} }
+    if (markSeen) wnSeen();
     el.classList.add('bye');
     setTimeout(function () { el.remove(); }, 260);
   }
@@ -1510,6 +1618,7 @@ var GLOSS = {
       var WN = window.TBX_WN;
       if (!WN || !WN.items || !WN.items.length) return;
       if (+(localStorage.getItem('tbx_wn_seen') || 0) >= WN.v) return;
+      if (!localStorage.getItem('tbx_tour_done')) return; // first launch: the tour, not What's New (the tour marks it seen)
     } catch (e) { return; }
     if (WN_SHOWN || document.getElementById('wncard')) return;
     WN_SHOWN = true;
@@ -1517,8 +1626,8 @@ var GLOSS = {
     var el = document.createElement('div');
     el.id = 'wncard';
     el.innerHTML = '<div class="wn-h"><span>What&#8217;s new</span>' +
-      '<button id="wndismiss" aria-label="Dismiss">&#x2715;</button></div>' +
-      WN2.items.map(function (i, idx) {
+      '<button id="wndismiss" aria-label="Dismiss">' + ICON.close + '</button></div>' +
+      WN2.items.slice().reverse().map(function (i, idx) { // whatsnew.js is appended oldest -> newest: newest shows first
         var inner = '<b>' + esc(i.d) + '</b>' + esc(i.t) + (i.link ? '<span class="wn-link">' + esc(i.link) + '</span>' : '');
         var cls = 'wn-i' + (idx ? ' wn-x' : '');
         var go = i.sku ? pnRoute(i.sku) : (i.go || '');
@@ -1647,7 +1756,7 @@ var GLOSS = {
   }
   function composeCardPNG(it) {
     var W = 1080, PAD = 56;
-    var name = it.t || it.name || '', fam = it.fam || '', sku = it.sku || '', uom = it.uom || '';
+    var name = it.name || it.t || '', fam = it.fam || '', sku = it.sku || '', uom = it.uom || '';
     var specs = (it.specs || []).filter(function (s) { return s && s[1]; });
     var MAXS = 9, extra = Math.max(0, specs.length - MAXS);
     specs = specs.slice(0, MAXS);
@@ -1736,12 +1845,13 @@ var GLOSS = {
     return location.origin + location.pathname.replace(/index\.html$/, '') + '#/pn/' + encodeURIComponent(it.sku);
   }
   function cardText(it) {
-    var L = [it.t || it.name || ''];
+    var L = [it.name || it.t || '']; // the full title: the short list title (it.t, e.g. "Iconix 2") drops size and suture
     L.push('REF ' + it.sku + (it.uom ? ' · ' + it.uom : ''));
     if (it.fam) L.push(it.fam);
     var sp = (it.specs || []).filter(function (s) { return s && s[1]; });
     if (sp.length) L.push('');
-    sp.forEach(function (s) { L.push('• ' + s[0] + ': ' + s[1]); });
+    sp.forEach(function (s) { L.push(s[0] ? '• ' + s[0] + ': ' + s[1] : s[1]); }); // sub-headings print as plain lines
+    L.push('', cardLink(it)); // P44: copied details carry the link to the card
     return L.join('\n');
   }
   function copyToClip(t) {
@@ -1756,22 +1866,41 @@ var GLOSS = {
     try { document.execCommand('copy'); } catch (e) {}
     ta.remove();
   }
-  function shareAsImage(it) {
-    toastMsg('Building image…', 1400);
-    return composeCardPNG(it).then(function (c) {
+  // P43 — the share image is drawn as soon as the share sheet opens, so "Send as image" can call navigator.share
+  // inside the tap itself. (iOS refuses a share whose user gesture went stale while the photo loaded and the canvas
+  // was drawn.) Not ready yet → the row says "Preparing image…" and asks for a fresh tap when it is.
+  var SH_PREP = null;
+  function shPrep(it) {
+    if (SH_PREP && SH_PREP.sku === it.sku) return SH_PREP;
+    var P = { sku: it.sku, v: null, err: false };
+    P.p = composeCardPNG(it).then(function (c) {
       return new Promise(function (res) { c.toBlob(res, 'image/png'); });
     }).then(function (blob) {
-      if (!blob) { toastMsg('Could not build image', 2200); return; }
-      var fname = (nrm(it.sku) || 'card').toLowerCase() + '-card.png';
-      var file = null;
+      if (!blob) throw new Error('blob');
+      var fname = (nrm(it.sku) || 'card').toLowerCase() + '-card.png', file = null;
       try { file = new File([blob], fname, { type: 'image/png' }); } catch (e) {}
-      if (file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
-        return navigator.share({ files: [file], title: it.t || it.name || 'SportsMed Toolbox' }).catch(function (e) {
-          if (e && e.name === 'AbortError') return;
-          dlBlob(blob, fname);
-        });
-      }
-      dlBlob(blob, fname);
+      P.v = { blob: blob, file: file, fname: fname };
+      return P.v;
+    }).catch(function () { P.err = true; return null; });
+    SH_PREP = P;
+    return P;
+  }
+  function shareImgNow(v, it) { // call synchronously from the tap handler
+    var ok = false;
+    try { ok = !!(v.file && navigator.canShare && navigator.share && navigator.canShare({ files: [v.file] })); } catch (e) {}
+    if (ok) {
+      return navigator.share({ files: [v.file], title: it.name || it.t || 'SM ToolBox' }).catch(function (e) {
+        if (e && e.name === 'AbortError') return;
+        dlBlob(v.blob, v.fname);
+      });
+    }
+    dlBlob(v.blob, v.fname);
+    return Promise.resolve();
+  }
+  function shareAsImage(it) { // programmatic path (tests): build or reuse, then share
+    return shPrep(it).p.then(function (v) {
+      if (!v) { toastMsg('Could not build image', 2200); return; }
+      return shareImgNow(v, it);
     });
   }
   function dlBlob(blob, fname) {
@@ -1782,16 +1911,20 @@ var GLOSS = {
     setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
     toastMsg('Image saved to downloads', 2400);
   }
+  // P44 — a shared link carries the product name and part number (the link preview only shows the locked site)
+  function shareLinkText(it) { return (it.name || it.t || '') + '\nREF ' + it.sku; }
   function shareLinkOf(it) {
-    var url = cardLink(it);
+    var url = cardLink(it), text = shareLinkText(it);
+    var fallback = function () { return copyToClip(text + '\n' + url).then(function () { toastMsg('Link copied', 2200); }); };
     if (navigator.share) {
-      return navigator.share({ title: it.t || it.name || 'SportsMed Toolbox', url: url }).catch(function (e) {
+      return navigator.share({ title: it.name || it.t || 'SM ToolBox', text: text, url: url }).catch(function (e) {
         if (e && e.name === 'AbortError') return;
-        return copyToClip(url).then(function () { toastMsg('Link copied', 2200); });
+        return fallback();
       });
     }
-    return copyToClip(url).then(function () { toastMsg('Link copied', 2200); });
+    return fallback();
   }
+  function shLabel(opt, t) { var sl = opt.querySelector('.sl'); if (sl && sl.firstChild) sl.firstChild.nodeValue = t; }
   function openShareSheet() {
     var it = CUR_IT;
     if (!it) return;
@@ -1803,28 +1936,42 @@ var GLOSS = {
       sh.addEventListener('click', function (e) {
         if (e.target === sh || e.target.closest('.as-close')) { sh.hidden = true; return; }
         var opt = e.target.closest('.shopt');
-        if (!opt) return;
-        sh.hidden = true;
+        if (!opt || !CUR_IT) return;
         var act = opt.getAttribute('data-sh');
-        try { ugEv('share', CUR_IT && CUR_IT.sku, act); } catch (eUg) {}
-        if (act === 'img') shareAsImage(CUR_IT);
-        else if (act === 'link') shareLinkOf(CUR_IT);
+        if (act === 'img') {
+          var P = shPrep(CUR_IT);
+          if (!P.v && !P.err) {
+            if (!opt.classList.contains('busy')) {
+              opt.classList.add('busy'); opt.setAttribute('aria-busy', 'true'); shLabel(opt, 'Preparing image…');
+              P.p.then(function () { opt.classList.remove('busy'); opt.removeAttribute('aria-busy'); shLabel(opt, P.v ? 'Image ready — tap to send' : 'Could not build image'); });
+            }
+            return; // keep the sheet open: the next tap is a fresh gesture
+          }
+          sh.hidden = true;
+          try { ugEv('share', CUR_IT.sku, act); } catch (eUg) {}
+          if (P.v) shareImgNow(P.v, CUR_IT); else toastMsg('Could not build image', 2200);
+          return;
+        }
+        sh.hidden = true;
+        try { ugEv('share', CUR_IT.sku, act); } catch (eUg2) {}
+        if (act === 'link') shareLinkOf(CUR_IT);
         else if (act === 'copy') copyToClip(cardText(CUR_IT)).then(function () { toastMsg('Details copied — paste anywhere', 2400); });
       });
     }
-    sh.innerHTML = '<div class="as-card"><h3>Share this card</h3>' +
+    sh.innerHTML = '<div class="as-card" role="dialog" aria-modal="true" aria-label="Share this card"><h3>Share this card</h3>' +
       '<div class="sh-sub">' + esc(it.t || it.name || '') + ' · ' + esc(it.sku || '') + '</div>' +
       '<button class="shopt" data-sh="img"><span class="si">' +
         '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></span>' +
         '<span class="sl">Send as image<span>A compact branded card — texts great</span></span></button>' +
       '<button class="shopt" data-sh="link"><span class="si">' +
         '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.9" stroke-linecap="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg></span>' +
-        '<span class="sl">Share link<span>Opens this card in the app</span></span></button>' +
+        '<span class="sl">Share link<span>Name, REF and a link that opens this card</span></span></button>' +
       '<button class="shopt" data-sh="copy"><span class="si">' +
         '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg></span>' +
-        '<span class="sl">Copy details<span>Name, REF and specs as text</span></span></button>' +
+        '<span class="sl">Copy details<span>Name, REF, specs and the link as text</span></span></button>' +
       '<button class="as-close">Cancel</button></div>';
     sh.hidden = false;
+    setTimeout(function () { try { if (CUR_IT === it && !sh.hidden) shPrep(it); } catch (eP) {} }, 60); // after the sheet paints
   }
 
   // In-app dialogs (native confirm/alert/prompt look foreign in standalone mode
@@ -1921,6 +2068,7 @@ var GLOSS = {
     }
     function done() {
       try { localStorage.setItem('tbx_tour_done', '1'); } catch (e) {}
+      wnSeen(); // P17: a new user gets the tour; What's New is for people who knew the app before
       ov.remove();
     }
     ov.addEventListener('click', function (e) {
@@ -1948,9 +2096,18 @@ var GLOSS = {
     if (!sh) {
       sh = document.createElement('div');
       sh.id = 'a2hs-sheet';
-      var ios = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+      // P52: iOS 26+ Safari puts Share under the ⋯ menu next to the address bar; pick the steps by Safari's Version/ token
+      var ua = navigator.userAgent || '';
+      var ios = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+      var sv = +((/Version\/(\d+)/.exec(ua) || [])[1] || 0), safari = /Safari\//.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(ua);
+      var SHR = '<span class="a2i">' + ICON.share + '</span>', MOR = '<span class="a2i">' + ICON.more + '</span>';
       var steps = ios
-        ? '<li>Open this site in <b>Safari</b></li><li>Tap the <b>Share</b> button (square with an arrow)</li><li>Scroll down and tap <b>Add to Home Screen</b></li><li>Tap <b>Add</b></li>'
+        ? (safari ? '' : '<li>Open <b>sportsmedtoolbox.com</b> in <b>Safari</b></li>') +
+          (safari && sv >= 26 ? '<li>Tap ' + MOR + ' next to the address bar, then <b>Share</b></li>'
+            : safari && sv ? '<li>Tap <b>Share</b> ' + SHR + ' in the toolbar</li>'
+            : '<li>Tap <b>Share</b> ' + SHR + ' — on iOS 26 and later it’s under ' + MOR + ' next to the address bar</li>') +
+          '<li>Scroll down and tap <b>Add to Home Screen</b></li>' +
+          (safari && sv && sv < 26 ? '<li>Tap <b>Add</b></li>' : '<li>Keep <b>Open as Web App</b> on, then tap <b>Add</b></li>')
         : '<li>Open the browser menu (<b>&#8942;</b>)</li><li>Tap <b>Add to home screen</b> or <b>Install app</b></li><li>Confirm</li>';
       sh.innerHTML = '<div class="as-card"><h3>Install SportsMed Toolbox</h3><ol>' + steps + '</ol>' +
         '<button class="as-close">Done</button></div>';
@@ -1976,6 +2133,12 @@ var GLOSS = {
       if (card) card.remove();
       return;
     }
+    var an = e.target.closest && e.target.closest('[data-act="asknate"]');
+    if (an) { // P23: open the feedback form with the missing term filled in (no screenshot: the Route line carries ?q=…)
+      var aq = an.getAttribute('data-q') || CURQ;
+      try { if (window.TBX_FB_OPEN) window.TBX_FB_OPEN({ note: 'Please add “' + aq + '” to ToolBox — I searched for it and found nothing.', shot: false }); } catch (eA) {}
+      return;
+    }
     var s = e.target.closest && e.target.closest('[data-act="scan"]');
     if (s) { var sb = document.getElementById('scanbtn'); if (sb) sb.click(); return; }
     var ss = e.target.closest && e.target.closest('[data-ssort]');
@@ -1992,9 +2155,10 @@ var GLOSS = {
       content.innerHTML = resultsHTML();
       return;
     }
+    var wi = e.target.closest && e.target.closest('#wncard .wn-i[data-go]');
+    if (wi) wnSeen(); // P17: tapping an item counts as reading it (the data-go handler navigates)
     var mo = e.target.closest && e.target.closest('#wnmore');
     if (mo) {
-      if (WN_TIMER) { clearTimeout(WN_TIMER); WN_TIMER = null; }
       var wc = document.getElementById('wncard');
       if (wc) {
         wc.classList.toggle('open');
@@ -2021,7 +2185,7 @@ var GLOSS = {
     var tiles = tileDefs.map(function (t) {
       return '<button class="tile" data-go="' + t.go + '">' +
         '<span class="tico">' + (TILE_ICONS[t.label] || '') + '</span>' +
-        '<span class="tl"><b>' + esc(t.label) + '</b><span class="n">' + t.n + ' items</span></span>' +
+        '<span class="tl"><b>' + esc(t.label) + '</b><span class="n">' + plural(t.n, 'item') + '</span></span>' +
         '<span class="ct">&#x203A;</span></button>';
     }).join('');
     tiles += boTileHTML();
@@ -2064,7 +2228,7 @@ var GLOSS = {
       });
       var tiles = icats.filter(function (c) { return catCount(c); }).map(function (c) {
         return '<button class="tile" data-go="#/cat/' + encodeURIComponent(c) + '">' +
-          '<span class="tl"><b>' + esc(c) + '</b><span class="n">' + catCount(c) + ' items</span></span>' +
+          '<span class="tl"><b>' + esc(c) + '</b><span class="n">' + plural(catCount(c), 'item') + '</span></span>' +
           '<span class="ct">&#x203A;</span></button>';
       }).join('');
       render('<div class="tiles">' + tiles + '</div>');
@@ -2074,14 +2238,14 @@ var GLOSS = {
     render('<div class="list">' +
       '<button class="rowitem" data-go="#/dgrp/' + encodeURIComponent('Arthroscopy capital') + '">' +
       '<div class="rl"><b class="ti">Arthroscopy Capital</b>' +
-      '<span class="ld dim2">' + capArthro().length + ' items</span></div><div class="ct">&#x203A;</div></button>' +
+      '<span class="ld dim2">' + plural(capArthro().length, 'item') + '</span></div><div class="ct">&#x203A;</div></button>' +
       '<button class="rowitem" data-go="#/fam/' + encodeURIComponent('Disposables') + '/' + encodeURIComponent('CrossFlow arthroscopy pump') + '">' +
       '<div class="rl"><b class="ti">Pump Tubing</b>' +
-      '<span class="ld dim2">' + pumpTubing().length + ' items</span></div><div class="ct">&#x203A;</div></button>' +
+      '<span class="ld dim2">' + plural(pumpTubing().length, 'item') + '</span></div><div class="ct">&#x203A;</div></button>' +
       '<button class="rowitem" data-go="#/probes"><div class="rl"><b class="ti">SERFAS RF Wands</b>' +
-      '<span class="ld dim2">' + D.probes.length + ' items</span></div><div class="ct">&#x203A;</div></button>' +
+      '<span class="ld dim2">' + plural(D.probes.length, 'item') + '</span></div><div class="ct">&#x203A;</div></button>' +
       '<button class="rowitem" data-go="#/shavers"><div class="rl"><b class="ti">Shaver Blades &amp; Burs</b>' +
-      '<span class="ld dim2">' + D.shavers.length + ' items</span></div><div class="ct">&#x203A;</div></button>' +
+      '<span class="ld dim2">' + plural(D.shavers.length, 'item') + '</span></div><div class="ct">&#x203A;</div></button>' +
       '</div>');
   }
   var DISP_GROUPS = {
@@ -2143,7 +2307,7 @@ var GLOSS = {
     var names = Object.keys(counts).sort();
     render('<div class="tiles">' + names.map(function (g) {
       return '<button class="tile" data-go="#/dgrp/' + encodeURIComponent(g) + '">' +
-        '<span class="tl"><b>' + esc(g) + '</b><span class="n">' + counts[g] + ' items</span></span>' +
+        '<span class="tl"><b>' + esc(g) + '</b><span class="n">' + plural(counts[g], 'item') + '</span></span>' +
         '<span class="ct">&#x203A;</span></button>';
     }).join('') + '</div>');
   }
@@ -2163,7 +2327,7 @@ var GLOSS = {
     order.sort();
     render('<div class="list">' + order.map(function (f) {
       return '<button class="rowitem" data-go="#/fam/' + encodeURIComponent(cat) + '/' + encodeURIComponent(f) + '">' +
-        '<div class="rl"><b class="ti">' + esc(f) + '</b><span class="ld dim2">' + fams[f] + ' items</span></div>' +
+        '<div class="rl"><b class="ti">' + esc(f) + '</b><span class="ld dim2">' + plural(fams[f], 'item') + '</span></div>' +
         '<div class="ct">&#x203A;</div></button>';
     }).join('') + '</div>');
   }
@@ -2180,7 +2344,7 @@ var GLOSS = {
     order.sort();
     render('<div class="list">' + order.map(function (f) {
       return '<button class="rowitem" data-go="#/fam/' + encodeURIComponent(c) + '/' + encodeURIComponent(f) + '">' +
-        '<div class="rl"><b class="ti">' + esc(f) + '</b><span class="ld dim2">' + fams[f] + ' items</span></div>' +
+        '<div class="rl"><b class="ti">' + esc(f) + '</b><span class="ld dim2">' + plural(fams[f], 'item') + '</span></div>' +
         '<div class="ct">&#x203A;</div></button>';
     }).join('') + '</div>');
   }
@@ -2259,7 +2423,7 @@ var GLOSS = {
     if (order.length) {
       render('<div class="list">' + order.map(function (s) {
         return '<button class="rowitem" data-go="#/sub/' + encodeURIComponent(c) + '/' + encodeURIComponent(f) + '/' + encodeURIComponent(s) + '">' +
-          '<div class="rl"><b class="ti">' + esc(s) + '</b><span class="ld dim2">' + subs[s] + ' items</span></div>' +
+          '<div class="rl"><b class="ti">' + esc(s) + '</b><span class="ld dim2">' + plural(subs[s], 'item') + '</span></div>' +
           '<div class="ct">&#x203A;</div></button>';
       }).join('') + '</div>');
       return;
@@ -2361,7 +2525,7 @@ var GLOSS = {
   }
   function pnScreen(sku) {
     var e = BYPN[nrm(sku)] || BYPNZ[nrm(sku).replace(/^0+/, '')]; // leading zeros optional (0295724120 = 295724120)
-    if (!e) return home();
+    if (!e) return notFoundScreen(sku);
     var mv = movedOf(sku);
     if (mv) { location.replace(pnRoute(mv.moved)); pnMoveShow(mv); return; } // retired number: current card + change popup
     if (e.kind === 'item') { noteRecent(D.items[e.idx].sku, D.items[e.idx].t || D.items[e.idx].name); return itemCard(D.items[e.idx]); }
@@ -2397,9 +2561,18 @@ var GLOSS = {
       '<div class="about-quote">\u201cIf your tools don\u2019t work, make them work. If you can\u2019t make them work, make some that do work.\u201d<span class="aq-by">\u2014 Homer Stryker</span></div>' +
       '<div style="text-align:center; margin:18px 0 6px"><button class="footlink" data-act="lockdev">Lock this device</button></div>');
   }
+  function notFoundScreen(sku) { // P14: an old favorite / shared link / typo — say so, offer Search and Scan
+    setTitle('Not in ToolBox', ''); backBtn.hidden = false; CUR_IT = null;
+    var s = String(sku || '').slice(0, 40), fr = pnRoute(s);
+    render('<div class="card nf-card">' + emptyHTML(ICON.search, '“' + s + '” isn’t in ToolBox',
+      'It may be an old link, a typo, or a part without a card yet.',
+      '<div class="nf-acts"><button class="nf-btn" data-go="#/?q=' + encodeURIComponent(s) + '">' + ICON.search + '<span>Search for it</span></button>' +
+      '<button class="nf-btn" data-act="scan">' + ICON.scan + '<span>Scan the barcode</span></button></div>' +
+      (isFav(fr) ? '<button class="footlink nf-unfav" data-unfav-route="' + esc(fr) + '">Remove from Favorites</button>' : '')) + '</div>');
+  }
   function instrScreen(sku, cat) {
     var e = BYPN[nrm(sku)];
-    if (!e || e.kind !== 'item') return home();
+    if (!e || e.kind !== 'item') return notFoundScreen(sku);
     var it = D.items[e.idx];
     backBtn.hidden = false;
     var CATTITLE = { Capital: 'Associated capital', Disposables: 'Associated disposables', Instruments: 'Instrumentation' };
@@ -2418,7 +2591,7 @@ var GLOSS = {
   }
   function partsScreen(sku) {
     var e = BYPN[nrm(sku)];
-    if (!e || e.kind !== 'item') return home();
+    if (!e || e.kind !== 'item') return notFoundScreen(sku);
     var it = D.items[e.idx];
     backBtn.hidden = false;
     setTitle(it.plabel || 'Parts', '');
@@ -2458,7 +2631,7 @@ var GLOSS = {
     D.shavers.forEach(function (s) { var f = s.fam || 'Formula'; counts[f] = (counts[f] || 0) + 1; });
     render('<div class="list">' + SHFAMS.slice().sort().filter(function (fm) { return counts[fm]; }).map(function (fm) {
       return '<button class="rowitem" data-go="#/shaverfam/' + encodeURIComponent(fm) + '">' +
-        '<div class="rl"><b class="ti">' + esc(fm) + '</b><span class="ld dim2">' + counts[fm] + ' items</span></div>' +
+        '<div class="rl"><b class="ti">' + esc(fm) + '</b><span class="ld dim2">' + plural(counts[fm], 'item') + '</span></div>' +
         '<div class="ct">&#x203A;</div></button>';
     }).join('') + '</div>');
   }
@@ -7090,14 +7263,27 @@ var GLOSS = {
     });
   }
 
-  function route() {
-    try { ugRoute(); } catch (eUg) {} // anonymous usage: log the screen / card before anything renders
+  // P7 — any navigation (Back, swipe-back, links) closes the card overlays and releases the viewer's scroll lock
+  function closeOverlays() {
+    var lb = document.getElementById('lb'); if (LB_CLOSE && lb && !lb.hidden) LB_CLOSE();
+    ['share-sheet', 'ug-sheet', 'a2hs-sheet', 'jump-sheet'].forEach(function (id) { var el = document.getElementById(id); if (el && !el.hidden) el.hidden = true; });
+    SH_PREP = null;
+  }
+  // P6/P24: route({ soft: true }) redraws the current screen in place when the search box is cleared — for real, so the
+  // Backorder Report and the usage dashboard (which fill themselves after render()) get their data and listeners back.
+  // It is not a new visit: no usage "view", What's New and the family chips stay, and the page returns to where it was
+  // scrolled before the search started (SOFT_Y).
+  var SOFT_Y = 0;
+  function route(ev) {
+    var soft = !!(ev && ev.soft === true);
+    if (!soft) { try { ugRoute(); } catch (eUg) {} } // anonymous usage: log the screen / card before anything renders
     var raw = location.hash || '#/';
     var qi = raw.indexOf('?');
     var query = qi > -1 ? raw.slice(qi + 1) : '';
     if (qparam(query, 'q') !== CURQ) { SALL = false; SPECF = {}; }
     CURQ = qparam(query, 'q');
     if (qInput && qInput.value !== CURQ) qInput.value = CURQ;
+    try { qUi(); } catch (eQ) {}
     var h = qi > -1 ? raw.slice(0, qi) : raw;
     // Renamed categories: old links (favorites, shared cards, home-screen clips) still open.
     h = h.replace(/Knotless(?:%20| )Hard(?:%20| )Body(?:%20| )Anchors/g, 'Knotless%20Anchors');
@@ -7122,17 +7308,20 @@ var GLOSS = {
       }
       return null;
     };
-    window.scrollTo(0, 0);
+    if (!soft) { SOFT_Y = 0; window.scrollTo(0, 0); }
+    try { closeOverlays(); } catch (eOv) {}
     var xb = document.getElementById('expban');
     if (xb && Date.now() - (+xb.dataset.born || 0) > 1500) xb.remove();
     var pmv = document.getElementById('pnmove');
     if (pmv && dec(h) !== dec(pmv.dataset.route || '')) pnMoveClose(false); // Back / any navigation away dismisses it
-    hideWN(false);
+    if (!soft) hideWN(false);
     CURREFRESH = null;
     homeBtn.classList.add('away');
-    FILT = {}; CURVIEW = null;
+    if (!soft) FILT = {};
+    CURVIEW = null;
     var fpFilt = qparam(query, 'fp'); if (fpFilt) FILT.fp = fpFilt;
     var gp0 = document.getElementById('glosspanel'); if (gp0) gp0.hidden = true;
+    if (document.body) document.body.classList.remove('gloss-on');
     var inCT = (h === '#/cc' || h === '#/cc/fops' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0 || h.indexOf('#/fa2') === 0);
     if (!inCT) ccStop();
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
@@ -7213,24 +7402,58 @@ var GLOSS = {
     SALL = false;
     content.innerHTML = resultsHTML();
   });
+  var qClear = document.getElementById('qclear');
   qInput.addEventListener('input', function () {
+    var was = CURQ;
     CURQ = qInput.value.trim();
     if (!CURQ) { SFILT = null; SPECF = {}; }
-    var base = (location.hash || '#/').split('?')[0];
-    history.replaceState(null, '', base + (CURQ ? '?q=' + encodeURIComponent(CURQ) : ''));
+    if (!was && CURQ) SOFT_Y = Math.round(window.scrollY || 0); // P6: where the screen under the results was
+    // only q is rewritten: the screen's own parameters (FlowPort ?fp=…) stay in the URL while typing and after clearing
+    var parts = (location.hash || '#/').split('?'), base = parts[0];
+    var keep = (parts[1] || '').split('&').filter(function (p) { return p && !/^q=/.test(p); });
+    if (CURQ) keep.push('q=' + encodeURIComponent(CURQ));
+    history.replaceState(null, '', base + (keep.length ? '?' + keep.join('&') : ''));
     if (CURQ) {
       if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML;
       title.innerHTML = 'Search';
       content.innerHTML = resultsHTML();
     } else {
-      if (LAST_TITLE) { title.innerHTML = LAST_TITLE; LAST_TITLE = ''; }
-      content.innerHTML = LAST_BROWSE;
+      LAST_TITLE = '';
+      var y = SOFT_Y;
+      route({ soft: true }); // P6/P24: redraw the screen underneath for real (the saved HTML was an empty shell on #/bo and #/usage)
+      if (y) window.scrollTo(0, y);
     }
+    qUi();
   });
+  // P24: a clear button that is there whenever the box has text (iOS shows its own only while the box is focused)
+  function qUi() { if (qClear) qClear.hidden = !qInput.value; }
+  if (qClear) {
+    var keepFocus = function (e) { e.preventDefault(); }; // the tap must not blur the box: the keyboard stays if it was up
+    qClear.addEventListener('pointerdown', keepFocus); qClear.addEventListener('mousedown', keepFocus);
+    qClear.addEventListener('click', function () {
+      var had = document.activeElement === qInput;
+      qInput.value = ''; qInput.dispatchEvent(new Event('input')); // the same path as deleting the text (usage, URL, repaint)
+      if (had) qInput.focus();
+    });
+  }
   function tbxStart() {
     window.addEventListener('hashchange', route); route();
     window.__tbxRouted = true; // boot succeeded: later errors are bugs, not cache corruption (see heal)
     setTimeout(showTour, 700);
+    // P51: pay the first-card costs while Home is on screen (Safari has no requestIdleCallback).
+    setTimeout(function () {
+      try {
+        usedByIndex();
+        var w = null; for (var wi = 0; wi < D.items.length && !w; wi++) { var x = D.items[wi]; if (!x.hidden && x.specs && x.specs.length > 4 && x.note) w = x; }
+        if (!w) return;
+        var html = specCard({ name: w.name, fam: w.fam, sku: w.sku, uom: w.uom, chips: [], tags: w.tags, specs: w.specs, note: w.note, src: w.src,
+          imgs: [], links: [], refs: [], bp: w.bp, vars: variantsFor(w), used: usedWith(w), fav: { route: pnRoute(w.sku), it: { t: w.t || w.name, sku: w.sku } } });
+        var box = document.createElement('div');
+        box.setAttribute('aria-hidden', 'true');
+        box.style.cssText = 'position:absolute;left:-9999px;top:0;width:' + (content.clientWidth || 390) + 'px;visibility:hidden;pointer-events:none;contain:layout paint';
+        box.innerHTML = html; document.body.appendChild(box); void box.offsetHeight; box.remove();
+      } catch (eW) {}
+    }, 2200);
     // Backorder report: never on the render path — first fetch after the home screen has painted,
     // then at most every 30 min, plus whenever the app comes back to the foreground stale.
     setTimeout(function () { try { boRefresh(false); } catch (e) {} }, 1500);
@@ -7262,6 +7485,7 @@ var GLOSS = {
     setTimeout(function () { toast.textContent = 'Copied'; toast.classList.remove('act'); toastNext(); }, 250);
   }
 
+  var LB_CLOSE = null;
   // ---- image lightbox (tap to zoom) ----
   (function () {
     var lb = document.getElementById('lb'), img = document.getElementById('lb-img'),
@@ -7272,6 +7496,7 @@ var GLOSS = {
     function reset() { scale = 1; tx = 0; ty = 0; apply(); }
     function openLB(src) { img.src = src; reset(); lb.hidden = false; document.body.style.overflow = 'hidden'; }
     function closeLB() { lb.hidden = true; img.src = ''; document.body.style.overflow = ''; }
+    LB_CLOSE = closeLB;
     content.addEventListener('click', function (e) {
       var t = e.target;
       if (t && t.tagName === 'IMG' && t.getAttribute('src')) { openLB(t.getAttribute('src')); }
@@ -7661,21 +7886,38 @@ var GLOSS = {
   })();
 
   // ---- service worker + update banner + manual check ----
-  var TBX_REG = null;
+  var TBX_REG = null, TBX_WANT = false, TBX_RELOADED = false;
+  // P8: reload because THIS page asked for the update (banner, Check for updates) — decided when the new worker takes
+  // over, not from a flag frozen at boot. A takeover nobody here asked for never reloads an active user.
+  function tbxApplyUpdate() {
+    TBX_WANT = true;
+    var w = TBX_REG && TBX_REG.waiting;
+    if (w) w.postMessage('SKIP_WAITING');
+    setTimeout(function () {                   // the takeover can be missed (raced a newer worker, or another window took it)
+      if (TBX_RELOADED) return;
+      if (TBX_REG && TBX_REG.waiting) { TBX_REG.waiting.postMessage('SKIP_WAITING'); return; }
+      TBX_RELOADED = true; location.reload();
+    }, 4000);
+  }
+  function updBanner(text, fn) { // g3 P18/P12: the feedback bubble steps aside while the banner shows
+    var b = document.getElementById('updbanner'); if (!b) return;
+    if (text) b.textContent = text;
+    b.hidden = false; document.body.classList.add('upd-on');
+    b.onclick = function () { b.hidden = true; document.body.classList.remove('upd-on'); fn(); };
+  }
   if ('serviceWorker' in navigator) {
     var hadController = !!navigator.serviceWorker.controller;
-    var reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
-      if (!hadController) return; // first-visit SW claim: page already works, reloading here is the first-run jank
-      if (reloaded) return; reloaded = true; location.reload();
+      var was = hadController; hadController = true;
+      if (TBX_WANT) { if (!TBX_RELOADED) { TBX_RELOADED = true; location.reload(); } return; }
+      if (was) updBanner('Updated — tap to refresh', function () { location.reload(); });
     });
     navigator.serviceWorker.register('sw.js').then(function (reg) {
       TBX_REG = reg;
-      var banner = document.getElementById('updbanner');
+      if (!reg) return;
       function offer(w) {
         if (!w) return;
-        banner.hidden = false;
-        banner.onclick = function () { banner.hidden = true; w.postMessage('SKIP_WAITING'); };
+        updBanner('Update ready \u2014 tap to refresh', tbxApplyUpdate);
       }
       if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
       reg.addEventListener('updatefound', function () {
@@ -7685,7 +7927,7 @@ var GLOSS = {
           if (nw.state !== 'installed' || !navigator.serviceWorker.controller) return;
           // A manual "Check for updates" installs straight away; a background
           // find just shows the banner.
-          if (AUTO_UPD) { AUTO_UPD = false; (reg.waiting || nw).postMessage('SKIP_WAITING'); }
+          if (AUTO_UPD) { AUTO_UPD = false; tbxApplyUpdate(); }
           else offer(reg.waiting || nw);
         });
       });
@@ -7706,7 +7948,7 @@ var GLOSS = {
       setTimeout(function () {
         if (reg.waiting) {
           toastMsg('Update found — installing…', 2200);
-          reg.waiting.postMessage('SKIP_WAITING');
+          tbxApplyUpdate();
           return;
         }
         if (reg.installing) { AUTO_UPD = true; toastMsg('Downloading update…', 2600); return; }
@@ -7720,12 +7962,32 @@ var GLOSS = {
     if (e.target.closest && e.target.closest('[data-act="checkupd"]')) { checkForUpdate(); return; }
     if (e.target.closest && e.target.closest('[data-act="cyclecount"]')) { location.hash = '#/ct'; return; }
     if (e.target.closest && e.target.closest('[data-act="otherteams"]')) { location.hash = '#/teams'; return; }
-    if (e.target.closest && e.target.closest('[data-act="lockdev"]')) {
-      try { sessionStorage.removeItem('tbx_k2'); sessionStorage.removeItem('tbx_key'); } catch (e2) {}
-      try { localStorage.removeItem('tbx_k2'); localStorage.removeItem('tbx_key'); localStorage.removeItem('tbx_rm'); } catch (e3) {}
-      location.reload();
-    }
+    if (e.target.closest && e.target.closest('[data-act="lockdev"]')) { lockDevice(); }
   });
+
+  // P19: sign out of everything on this phone — team login, territory and F&A logins, the usage dashboard key — but keep
+  // the rep's own things (favorites, recents, taught barcodes, drafts, location memory, the anonymous usage id) and EVERY
+  // unsent scan. A territory (or F&A) with unsent work keeps its login until the next unlock sends it: nothing is stranded.
+  function lockDevice() {
+    var LS = localStorage, keys = [], i;
+    try { for (i = 0; i < LS.length; i++) keys.push(LS.key(i)); } catch (e0) {}
+    var pend = {}, n = 0;
+    keys.forEach(function (k) { var m = /^tbx_(.+)_ops$/.exec(k); if (!m) return; var c = 0; try { c = (JSON.parse(LS.getItem(k) || '[]') || []).length; } catch (e1) {} if (c) { pend[m[1]] = 1; n += c; } });
+    var fa = false; try { fa = !!LS.getItem('tbx_fa2_pend'); } catch (e2) {}
+    var msg = 'Lock this device?\n\nToolBox will ask for the team password next time. Territory, F&A and dashboard logins on this phone are signed out too.';
+    if (n || fa) msg += '\n\n' + (n ? n + ' cycle-count scan' + (n === 1 ? '' : 's') : '') + (n && fa ? ' and ' : '') + (fa ? 'an F&A save' : '') +
+      ' haven’t uploaded yet. ' + (n + (fa ? 1 : 0) === 1 ? 'It stays' : 'They stay') + ' on this phone and upload the next time ToolBox is unlocked.';
+    if (!confirm(msg)) return;
+    var drop = ['tbx_k2', 'tbx_key', 'tbx_rm', 'tbx_uadm'];
+    keys.forEach(function (k) {
+      var m = /^tbx_((?:[a-z0-9-]+_)?cc)(|_roster|_sheet)$/.exec(k);   // territory login + its roster / sheet link
+      if (m && !pend[m[1]]) drop.push(k);
+    });
+    if (!fa) drop.push('tbx_fa2', 'tbx_fa2_cache', 'tbx_fa2_teams');
+    drop.forEach(function (k) { try { LS.removeItem(k); } catch (e3) {} });
+    try { sessionStorage.removeItem('tbx_k2'); sessionStorage.removeItem('tbx_key'); } catch (e4) {}
+    location.reload();
+  }
 
   // ---- keep the bottom search bar above the iOS keyboard ----
   (function () {
@@ -7758,6 +8020,7 @@ var GLOSS = {
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
     cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, TORDER: TORDER, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, head: fopsHead, remove: fopsRemove, progress: fopsProgress, preview: fopsPreview, xlsx: fopsXlsxBytes, xlsxRows: fopsXlsxRows, deliver: fopsDeliver, download: fopsDownload, FO: FO } } };
+  try { window.TBX_DEV.card = { closeOverlays: closeOverlays, shPrep: shPrep, shareLinkText: shareLinkText }; } catch (eDv) {}
 };
 
 /* ---- Feedback: screenshot + silent send (mailto fallback) ----
@@ -7775,6 +8038,23 @@ window.TBX_FEEDBACK_INIT = function (cfg) {
   var fab = document.createElement('button');
   fab.id = 'fb-fab'; fab.setAttribute('aria-label', 'Send feedback'); fab.innerHTML = '&#x1F4AC;';
   document.body.appendChild(fab);
+  // P12 (Nate's spec): the bubble fades out while the page is moving and fades back once it has been still for 600 ms.
+  // Only a finger, a wheel or the momentum after them counts; programmatic scrolls (route, scrollIntoView) do not.
+  (function () {
+    var idle = null, touching = false, dragged = false, sx = 0, sy = 0, lastDrag = 0, lastWheel = 0;
+    function away() { if (!fab.classList.contains('fb-away')) fab.classList.add('fb-away'); clearTimeout(idle); idle = setTimeout(back, 600); }
+    function back() { if (touching && dragged) { idle = setTimeout(back, 600); return; } idle = null; fab.classList.remove('fb-away'); }
+    document.addEventListener('touchstart', function (e) { touching = true; dragged = false; lastDrag = 0; var t = e.touches && e.touches[0]; if (t) { sx = t.clientX; sy = t.clientY; } }, { passive: true, capture: true }); // a new touch stops momentum
+    document.addEventListener('touchmove', function (e) { var t = e.touches && e.touches[0]; if (t && (Math.abs(t.clientX - sx) > 8 || Math.abs(t.clientY - sy) > 8)) { dragged = true; away(); } }, { passive: true, capture: true });
+    var up = function () { touching = false; if (dragged) lastDrag = Date.now(); }; // a tap is not movement: route()'s scroll-to-top after it must not blink the bubble
+    document.addEventListener('touchend', up, { passive: true, capture: true });
+    document.addEventListener('touchcancel', up, { passive: true, capture: true });
+    window.addEventListener('wheel', function () { lastWheel = Date.now(); away(); }, { passive: true });
+    window.addEventListener('scroll', function () { if ((touching && dragged) || Date.now() - lastDrag < 1500 || Date.now() - lastWheel < 400) away(); }, { passive: true }); // drag, its momentum, or a wheel
+    // keyboard up (a text field has focus): the bubble would float over the keys
+    document.addEventListener('focusin', function (e) { var t = e.target; if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && !t.closest('#fb-ov')) document.body.classList.add('kb-on'); });
+    document.addEventListener('focusout', function () { setTimeout(function () { var a = document.activeElement; if (!a || !/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) document.body.classList.remove('kb-on'); }, 80); });
+  })();
 
   var ov = document.createElement('div');
   ov.id = 'fb-ov'; ov.hidden = true;
@@ -7823,19 +8103,29 @@ window.TBX_FEEDBACK_INIT = function (cfg) {
     });
   }
   function resetSend() { var b = $('fb-send'); b.disabled = false; b.textContent = 'Send'; }
-  fab.addEventListener('click', function () {
+  // P23: the bubble and "Ask Nate to add ..." open the same form; pre = {note, shot:false}. Keep window.TBX_FB_OPEN(pre).
+  function openFb(pre) {
+    pre = pre || {};
     var c = ctx();
     $('fb-ctx').textContent = 'Screen: ' + c.t + '  (' + c.h + ')';
     $('fb-hint').textContent = FEEDBACK_URL
       ? 'Sends quietly in the background \u2014 goes straight to Nate.'
       : 'Opens your email app \u2014 goes straight to Nate.';
     resetSend();
+    ov.dataset.pre = pre.note || '';
+    if (pre.note) $('fb-note').value = pre.note;
     ov.hidden = false;
-    capture();
+    if (pre.shot === false) { SHOT = null; $('fb-shotrow').style.display = 'none'; } else capture();
     setTimeout(function () { var n = $('fb-name'); if (n && !n.value) n.focus(); }, 60);
-  });
-  $('fb-cancel').addEventListener('click', function () { ov.hidden = true; });
-  ov.addEventListener('click', function (e) { if (e.target === ov) ov.hidden = true; });
+  }
+  function closeFb() { // an untouched pre-filled note does not linger for the next time the form opens
+    ov.hidden = true;
+    if (ov.dataset.pre && $('fb-note').value === ov.dataset.pre) $('fb-note').value = '';
+  }
+  window.TBX_FB_OPEN = openFb;
+  fab.addEventListener('click', function () { openFb(); });
+  $('fb-cancel').addEventListener('click', closeFb);
+  ov.addEventListener('click', function (e) { if (e.target === ov) closeFb(); });
 
   function viaMail(name, note, c) {
     if (!EMAIL) { $('fb-hint').textContent = 'Couldn\u2019t send \u2014 try again when you have signal.'; return; }

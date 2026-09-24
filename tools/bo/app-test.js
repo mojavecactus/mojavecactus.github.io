@@ -98,7 +98,8 @@ async function boot(opts) {
     check('bo: backorder sort = dated (asc) → text date → undated', lastDated < q4 && q4 < firstUndated && metas.length === 77, [lastDated, q4, firstUndated]);
     check('bo: dates carry the report stamp', metas.filter(m => /per 9\/9 report/.test(m)).length === 21, metas.filter(m => /per 9\/9/.test(m)).length);
     const cat776 = Array.from(boRows).find(r => /CAT00776/.test(r.textContent));
-    check('bo: CAT00776 entry — catalog title, report desc, date, note, link', cat776 && cat776.tagName === 'BUTTON' && /FlowPort II/.test(cat776.querySelector('.ti').textContent) && /Est\. full clear Sep 15/.test(cat776.textContent) && /September 14/.test(cat776.querySelector('.bo-note').textContent) && cat776.getAttribute('data-go') === '#/pn/CAT00776', cat776 && cat776.textContent.replace(/\s+/g, ' ').slice(0, 200));
+    // the fixture's clear date (Sep 15, 2026) is in the past once that day is over: the app then says "Clear date passed (was Sep 15)"
+    check('bo: CAT00776 entry — catalog title, report desc, date, note, link', cat776 && cat776.tagName === 'BUTTON' && /FlowPort II/.test(cat776.querySelector('.ti').textContent) && /(Est\. full clear|Clear date passed \(was) Sep 15/.test(cat776.textContent) && /September 14/.test(cat776.querySelector('.bo-note').textContent) && cat776.getAttribute('data-go') === '#/pn/CAT00776', cat776 && cat776.textContent.replace(/\s+/g, ' ').slice(0, 200));
     const ctl = t.$$('#bo-body .list')[1].querySelectorAll('.bo-row');
     check('bo: controlled entries carry the message to the sales force', ctl.length === 10 && Array.from(ctl).every(r => r.querySelector('.bo-note')) && /limited to 60 days/.test(ctl[0].textContent));
     const cat2438 = Array.from(ctl).find(r => /CAT02438/.test(r.textContent));
@@ -124,6 +125,12 @@ async function boot(opts) {
     check('bo: refresh button forces a hub call and spins while it runs', t.calls.filter(c => c.url === HUB).length === 2 && t.$('#bo-refresh').classList.contains('spin') && t.$('#bo-refresh').disabled);
     await sleep(700);
     check('bo: spin stops after the refresh settles', !t.$('#bo-refresh').classList.contains('spin') && !t.$('#bo-refresh').disabled);
+    // P6: a catalog search typed over the report and then cleared redraws the report for real (rows and filter listeners)
+    t.$('#q').value = 'iconix'; t.$('#q').dispatchEvent(new t.w.Event('input')); await sleep(20);
+    t.$('#q').value = ''; t.$('#q').dispatchEvent(new t.w.Event('input')); await sleep(40);
+    const nRows = t.$$('#bo-body .bo-row').length, qi2 = t.$('#bo-q'); qi2.value = 'flowport'; qi2.dispatchEvent(new t.w.Event('input')); await sleep(20);
+    check('bo: clearing the search box redraws the report and its filter still works (P6)', nRows === 98 && t.$$('#bo-body .bo-row').length === 4 && /Backorder/.test(t.txt('#title')), [nRows, t.$$('#bo-body .bo-row').length]);
+    qi2.value = ''; qi2.dispatchEvent(new t.w.Event('input')); await sleep(20);
     // tap an entry → card
     Array.from(t.$$('#bo-body .bo-row')).find(r => /CAT00776/.test(r.textContent)).click(); await sleep(40);
     check('bo: tapping an entry opens the product card', t.w.location.hash === '#/pn/CAT00776' && t.$('.card h1') && /FlowPort/.test(t.txt('.card h1')), t.w.location.hash);
@@ -134,7 +141,7 @@ async function boot(opts) {
     await t.go('#/pn/CAT00776');
     check('card: Backorder pill in the banner, none in the title', t.$('.bobanner .bopill.bo') && !t.$('.card h1 .bopill') && !t.$('.bobanner .bopill.ctl'));
     const ban = t.$('.bobanner');
-    check('card: banner with date, report stamp, note, link to the report', ban && /Est\. full clear Sep 15/.test(ban.textContent) && /per 9\/9 report/.test(ban.textContent) && /September 14/.test(ban.textContent) && ban.querySelector('[data-go="#/bo"]'), ban && ban.textContent.replace(/\s+/g, ' '));
+    check('card: banner with date, report stamp, note, link to the report', ban && /(Est\. full clear|Clear date passed \(was) Sep 15/.test(ban.textContent) && /per 9\/9 report/.test(ban.textContent) && /September 14/.test(ban.textContent) && ban.querySelector('[data-go="#/bo"]'), ban && ban.textContent.replace(/\s+/g, ' '));
     check('card: banner sits above the part-number block', (() => { const c = t.$('.card'); const kids = Array.from(c.children).map(e => e.className); return kids.indexOf('bobanner') < kids.indexOf('pnblock') && kids.indexOf('bobanner') > kids.indexOf('fam'); })());
     await t.go('#/pn/CAT02438');
     check('card: CAT02438 — Controlled + Cleared pills and both banner lines', t.$$('.bobanner .bopill').length === 2 && t.$('.bobanner .bopill.ctl') && t.$('.bobanner .bopill.clr') && /24–36 hr/.test(t.txt('.bobanner')) && /Cleared backorder · week of Sep 7/.test(t.txt('.bobanner')) && /restock again next week/.test(t.txt('.bobanner')));
