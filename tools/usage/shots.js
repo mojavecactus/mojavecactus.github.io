@@ -1,11 +1,13 @@
 // Visual check: the real app in headless Chromium at phone width with the usage hub faked by the real core
 // over 30 days of synthetic team activity. Screenshots to tools/usage/shots/ (gitignored).
 //   APP_PW=<catalog pw> node tools/usage/shots.js      (needs data.js decrypted in the repo root for the part numbers)
+//   PORT=<port> OUT=<dir> override the local server port (8124) and the output folder. 08–12: the N9 "To review" card
+//   (u_queue / u_mark answered by the real core) at 390 and 320 px; 13–14: P45 feedback kept offline.
 const { chromium } = require('playwright'); const { spawn } = require('child_process');
 const fs = require('fs'), path = require('path');
 const U = require('./usage-core.js');
-const R = path.resolve(__dirname, '../..'); const OUT = path.join(__dirname, 'shots'); fs.mkdirSync(OUT, { recursive: true });
-const PORT = 8124, BASE = 'http://localhost:' + PORT + '/';
+const R = path.resolve(__dirname, '../..'); const OUT = path.resolve(process.env.OUT || path.join(__dirname, 'shots')); fs.mkdirSync(OUT, { recursive: true });
+const PORT = +process.env.PORT || 8124, BASE = 'http://localhost:' + PORT + '/';
 const HUB = 'https://script.google.com/macros/s/fake-usage/exec';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -57,19 +59,30 @@ function gen(now) {
   const browser = await chromium.launch({ headless: true });
   const shots = [];
   async function page(opts) {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, timezoneId: 'America/New_York' });
+    const ctx = await browser.newContext({ viewport: { width: opts.width || 390, height: opts.width === 320 ? 700 : 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, timezoneId: 'America/New_York' });
     await ctx.addInitScript((a) => {
       try { localStorage.setItem('tbx_tour_done', '1'); localStorage.setItem('tbx_a2hs_x', '1'); localStorage.setItem('tbx_wn_seen', '99'); if (a.admin) localStorage.setItem('tbx_uadm', 'admin-key-123'); } catch (e) {}
-      let t; Object.defineProperty(window, 'TOOLBOX', { configurable: true, get() { return t; }, set(v) { if (v) { v.usage = { url: a.hub, key: 'write-key' }; delete v.bo; } t = v; } });
+      let t; Object.defineProperty(window, 'TOOLBOX', { configurable: true, get() { return t; }, set(v) { if (v) { v.usage = { url: a.hub, key: 'write-key' }; delete v.bo; v.fb = { url: a.hub.replace('fake-usage', 'fake-relay'), token: 'shots', email: '' }; } t = v; } }); // never a live hub
     }, { hub: HUB, admin: !!opts.admin });
     const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(String(e)));
-    const rows = gen(Date.now());
+    const rows = gen(Date.now()), v2 = opts.v2 !== false, review = {}, H = 3600e3;
+    // what the owner decided earlier (the hub's Review tab): one done and asked again since, one ignored, one done and quiet
+    review['search\ttightrope'] = { st: 'done', note: 'not ours — Arthrex', at: new Date(Date.now() - 20 * 24 * H).toISOString() };
+    review['search\tquattro link'] = { st: 'ignore', note: '', at: new Date(Date.now() - 2 * 24 * H).toISOString() };
+    review['part\t234020123'] = { st: 'todo', note: 'ask CS for the new label', at: new Date(Date.now() - 3 * 24 * H).toISOString() };
+    const mark = (b, now) => { if (b.key !== 'admin-key-123') return { ok: false, err: 'key' }; const k = U.qKey(b.t, b.k); if (!U.QTYPES.hasOwnProperty(b.t) || !U.QST.hasOwnProperty(b.st) || !k) return { ok: false, err: 'bad' };
+      const prev = review[b.t + '\t' + k], at = new Date(now).toISOString(), note = b.note == null ? (prev ? prev.note : '') : U.clean(b.note, 140);
+      review[b.t + '\t' + k] = { st: b.st, note, at }; return { ok: true, t: b.t, k, st: b.st, note, at }; };
     await p.route('**/sw.js', r => r.fulfill({ status: 404, body: '' }));
     await p.route(/script\.google\.com/, r => {
       let b = {}; try { b = JSON.parse(r.request().postData() || '{}'); } catch (e) {}
       const now = Date.now();
       const out = b.action === 'u_live' ? (b.key === 'admin-key-123' ? U.live(rows, { now, excl: {} }) : { ok: false, err: 'key' })
-        : b.action === 'u_stats' ? U.stats(rows, { now, days: +b.days || 7, excl: {} }) : { ok: true, n: (b.e || []).length };
+        : b.action === 'u_stats' ? U.stats(rows, { now, days: +b.days || 7, excl: {} })
+        : b.action === 'u_queue' ? (!v2 ? { ok: false, err: 'action' } : b.key !== 'admin-key-123' ? { ok: false, err: 'key' } : U.mergeReview(U.queue(rows, { now, days: +b.days || 30, excl: {} }), JSON.parse(JSON.stringify(review))))
+        : b.action === 'u_mark' ? (v2 ? mark(b, now) : { ok: false, err: 'action' })
+        : b.token !== undefined && b.note !== undefined ? 'ok' : { ok: true, n: (b.e || []).length };
+      if (typeof out === 'string') return r.fulfill({ status: 200, contentType: 'text/plain', body: out }); // the feedback relay
       return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(out) });
     });
     await p.goto(BASE + '#/');
@@ -94,6 +107,53 @@ function gen(now) {
   { const { p, ctx, errs } = await page({ admin: false });
     await p.evaluate(() => { location.hash = '#/usage'; }); await sleep(800); await shot(p, '07-usage-gate');
     console.log('page errors (gate):', errs.length ? errs : 'none');
+    await ctx.close(); }
+  // ---- N9: the "To review" card (390 and 320 px) ----
+  const rq = async (p) => { await p.evaluate(() => { location.hash = '#/usage'; }); await p.waitForFunction(() => /Now finds|Every search/.test((document.getElementById('ug-rq') || {}).textContent || '') || document.querySelectorAll('#ug-rq .ug-rqr').length > 3, null, { timeout: 15000 }).catch(() => {}); await sleep(900); };
+  const card = async (p, name) => { // the whole card, with the fixed header / search bar / bubble / toast out of the way
+    await p.evaluate(() => { const st = document.createElement('style'); st.id = '__shot'; st.textContent = '#bar,#bottombar,#fb-fab,#toast{visibility:hidden !important}'; document.head.appendChild(st); });
+    const el = p.locator('#ug-rq'); await el.scrollIntoViewIfNeeded(); await sleep(150); const f = path.join(OUT, name + '.png'); await el.screenshot({ path: f }); shots.push(f);
+    await p.evaluate(() => { const st = document.getElementById('__shot'); if (st) st.remove(); });
+  };
+  for (const w of [390, 320]) {
+    const { p, ctx, errs } = await page({ admin: true, width: w }); const sfx = w === 390 ? '' : '-320';
+    await rq(p);
+    await p.evaluate(() => { const r = document.getElementById('ug-rq'); window.scrollTo(0, r.getBoundingClientRect().top + window.scrollY - 170); }); await sleep(200);
+    await shot(p, '08-usage-review-in-place' + sfx);
+    await card(p, '08-usage-review-searches' + sfx);
+    await p.locator('#ug-rq [data-rq-tab="barcode"]').click(); await sleep(250); await card(p, '09-usage-review-barcodes' + sfx);
+    await p.locator('#ug-rq [data-rq-tab="part"]').click(); await sleep(250); await card(p, '09b-usage-review-missing-cards' + sfx);
+    await p.locator('#ug-rq [data-rq-tab="search"]').click(); await sleep(250);
+    await p.locator('#ug-rq .ug-rqr').first().locator('[data-rq-act="done"]').click(); await sleep(400);
+    const all = p.locator('#ug-rqall'); if (await all.count()) { await all.check(); await sleep(300); }
+    await card(p, '10-usage-review-done-toggle' + sfx);
+    await p.screenshot({ path: path.join(OUT, '10b-usage-review-undo-toast' + sfx + '.png') }); shots.push(path.join(OUT, '10b-usage-review-undo-toast' + sfx + '.png'));
+    if (w === 390) {
+      await p.locator('#ug-rq .ug-rqr').nth(1).locator('[data-rq-act="note"]').click(); await sleep(150);
+      await p.locator('#ug-rqnote').fill('alias “tight rope” added in 4.144'); await card(p, '11-usage-review-note');
+    }
+    console.log('page errors (review ' + w + '):', errs.length ? errs : 'none');
+    await ctx.close();
+  }
+  { const { p, ctx, errs } = await page({ admin: true, v2: false });
+    await p.evaluate(() => { location.hash = '#/usage'; }); await sleep(1800);
+    await p.evaluate(() => { const r = document.getElementById('ug-rq'); window.scrollTo(0, r.getBoundingClientRect().top + window.scrollY - 170); }); await sleep(200);
+    await shot(p, '12-usage-review-old-hub');
+    console.log('page errors (old hub):', errs.length ? errs : 'none');
+    await ctx.close(); }
+  // ---- P45: feedback kept offline ----
+  { const { p, ctx, errs } = await page({ admin: false });
+    await p.evaluate(() => { location.hash = '#/pn/3910500580'; }); await sleep(900);
+    await p.locator('#fb-fab').click(); await p.waitForFunction(() => /attached/.test(document.getElementById('fb-shotcap').textContent), null, { timeout: 15000 }).catch(() => {});
+    await p.locator('#fb-cancel').click(); await sleep(200);
+    await ctx.setOffline(true);
+    await p.locator('#fb-fab').click(); await sleep(1500);
+    await p.locator('#fb-name').fill('Nate'); await p.locator('#fb-note').fill('The 1.4 DC guide photo is the old one.');
+    await p.locator('#fb-send').click(); await sleep(250); await shot(p, '13-feedback-saved-offline');
+    await sleep(1900); await p.evaluate(() => { location.hash = '#/about'; }); await sleep(600);
+    await p.evaluate(() => { const r = document.getElementById('fbq-note'); if (r) window.scrollTo(0, r.getBoundingClientRect().top + window.scrollY - 300); }); await sleep(200);
+    await shot(p, '14-about-feedback-waiting');
+    console.log('page errors (feedback):', errs.length ? errs : 'none');
     await ctx.close(); }
   await browser.close(); server.kill();
   console.log(shots.join('\n'));

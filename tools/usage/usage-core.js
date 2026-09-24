@@ -13,8 +13,10 @@
 //   error  key message          extra file:line
 //   ping   (app open on screen, idle — keeps "using it now" honest)
 // Devices are random ids made on the phone; sessions end after 30 idle minutes. Days/hours are US Eastern.
+// The hub's Review tab (type · key · status · note · updated) holds what the owner decided about queue rows (queue /
+// mergeReview below) — written only by u_mark, never by the app's event path.
 var UCORE = (function () {
-  var VER = 1;
+  var VER = 2;            // 2 = review queue (u_queue / u_mark); u_ping answers it, so a deploy is easy to confirm
   var COLS = ['ts', 'device', 'session', 'type', 'key', 'extra'];
   var TYPES = { open: 1, view: 1, card: 1, search: 1, scan: 1, fav: 1, share: 1, error: 1, ping: 1 };
   var MAXB = 200;            // events accepted per batch
@@ -201,8 +203,78 @@ var UCORE = (function () {
     };
   }
 
+  // ---- review queue (u_queue): what people looked for and didn't find, last `days` days (default 30) ----
+  //   search   the LATEST try found nothing (the catalog may have caught up since): n = tries that found nothing,
+  //            ok = tries that found something, dev = people who got nothing
+  //   barcode  scan outcome 'unknown' — a GTIN-14, or the scanned text reduced to A-Z0-9 (≤40)
+  //   part     a part number with no card, scanned (scan · nocard) or opened from a link (card · missing), merged on the
+  //            number without dashes / leading zeros (id); k = the latest spelling; scan / link = how it was hit
+  // Ranked by people, then tries, then most recent. QCAP rows per list; tot = how many there were before the cap.
+  var QCAP = 100, QGRACE = 2 * MIN, QTYPES = { search: 1, barcode: 1, part: 1 }, QST = { todo: 1, done: 1, ignore: 1 };
+  function qKey(t, k) { // the one normalization for queue rows AND Review-tab keys — idempotent: qKey(t, qKey(t, k)) = qKey(t, k)
+    k = clean(k, 80).replace(/^[=\s]+/, '').replace(/\s+$/, ''); // "= x" and a space left at the 80-char cut must not change on a 2nd pass
+    if (t === 'search') return k.toLowerCase();                        // clean() already trimmed and collapsed spaces
+    if (t === 'barcode') return k.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 40);
+    if (t === 'part') return k.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
+    return '';
+  }
+  function queue(rows, o) {
+    var now = o.now, days = Math.max(1, +o.days || 30), t0 = windowStart(now, days), hi = now + 2 * MIN, cap = o.cap || QCAP;
+    var evs = parse(rows, o.excl), S = {}, B = {}, P = {}, i, e, k, m;
+    function hit(map, key, ev) {
+      var x = map[key] || (map[key] = { n: 0, dev: {}, last: 0, first: 0 });
+      x.n++; x.dev[ev.d] = 1; if (ev.t >= x.last) { x.last = ev.t; x.disp = ev.k; } if (!x.first || ev.t < x.first) x.first = ev.t;
+      return x;
+    }
+    for (i = 0; i < evs.length; i++) {
+      e = evs[i];
+      if (e.t < t0 || e.t > hi) continue;
+      if (e.ty === 'search') {
+        if (!(k = qKey('search', e.k))) continue;
+        m = S[k] || (S[k] = { n: 0, ok: 0, dev: {}, last: 0, first: 0, lt: 0, lz: false });
+        if (e.t >= m.lt) { m.lt = e.t; m.lz = e.x === '0'; }
+        if (e.x === '0') { m.n++; m.dev[e.d] = 1; if (e.t > m.last) m.last = e.t; if (!m.first || e.t < m.first) m.first = e.t; } else m.ok++;
+      } else if (e.ty === 'scan' && e.x !== 'card' && e.x !== 'moved') {
+        if (e.x === 'nocard') { if ((k = qKey('part', e.k))) { m = hit(P, k, e); m.scan = (m.scan || 0) + 1; } }
+        else if ((k = qKey('barcode', e.k))) hit(B, k, e);                // 'unknown' (and anything unexpected, like stats())
+      } else if (e.ty === 'card' && e.x === 'missing') {
+        if ((k = qKey('part', e.k))) { m = hit(P, k, e); m.link = (m.link || 0) + 1; }
+      }
+    }
+    function list(map, keep, shape) {
+      var a = [];
+      for (var key in map) if (map.hasOwnProperty(key) && (!keep || keep(map[key]))) a.push(shape(key, map[key]));
+      a.sort(function (x, y) { return y.dev - x.dev || y.n - x.n || y.last - x.last || (x.k < y.k ? -1 : x.k > y.k ? 1 : 0); });
+      return a;
+    }
+    var s = list(S, function (x) { return x.lz && x.n > 0; }, function (key, x) {
+      var r = { k: key, n: x.n, dev: size(x.dev), last: x.last, first: x.first }; if (x.ok) r.ok = x.ok; return r; });
+    var b = list(B, null, function (key, x) { return { k: key, n: x.n, dev: size(x.dev), last: x.last, first: x.first }; });
+    var p = list(P, null, function (key, x) {
+      var r = { k: clean(x.disp, 80) || key, id: key, n: x.n, dev: size(x.dev), last: x.last, first: x.first };
+      if (x.scan) r.scan = x.scan; if (x.link) r.link = x.link; return r; });
+    return { ok: true, v: VER, asOf: now, days: days, from: t0, cap: cap, tot: { search: s.length, barcode: b.length, part: p.length },
+      search: s.slice(0, cap), barcode: b.slice(0, cap), part: p.slice(0, cap) };
+  }
+  // Review statuses (the hub's Review tab) onto a queue. rev = {'<type>\t<key>': {st, note, at}}. A row marked done that
+  // happened again more than QGRACE after the mark is back (back: 1); ignore stays quiet whatever happens.
+  function mergeReview(Q, rev) {
+    rev = rev || {};
+    ['search', 'barcode', 'part'].forEach(function (t) {
+      var a = Q[t] || [];
+      for (var i = 0; i < a.length; i++) {
+        var r = a[i], s = rev[t + '\t' + (t === 'part' ? r.id : r.k)];
+        if (!s || !QST.hasOwnProperty(s.st)) continue;
+        r.st = s.st; r.at = s.at || ''; if (s.note) r.note = s.note;
+        if (s.st === 'done' && r.last > (Date.parse(s.at) || 0) + QGRACE) r.back = 1;
+      }
+    });
+    return Q;
+  }
+
   return { VER: VER, COLS: COLS, TYPES: TYPES, MAXB: MAXB, MAX_ROWS: MAX_ROWS, TRIM_ROWS: TRIM_ROWS,
     etOff: etOff, etDay: etDay, etHour: etHour, etDayStart: etDayStart, addDays: addDays, windowStart: windowStart,
-    clean: clean, rowsFromBatch: rowsFromBatch, parse: parse, live: live, stats: stats };
+    clean: clean, rowsFromBatch: rowsFromBatch, parse: parse, live: live, stats: stats,
+    QCAP: QCAP, QGRACE: QGRACE, QTYPES: QTYPES, QST: QST, qKey: qKey, queue: queue, mergeReview: mergeReview };
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports = UCORE;

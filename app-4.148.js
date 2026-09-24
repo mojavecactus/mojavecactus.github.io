@@ -39,7 +39,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.147';
+  var APPVER = '4.148';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -407,7 +407,7 @@ var GLOSS = {
   // usage.off = completely inert. The dashboard (#/usage) needs the admin key, which is NOT in the payload.
   var UGH = null; try { if (D.usage && D.usage.url && D.usage.key && !D.usage.off) UGH = D.usage; } catch (eUg0) {}
   var UG = { q: [], fly: null, busy: false, timer: null, at: 0, back: 0, last: 0, lastAny: 0, started: false,
-    view: '', viewT: 0, sq: null, sqT: null, qSeen: {}, errs: 0, errSeen: {}, mem: '' };
+    view: '', viewT: 0, sq: null, sqT: null, qSeen: {}, errs: 0, errSeen: {}, mem: '', mute: 0 };
   var UG_SESS_MS = 30 * 60000, UG_MAXQ = 400, UG_BATCH = 100;
   function ugOn() { return !!UGH; }
   function ugRnd(n) {
@@ -524,6 +524,7 @@ var GLOSS = {
       } else key = ugViewKey(h, dec);
       if (!key || key === 'usage') return;
       var now = Date.now();
+      if (UG.mute) { var mu = UG.mute; UG.mute = 0; if (now - mu < 3000) return; } // N9 "Search it" on the dashboard: the owner's look, not a visit
       if (ty + ':' + key === UG.view && now - UG.viewT < 1500) return; // a re-render, not a new visit
       UG.view = ty + ':' + key; UG.viewT = now;
       ugEv(ty, key, x);
@@ -589,7 +590,12 @@ var GLOSS = {
   } catch (eUg1) {}
 
   // ---- Usage dashboard (#/usage) ----
-  var UGD = { live: null, liveAt: 0, stats: {}, statsAt: {}, days: 7, incl: false, busyL: false, busyS: false, errL: '', errS: '', gen: 0, more: {} };
+  var UGD = { live: null, liveAt: 0, stats: {}, statsAt: {}, days: 7, incl: false, busyL: false, busyS: false, errL: '', errS: '', gen: 0, more: {},
+    // N9 "To review" (u_queue / u_mark): the last answer and for which "Include my devices"; qNow = what this phone's catalog
+    // says about a row now (memo); qMarks = marks waiting to be sent, one at a time; qOver = marks made here that a queue
+    // answer may predate (re-applied until the hub has them); qDraw = the dashboard on screen
+    q: null, qIncl: -1, qAt: 0, qNext: 0, qBusy: false, qErr: '', qOff: false, qTab: 'search', qAll: false, qMore: {}, qNow: {}, qEdit: '',
+    qPend: 0, qMarks: [], qSending: false, qOver: {}, qDraw: null };
   function ugApi(action, extra, cb, keyOverride) {
     var ak = keyOverride || ugAdmin();
     if (!UGH || !ak) { cb(null, 'key'); return; }
@@ -603,6 +609,66 @@ var GLOSS = {
         .then(function (j) { if (!j || !j.ok) fin(null, (j && j.err) || 'bad'); else fin(j, ''); })
         .catch(function () { fin(null, navigator.onLine === false ? 'offline' : 'net'); });
     } catch (e2) { fin(null, 'net'); }
+  }
+  // ---- N9: review-queue marks (Done / Ignore / Reopen / Note). Optimistic on screen; sent one at a time; a failed mark
+  // puts the row back as it was. Kept outside usageScreen so a redraw (P6 soft route, Back) never loses one in flight.
+  function rqId(t, r) { return t + '\t' + (t === 'part' ? r.id : r.k); }
+  function rqCur(t, r) { // the row object in the current answer (a reload replaces them), else the one that was tapped
+    var a = (UGD.q && UGD.q[t]) || [], id = rqId(t, r);
+    for (var i = 0; i < a.length; i++) if (rqId(t, a[i]) === id) return a[i];
+    return r;
+  }
+  function rqSet(t, r, s) {
+    [r, rqCur(t, r)].forEach(function (x) { x.st = s.st; x.at = s.at; x.back = s.back || 0; if (s.note) x.note = s.note; else delete x.note; });
+  }
+  function rqMark(t, r, st, note, toastText, undoable) {
+    var prev = { st: r.st, note: r.note || '', at: r.at, back: r.back || 0 }, id = rqId(t, r);
+    var nn = note == null ? (r.note || '') : note;
+    var o = { st: st, note: nn, at: new Date().toISOString(), ok: 0 };
+    rqSet(t, r, o); UGD.qOver[id] = o;
+    UGD.qMarks.push({ t: t, k: t === 'part' ? r.id : r.k, st: st, note: note, id: id, o: o, prev: prev, r: r });
+    if (UGD.qDraw) UGD.qDraw();
+    if (toastText) rqToast(toastText, undoable ? function () {
+      // Undo: an open row (no decision, todo, or done-but-back) goes back to todo; a closed one to its old status
+      var wasOpen = !prev.st || prev.st === 'todo' || (prev.st === 'done' && prev.back);
+      rqMark(t, r, wasOpen ? 'todo' : prev.st, prev.note, '', false);
+    } : null);
+    rqPump();
+  }
+  function rqPump() {
+    if (UGD.qSending || !UGD.qMarks.length) return;
+    var m = UGD.qMarks[0], body = { t: m.t, k: m.k, st: m.st };
+    if (m.note != null) body.note = m.note;
+    UGD.qSending = true;
+    ugApi('u_mark', body, function (j, err) {
+      UGD.qSending = false;
+      if (!j && err === 'busy' && !m.retried) { m.retried = 1; setTimeout(rqPump, 1500); return; } // the hub was writing events: once more
+      UGD.qMarks.shift();
+      var cur = UGD.qOver[m.id] === m.o; // no later mark on this row has replaced this one
+      if (j) { m.o.ok = Date.now(); if (cur && j.at) { m.o.at = j.at; rqSet(m.t, m.r, m.o); } }
+      else {
+        if (cur) { delete UGD.qOver[m.id]; rqSet(m.t, m.r, m.prev); }
+        if (err === 'key') { try { localStorage.removeItem('tbx_uadm'); } catch (e) {} }
+        rqToast(err === 'full' ? 'Couldn’t save — the Review tab is full (5,000 rows).' : 'Couldn’t save — check your signal and try again.', null);
+      }
+      if (UGD.qDraw) UGD.qDraw();
+      rqPump();
+    });
+  }
+  // A queue answer may predate marks made here (still being sent, or confirmed after the request left): keep them on top.
+  function rqApply(Q, t0) {
+    for (var id in UGD.qOver) if (UGD.qOver.hasOwnProperty(id)) {
+      var o = UGD.qOver[id];
+      if (o.ok && o.ok < t0) { delete UGD.qOver[id]; continue; } // the hub had it when it answered
+      var t = id.slice(0, id.indexOf('\t')), a = Q[t] || [];
+      for (var i = 0; i < a.length; i++) if (rqId(t, a[i]) === id) { a[i].st = o.st; a[i].at = o.at; a[i].back = 0; if (o.note) a[i].note = o.note; else delete a[i].note; }
+    }
+  }
+  // one review toast at a time: a newer mark replaces the one on screen (its Undo) instead of queueing 4-s toasts behind it
+  function rqToast(text, undo) {
+    TQ = TQ.filter(function (x) { return !(x.opts && x.opts.rq); });
+    if (TCUR && TCUR.opts && TCUR.opts.rq && toast.classList.contains('on')) { clearTimeout(TTIMER); hideToast(); }
+    toastMsg(text, undo ? 5000 : 3200, undo ? { rq: 1, action: { label: 'Undo', fn: undo } } : { rq: 1 });
   }
   function ugNum(n) { n = +n || 0; return n >= 10000 ? (Math.round(n / 100) / 10) + 'K' : n.toLocaleString('en-US'); }
   function ugTitle(sku) { var e = BYPN[nrm(sku)] || BYPNZ[nrm(sku).replace(/^0+/, '')], r = e ? recOf(e) : null; return r ? (r.t || r.name || '') : ''; }
@@ -710,11 +776,14 @@ var GLOSS = {
       '<div class="card ug-live"><div class="ug-lh"><span class="ug-dot" aria-hidden="true"></span><span class="ug-lt">Live</span><span class="ug-upd" id="ug-upd"></span>' +
       '<button id="ug-rf" class="ct-help ug-rf" type="button" aria-label="Refresh">' + ICON.refresh + '</button></div>' +
       '<div id="ug-livebody"></div></div>' +
+      '<div id="ug-rq" class="ug-rq"></div>' +
       '<div class="grouphead ug-gh">Latest activity</div><div class="card ug-feed" id="ug-feed"></div>' +
       '<div class="ug-filters" id="ug-filters"></div>' +
       '<div id="ug-period"></div>' +
       '<div class="ug-foot">Anonymous: each phone is a random id — no names, nothing typed into forms.<br>' +
       '<button class="footlink" id="ug-forget">Forget the key on this device</button></div></div>');
+    var root = content.querySelector('.ug');
+    if (!root) return; // #/usage?q=… paints search results instead (render → resultsHTML): nothing of the dashboard to wire up
     var alive = function () { return gen === UGD.gen && (location.hash || '').split('?')[0] === '#/usage' && document.getElementById('ug-livebody'); };
     function drawLive() {
       if (!alive()) return;
@@ -830,34 +899,197 @@ var GLOSS = {
         UGD.busyS = false;
         if (j) { UGD.stats[key] = j; UGD.statsAt[key] = Date.now(); UGD.errS = ''; } else UGD.errS = err;
         drawPeriod();
+        if (UGD.qPend) { var qf = UGD.qPend === 2; UGD.qPend = 0; loadQueue(qf); } // N9: the queue's 30-day read follows the report's, not beside it
         if (key !== UGD.days + ':' + (UGD.incl ? 1 : 0)) loadStats(false); // the period changed while this was loading
       });
     }
     function statsStale() { var k = UGD.days + ':' + (UGD.incl ? 1 : 0); return !UGD.stats[k] || Date.now() - (UGD.statsAt[k] || 0) > (UGD.days === 1 ? 60000 : 300000); }
-    drawLive(); drawFilters(); drawPeriod();
+
+    // ---- N9 "To review": searches, barcodes and part numbers people didn't find in the last 30 days (u_queue), ranked by
+    // people then tries, with Search it / Copy / Done / Ignore / Note. Every value from the hub is escaped; buttons carry an
+    // index into RQV (the rows on screen), never a key. An older hub (no u_queue) gets one quiet line instead.
+    var RQT = [['search', 'Searches'], ['barcode', 'Barcodes'], ['part', 'Missing cards']];
+    var RQI = { search: 'Searches that still find nothing, most people first. Add a keyword, an alias or a card, then tap Done.',
+      barcode: 'Barcodes the scanner didn’t recognize. Look them up with the FDA lookup, then add them to the next barcode update.',
+      part: 'Part numbers scanned or opened from a link that have no card.' };
+    var RQE = { search: 'Every search in the last 30 days found something.', barcode: 'No unknown barcodes in the last 30 days.',
+      part: 'No part numbers without a card in the last 30 days.' };
+    var RQV = [], chk = null;
+    function rqStale() { return Date.now() >= (UGD.qNext || 0) && (UGD.qIncl !== (UGD.incl ? 1 : 0) || Date.now() - UGD.qAt > 300000); }
+    function rqDay(ts) { var d = new Date(typeof ts === 'number' ? ts : Date.parse(ts)); return isNaN(d.getTime()) ? '' : BO_MON[d.getMonth()] + ' ' + d.getDate(); }
+    function rqNow(t, r) { // what this phone's catalog says now: shipped data and barcode maps only, never its own taught barcodes
+      var id = rqId(t, r), e = null, sku = '';
+      if (UGD.qNow.hasOwnProperty(id)) return UGD.qNow[id];
+      if (t === 'search') return undefined;                    // searchAll costs 25–80 ms a term: rqCheck does these one per tick
+      if (t === 'barcode') {
+        if (/^\d{14}$/.test(r.k)) sku = (window.TBX_GTIN14 || {})[r.k] || (window.TBX_GTIN || {})[r.k.slice(1, 13)] || '';
+        else e = BYPN[nrm(r.k)] || BYPNZ[nrm(r.k).replace(/^0+/, '')];
+      } else e = BYPN[nrm(r.k)] || BYPNZ[String(r.id || '')];
+      if (e) sku = skuOf(e) || '';
+      return (UGD.qNow[id] = sku ? { sku: sku } : null);
+    }
+    function rqOpen(t, r) { // needs a look: no decision yet, "todo", or done but it happened again and this phone still can't answer it
+      if (!r.st || r.st === 'todo') return true;
+      return r.st === 'done' && !!r.back && !rqNow(t, r);
+    }
+    function rqGtins() { return ((UGD.q && UGD.q.barcode) || []).filter(function (r) { return /^\d{14}$/.test(r.k) && rqOpen('barcode', r); }).map(function (r) { return r.k; }); }
+    function rqCheck() { // "now finds N": one catalog search per tick, only for the rows on screen and "back" rows, then one redraw
+      if (chk || !UGD.q) return;
+      var want = [], seen = {};
+      var add = function (k) { var id = 'search\t' + k; if (!seen[id] && !UGD.qNow.hasOwnProperty(id)) { seen[id] = 1; want.push(k); } };
+      (UGD.q.search || []).forEach(function (r) { if (r.st === 'done' && r.back) add(r.k); });
+      RQV.forEach(function (x) { if (x.t === 'search') add(x.r.k); });
+      if (!want.length) return;
+      chk = setTimeout(function step() {
+        chk = null;
+        if (!alive()) return;
+        var k = want.shift(), n = 0;
+        try { n = searchAll(k).length; } catch (e) {}
+        UGD.qNow['search\t' + k] = n ? { n: n } : null;
+        if (want.length) chk = setTimeout(step, 0); else drawQueue();
+      }, 0);
+    }
+    function rqRow(t, r, i) {
+      var open = rqOpen(t, r), now = rqNow(t, r), p = '', sub = [], a = '';
+      var b = function (act, label) { return '<button type="button" class="ug-rqb" data-rq-act="' + act + '" data-rq-i="' + i + '">' + label + '</button>'; };
+      if (open && r.st === 'done' && r.back) p += ' <span class="ug-pill warn">Back</span>';
+      if (now) p += ' <span class="ug-pill ok">' + (t === 'search' ? 'Now finds ' + (+now.n || 0) : t === 'barcode' ? 'Maps to ' + esc(now.sku) : 'Has a card now') + '</span>';
+      if (!open) p += ' <span class="ug-pill">' + (r.st === 'ignore' ? 'Ignored' : 'Done') + '</span>';
+      sub.push(ppl(+r.dev || 0));
+      if (t === 'search') { sub.push(plural(+r.n || 0, 'try', 'tries')); if (r.ok) sub.push((+r.ok || 0) + ' found something'); }
+      else if (t === 'barcode') sub.push(plural(+r.n || 0, 'scan'));
+      else { if (r.scan) sub.push('scanned ' + (+r.scan || 0)); if (r.link) sub.push('from a link ' + (+r.link || 0)); }
+      sub.push('last ' + sinceText(r.last));
+      if (r.first && rqDay(r.first) !== rqDay(r.last)) sub.push('since ' + rqDay(r.first));
+      if (r.st === 'done' && r.back) sub.push('done ' + rqDay(r.at) + ' — asked again since');
+      if (r.note) sub.push('“' + r.note + '”');
+      if (UGD.qEdit === rqId(t, r)) {
+        a = '<div class="ug-rqe"><input id="ug-rqnote" class="cc-in" type="text" maxlength="140" autocomplete="off" placeholder="A note for yourself" aria-label="Note" value="' + esc(r.note || '') + '">' +
+          b('save', 'Save') + b('cancel', 'Cancel') + '</div>';
+      } else {
+        if (t !== 'barcode') a += b('go', 'Search it');
+        if (now && now.sku) a += b('card', 'Open card');
+        a += '<button type="button" class="ug-rqb" data-copy="' + esc(r.k) + '">Copy</button>';
+        a += open ? b('done', 'Done') + b('ignore', 'Ignore') : b('reopen', 'Reopen');
+        a += b('note', r.note ? 'Edit note' : 'Note');
+        a = '<div class="ug-rqa">' + a + '</div>';
+      }
+      return '<div class="ug-rqr' + (open ? '' : ' closed') + '"><div class="ug-rqm">' + (t === 'search' ? '<b>“' + esc(r.k) + '”</b>' : '<span class="mono">' + esc(r.k) + '</span>') + p + '</div>' +
+        '<div class="ug-rqs">' + sub.map(esc).join(' · ') + '</div>' + a + '</div>';
+    }
+    function drawQueue() {
+      var el = document.getElementById('ug-rq');
+      if (!el || !alive()) return;
+      if (UGD.qEdit && el.querySelector('#ug-rqnote')) return;  // a note being typed is never wiped by a refresh (redrawn on Save / Cancel)
+      var Q = UGD.q, tab = UGD.qTab, head = '<div class="grouphead ug-gh">To review · last 30 days</div>';
+      if (!Q) {
+        RQV = [];
+        el.innerHTML = UGD.qOff ? '<div class="grouphead ug-gh">To review</div><div class="ug-rqoff">The review list needs the usage-hub update.</div>' :
+          head + '<div class="card ug-list">' + (UGD.qErr && !UGD.qBusy ? '<div class="cc-empty">Couldn’t load the review list. <button type="button" class="footlink" data-rq-act="retry">Try again &#x203A;</button></div>' :
+            '<div class="cc-empty">Loading the review list…</div>') + '</div>';
+        return;
+      }
+      var open = {}, list = Q[tab] || [], rows = [], closed = 0, h;
+      RQT.forEach(function (x) { open[x[0]] = (Q[x[0]] || []).filter(function (r) { return rqOpen(x[0], r); }).length; });
+      list.forEach(function (r) { var o = rqOpen(tab, r); if (!o) closed++; if (o || UGD.qAll) rows.push(r); });
+      var all = UGD.qMore[tab] || rows.length <= 10, shown = all ? rows : rows.slice(0, 10), gt = tab === 'barcode' ? rqGtins().length : 0;
+      RQV = shown.map(function (r) { return { t: tab, r: r }; });
+      h = head + '<div class="card ug-list ug-rqcard' + (UGD.qBusy || UGD.qIncl !== (UGD.incl ? 1 : 0) ? ' ug-stale' : '') + '">' +
+        '<div class="ug-rqc" role="group" aria-label="Review lists">' + RQT.map(function (x) {
+          return '<button type="button" class="bochip ug-chip' + (x[0] === tab ? ' on' : '') + '" data-rq-tab="' + x[0] + '" aria-pressed="' + (x[0] === tab) + '">' + x[1] + '<b>' + open[x[0]] + '</b></button>';
+        }).join('') + '</div><div class="ug-rqi">' + RQI[tab] + '</div>';
+      h += shown.length ? shown.map(function (r, i) { return rqRow(tab, r, i); }).join('') :
+        '<div class="cc-empty">' + (closed ? 'Nothing open here — ' + closed + ' done or ignored.' : RQE[tab]) + '</div>';
+      if (!all) h += '<button type="button" class="ug-more" data-rq-act="more">Show all ' + rows.length + ' &#x203A;</button>';
+      if ((+(Q.tot || {})[tab] || 0) > list.length) h += '<div class="ug-rqi">Showing the top ' + list.length + ' of ' + (+Q.tot[tab]) + '.</div>';
+      if (closed || gt) h += '<div class="ug-rqf">' + (closed ? '<label class="ug-incl ug-rqt"><input type="checkbox" id="ug-rqall"' + (UGD.qAll ? ' checked' : '') + '> Show done &amp; ignored (' + closed + ')</label>' : '') +
+        (gt ? '<button type="button" class="footlink ug-rqg" data-rq-act="gtins">Copy GTINs for the FDA lookup &#x203A;</button>' : '') + '</div>';
+      el.innerHTML = h + '</div>';
+      rqCheck();
+    }
+    function loadQueue(fresh) {
+      if (UGD.qBusy) return;
+      var incl = UGD.incl ? 1 : 0, t0 = Date.now();
+      UGD.qBusy = true; drawQueue();
+      ugApi('u_queue', { days: 30, incl: incl, fresh: fresh ? 1 : 0 }, function (j, err) {
+        UGD.qBusy = false; UGD.qNext = 0;
+        if (err === 'key') { try { localStorage.removeItem('tbx_uadm'); } catch (e) {} UGD.q = null; if (alive()) usageGate('The saved key stopped working — enter it again.'); return; }
+        if (j) { rqApply(j, t0); UGD.q = j; UGD.qIncl = incl; UGD.qAt = Date.now(); UGD.qErr = ''; UGD.qOff = false; }
+        else if (err === 'action') { UGD.q = null; UGD.qIncl = incl; UGD.qAt = Date.now(); UGD.qErr = ''; UGD.qOff = true; } // hub older than the review queue
+        else { UGD.qErr = err || 'bad'; UGD.qNext = Date.now() + 60000; }                                                      // on its own again in a minute
+        if (UGD.qDraw) UGD.qDraw();
+        if (incl !== (UGD.incl ? 1 : 0)) loadQueue(false); // "Include my devices" changed while this was loading
+      });
+    }
+    function rqAct(act, x) {
+      if (UGD.qEdit && act !== 'save' && act !== 'note') { UGD.qEdit = ''; if (act !== 'cancel') drawQueue(); } // any other tap closes an open note
+      if (act === 'retry') { loadQueue(false); return; }
+      if (act === 'more') { UGD.qMore[UGD.qTab] = true; drawQueue(); return; }
+      if (act === 'gtins') { var g = rqGtins(); copyToClip(JSON.stringify(g)).then(function () { toastMsg('Copied ' + plural(g.length, 'GTIN') + ' for the FDA lookup', 2400); }); return; }
+      if (!x) return;
+      var t = x.t, r = x.r;
+      if (act === 'go') { UG.mute = Date.now(); location.hash = '#/?q=' + encodeURIComponent(r.k); return; } // a look, not a search: nothing is logged
+      if (act === 'card') { var nw = rqNow(t, r); if (nw && nw.sku) location.hash = pnRoute(nw.sku); return; }
+      if (act === 'done') { rqMark(t, r, 'done', null, 'Marked done', true); return; }
+      if (act === 'ignore') { rqMark(t, r, 'ignore', null, 'Ignored', true); return; }
+      if (act === 'reopen') { rqMark(t, r, 'todo', null, 'Reopened', true); return; }
+      if (act === 'cancel') { UGD.qEdit = ''; drawQueue(); return; }
+      if (act === 'note') {
+        UGD.qEdit = rqId(t, r); drawQueue();
+        var inp = document.getElementById('ug-rqnote'); // focused inside the tap, so the iPhone keyboard comes up
+        if (inp) { try { inp.focus({ preventScroll: true }); var n = inp.value.length; inp.setSelectionRange(n, n); } catch (eF) {} }
+        return;
+      }
+      if (act === 'save') {
+        var v = ((document.getElementById('ug-rqnote') || {}).value || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+        UGD.qEdit = '';
+        rqMark(t, r, rqOpen(t, r) ? 'todo' : r.st, v, 'Note saved', false); // an open row stays open, a closed one closed
+      }
+    }
+    UGD.qDraw = drawQueue; UGD.qEdit = ''; // a fresh dashboard never opens with a note half-typed
+    drawLive(); drawFilters(); drawPeriod(); drawQueue();
     if (!UGD.live || Date.now() - UGD.liveAt > 10000) loadLive();
-    if (statsStale()) loadStats(false);
+    var qStale = rqStale();
+    if (statsStale()) { if (qStale && !UGD.qBusy) UGD.qPend = 1; loadStats(false); }
+    else if (qStale) setTimeout(function () { if (alive() && rqStale() && !UGD.qBusy) loadQueue(false); }, 1500); // stats from memory
     var tick = setInterval(function () {
       if (!alive()) { clearInterval(tick); return; }
       if (document.hidden) return;
       if (Date.now() - UGD.liveAt >= 20000) loadLive(); else drawLive(); // live every 20 s; relabel "updated …" between
       if (statsStale()) loadStats(false);
+      else if (rqStale() && !UGD.qBusy && !UGD.qPend && !UGD.qMarks.length && !UGD.qEdit) loadQueue(false); // the queue every 5 min
     }, 5000);
-    var root = content.querySelector('.ug');
     root.addEventListener('click', function (e) {
       var t = e.target;
       var d = t.closest && t.closest('[data-ug-days]');
       if (d) { UGD.days = +d.getAttribute('data-ug-days'); drawFilters(); drawPeriod(); if (statsStale()) loadStats(false); return; }
-      if (t.closest && t.closest('#ug-rf')) { var rf = document.getElementById('ug-rf'); rf.classList.add('spin'); setTimeout(function () { rf.classList.remove('spin'); }, 800); UGD.liveAt = 0; loadLive(); loadStats(true); return; }
+      if (t.closest && t.closest('#ug-rf')) { var rf = document.getElementById('ug-rf'); rf.classList.add('spin'); setTimeout(function () { rf.classList.remove('spin'); }, 800); UGD.liveAt = 0; loadLive(); UGD.qPend = 2; loadStats(true); return; }
       if (t.closest && t.closest('[data-ug-retry]')) { loadStats(false); return; }
       var mo = t.closest && t.closest('[data-ug-more]');
       if (mo) { var mk = mo.getAttribute('data-ug-more'); UGD.more[mk] = true; if (mk === 'feed') drawLive(); else drawPeriod(); return; }
-      if (t.closest && t.closest('#ug-forget')) { try { localStorage.removeItem('tbx_uadm'); } catch (e2) {} UGD.live = null; UGD.stats = {}; usageGate('Key removed from this device.'); return; }
+      if (t.closest && t.closest('#ug-forget')) {
+        try { localStorage.removeItem('tbx_uadm'); } catch (e2) {}
+        UGD.live = null; UGD.stats = {}; UGD.q = null; UGD.qIncl = -1; UGD.qAt = 0; UGD.qOff = false; UGD.qErr = ''; UGD.qEdit = ''; UGD.qOver = {}; UGD.qMarks = [];
+        usageGate('Key removed from this device.'); return;
+      }
+      var rt = t.closest && t.closest('[data-rq-tab]');
+      if (rt) { UGD.qTab = rt.getAttribute('data-rq-tab'); UGD.qEdit = ''; drawQueue(); return; }
+      var ra = t.closest && t.closest('[data-rq-act]');
+      if (ra) { rqAct(ra.getAttribute('data-rq-act'), RQV[+ra.getAttribute('data-rq-i')]); return; }
       var col = t.closest && t.closest('.ug-col');
       if (col) { ugTipShow(col); return; }
     });
     root.addEventListener('change', function (e) {
-      if (e.target && e.target.id === 'ug-incl') { UGD.incl = !!e.target.checked; UGD.liveAt = 0; loadLive(); drawPeriod(); if (statsStale()) loadStats(false); }
+      if (e.target && e.target.id === 'ug-incl') {
+        UGD.incl = !!e.target.checked; UGD.liveAt = 0; loadLive(); drawPeriod(); drawQueue();
+        if (statsStale()) { UGD.qPend = 1; loadStats(false); } else loadQueue(false); // the queue follows "Include my devices" too
+      }
+      if (e.target && e.target.id === 'ug-rqall') { UGD.qAll = !!e.target.checked; UGD.qEdit = ''; drawQueue(); }
+    });
+    root.addEventListener('keydown', function (e) {
+      if (!e.target || e.target.id !== 'ug-rqnote') return;
+      if (e.key === 'Enter') { e.preventDefault(); var sv = root.querySelector('.ug-rqe [data-rq-act="save"]'); if (sv) sv.click(); }
+      else if (e.key === 'Escape') { UGD.qEdit = ''; drawQueue(); }
     });
     root.addEventListener('mouseover', function (e) { var col = e.target.closest && e.target.closest('.ug-col'); if (col) ugTipShow(col); });
     root.addEventListener('focusin', function (e) { var col = e.target.closest && e.target.closest('.ug-col'); if (col) ugTipShow(col); });
@@ -3065,10 +3297,12 @@ var GLOSS = {
       '<div class="card about-card">' +
         '<div class="tip"><b style="color:var(--bone)">Created by Nate Merrell</b><br>Built for the CT Sports Medicine Team.</div>' +
         '<div class="tip">Questions, corrections, or a product you want added? Use the feedback bubble on any screen.</div>' +
+        '<div id="fbq-note"></div>' + // P45: feedback waiting for signal / couldn't send (filled by the feedback module)
       '</div>' +
       '<div class="about-quote">\u201cIf your tools don\u2019t work, make them work. If you can\u2019t make them work, make some that do work.\u201d<span class="aq-by">\u2014 Homer Stryker</span></div>' +
       '<div style="text-align:center; margin:18px 0 6px"><button class="footlink" data-act="lockdev">Lock this device</button></div>');
     setTimeout(function () { try { phAbout(); } catch (ePh) {} }, 0);   // P2: the "Offline photos" line, once painted
+    try { if (window.TBX_FBQ) window.TBX_FBQ.paint(); } catch (eFq) {}
   }
   function notFoundScreen(sku) { // P14: an old favorite / shared link / typo — say so, offer Search and Scan
     setTitle('Not in ToolBox', ''); backBtn.hidden = false; CUR_IT = null;
@@ -8085,13 +8319,13 @@ var GLOSS = {
 
   // ---- toast helper ----
   // One toast at a time; later ones queue. opts.action = {label, fn} adds a button (Undo etc.).
-  var TQ = [], TBUSY = false, TTIMER = null;
+  var TQ = [], TBUSY = false, TTIMER = null, TCUR = null; // TCUR = the toast on screen (rqToast replaces its own)
   function toastMsg(text, ms, opts) {
     TQ.push({ text: text, ms: ms || 2200, opts: opts || null });
     if (!TBUSY) toastNext();
   }
   function toastNext() {
-    var t = TQ.shift();
+    var t = TQ.shift(); TCUR = t || null;
     if (!t) { TBUSY = false; return; }
     TBUSY = true;
     var act = t.opts && t.opts.action;
@@ -8834,6 +9068,8 @@ var GLOSS = {
   // P19: sign out of everything on this phone — team login, territory and F&A logins, the usage dashboard key — but keep
   // the rep's own things (favorites, recents, taught barcodes, drafts, location memory, the anonymous usage id) and EVERY
   // unsent scan. A territory (or F&A) with unsent work keeps its login until the next unlock sends it: nothing is stranded.
+  // P45: unsent feedback (tbx_fbq + its screenshots in Cache Storage tbx-fbq) and the rep's feedback name (tbx_fb_name)
+  // are the rep's own too — kept; the queue sends after the next unlock. Only the keys listed in `drop` ever go.
   function lockDevice() {
     var LS = localStorage, keys = [], i;
     try { for (i = 0; i < LS.length; i++) keys.push(LS.key(i)); } catch (e0) {}
@@ -8891,9 +9127,15 @@ var GLOSS = {
     setV2: function (fn) { CARD2.render = fn || specCard; } }; } catch (eDv) {}
 };
 
-/* ---- Feedback: screenshot + silent send (mailto fallback) ----
+/* ---- Feedback: screenshot + silent send, kept for later when it can't go now (P45) ----
    Relay URL, token and address live in the encrypted payload (TOOLBOX.fb), not
-   in this public bundle. Wired from TBX_BOOT once the data has been unlocked. */
+   in this public bundle. Wired from TBX_BOOT once the data has been unlocked.
+   A note that can't go now (offline, no answer in 15 s, or the relay answers anything but "ok") waits on the phone:
+   the words in localStorage tbx_fbq (≤20 notes, ≤2,000 characters each, never a picture), the screenshot in Cache
+   Storage "tbx-fbq" (≤2 MB in all; the oldest pictures give way first, their notes stay). Oldest first, one at a time,
+   it is sent 5 s after start, when the phone comes back online and when the app comes back to the front. After three
+   refusals a note stops retrying and About offers Email it · Discard. Separate from the usage queue (tbx_uq). The
+   rep's name is remembered (tbx_fb_name). Lock this device keeps all of it; the service worker never deletes tbx-fbq. */
 window.TBX_FEEDBACK_INIT = function (cfg) {
   if (window.__tbxFbInit) return; window.__tbxFbInit = true;
   cfg = cfg || {};
@@ -8901,7 +9143,8 @@ window.TBX_FEEDBACK_INIT = function (cfg) {
   var FEEDBACK_URL = cfg.url || '';
   var TOKEN = cfg.token || '';
   if (!EMAIL && !FEEDBACK_URL) return; // nowhere to send: no bubble
-  var SHOT = null;
+  var SHOT = null, SHOTC = null, VIEW = null; // screenshot (data URL + its canvas); the screen as it was when the form opened
+  var QKEY = 'tbx_fbq', QCACHE = 'tbx-fbq', QMAX = 20, QNOTE = 2000, QSHOTS = 2 * 1024 * 1024, QBIG = 200 * 1024, QTRIES = 3;
 
   var fab = document.createElement('button');
   fab.id = 'fb-fab'; fab.setAttribute('aria-label', 'Send feedback');
@@ -8933,7 +9176,7 @@ window.TBX_FEEDBACK_INIT = function (cfg) {
     '<div id="fb-ctx"></div>' +
     '<div id="fb-shotrow"><img id="fb-shot" alt=""><span id="fb-shotcap">Capturing screenshot&hellip;</span></div>' +
     '<input id="fb-name" type="text" placeholder="Your name" autocomplete="name">' +
-    '<textarea id="fb-note" placeholder="What should be added, fixed, or changed on this screen?"></textarea>' +
+    '<textarea id="fb-note" maxlength="2000" placeholder="What should be added, fixed, or changed on this screen?"></textarea>' +
     '<div id="fb-row"><button id="fb-cancel" type="button">Cancel</button><button id="fb-send" type="button">Send</button></div>' +
     '<div id="fb-hint"></div>' +
     '</div>';
@@ -8954,39 +9197,49 @@ window.TBX_FEEDBACK_INIT = function (cfg) {
     s.onerror = function () { cb(false); };
     document.head.appendChild(s);
   }
+  var CAPN = 0;
   function capture() {
-    SHOT = null;
+    SHOT = null; SHOTC = null;
+    var n = ++CAPN; // a capture still running from an earlier opening must not land on this one
     $('fb-shot').style.display = 'none';
     $('fb-shotrow').style.display = 'flex';
     $('fb-shotcap').textContent = 'Capturing screenshot\u2026';
+    var v = VIEW || { x: window.scrollX, y: window.scrollY, w: window.innerWidth, h: window.innerHeight };
     loadLib(function (ok) {
+      if (n !== CAPN) return;
       if (!ok || !window.html2canvas) { $('fb-shotrow').style.display = 'none'; return; }
       html2canvas(document.body, {
         backgroundColor: '#1E1E1E', scale: 1.5, logging: false,
-        x: window.scrollX, y: window.scrollY, width: window.innerWidth, height: window.innerHeight,
+        x: v.x, y: v.y, width: v.w, height: v.h, // as it was when the bubble was tapped, before the keyboard moved anything
         ignoreElements: function (el) { return el.id === 'fb-fab' || el.id === 'fb-ov'; }
       }).then(function (c) {
-        SHOT = c.toDataURL('image/jpeg', 0.7);
+        if (n !== CAPN) return;
+        SHOTC = c; SHOT = c.toDataURL('image/jpeg', 0.7);
         $('fb-shot').src = SHOT; $('fb-shot').style.display = 'block';
         $('fb-shotcap').textContent = 'Screenshot of this screen attached';
-      }).catch(function () { $('fb-shotrow').style.display = 'none'; });
+      }).catch(function () { if (n === CAPN) $('fb-shotrow').style.display = 'none'; });
     });
   }
   function resetSend() { var b = $('fb-send'); b.disabled = false; b.textContent = 'Send'; }
+  function savedName() { try { return localStorage.getItem('tbx_fb_name') || ''; } catch (e) { return ''; } }
+  function keepName(n) { try { if (n) localStorage.setItem('tbx_fb_name', n.slice(0, 60)); else localStorage.removeItem('tbx_fb_name'); } catch (e) {} }
   // P23: the bubble and "Ask Nate to add ..." open the same form; pre = {note, shot:false}. Keep window.TBX_FB_OPEN(pre).
   function openFb(pre) {
     pre = pre || {};
     var c = ctx();
+    VIEW = { x: window.scrollX, y: window.scrollY, w: window.innerWidth, h: window.innerHeight };
     $('fb-ctx').textContent = 'Screen: ' + c.t + '  (' + c.h + ')';
-    $('fb-hint').textContent = FEEDBACK_URL
-      ? 'Sends quietly in the background \u2014 goes straight to Nate.'
-      : 'Opens your email app \u2014 goes straight to Nate.';
+    $('fb-hint').textContent = !FEEDBACK_URL ? 'Opens your email app \u2014 goes straight to Nate.' : navigator.onLine === false
+      ? 'You\u2019re offline \u2014 it\u2019ll be kept and sent when you have signal.' : 'Sends quietly in the background \u2014 goes straight to Nate.';
     resetSend();
     ov.dataset.pre = pre.note || '';
     if (pre.note) $('fb-note').value = pre.note;
+    var nm = $('fb-name'), nt = $('fb-note');
+    if (!nm.value) nm.value = savedName();
     ov.hidden = false;
-    if (pre.shot === false) { SHOT = null; $('fb-shotrow').style.display = 'none'; } else capture();
-    setTimeout(function () { var n = $('fb-name'); if (n && !n.value) n.focus(); }, 60);
+    if (pre.shot === false) { SHOT = null; SHOTC = null; ++CAPN; $('fb-shotrow').style.display = 'none'; } else capture();
+    // focus inside the tap itself (a timer is too late for iOS to raise the keyboard): the note once the name is known
+    try { var f = nm.value ? nt : nm; f.focus({ preventScroll: true }); if (f === nt) nt.setSelectionRange(nt.value.length, nt.value.length); } catch (eF) {}
   }
   function closeFb() { // an untouched pre-filled note does not linger for the next time the form opens
     ov.hidden = true;
@@ -8997,36 +9250,166 @@ window.TBX_FEEDBACK_INIT = function (cfg) {
   $('fb-cancel').addEventListener('click', closeFb);
   ov.addEventListener('click', function (e) { if (e.target === ov) closeFb(); });
 
+  function mailBody(name, note, c) { return note + '\n\n\u2014 ' + (name || 'Anonymous') + '\nScreen: ' + c.t + '\nRoute: ' + c.h; }
+  function mailHref(name, note, c) { return 'mailto:' + EMAIL + '?subject=' + encodeURIComponent('Toolbox feedback \u2014 ' + c.t) + '&body=' + encodeURIComponent(mailBody(name, note, c)); }
   function viaMail(name, note, c) {
     if (!EMAIL) { $('fb-hint').textContent = 'Couldn\u2019t send \u2014 try again when you have signal.'; return; }
-    var subject = 'Toolbox feedback \u2014 ' + c.t;
-    var body = note + '\n\n\u2014 ' + (name || 'Anonymous') + '\nScreen: ' + c.t + '\nRoute: ' + c.h;
-    location.href = 'mailto:' + EMAIL + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+    location.href = mailHref(name, note, c);
     ov.hidden = true; $('fb-note').value = '';
+  }
+
+  // ---- the queue (P45) ----
+  function qLoad() { try { var a = JSON.parse(localStorage.getItem(QKEY) || '[]'); return Array.isArray(a) ? a.filter(function (x) { return x && x.id && x.note; }) : []; } catch (e) { return []; } }
+  function qSave(a) { try { if (a.length) localStorage.setItem(QKEY, JSON.stringify(a)); else localStorage.removeItem(QKEY); return true; } catch (e) { return false; } }
+  function qEdit(id, fn) { var a = qLoad(); a.forEach(function (x) { if (x.id === id) fn(x); }); qSave(a); }
+  function qId() { var s = Date.now().toString(36); try { var r = crypto.getRandomValues(new Uint8Array(4)); for (var i = 0; i < 4; i++) s += (r[i] % 36).toString(36); } catch (e) { s += Math.random().toString(36).slice(2, 6); } return s; }
+  function shotUrl(id) { return './__fbq/' + id + '.jpg'; }
+  function hasCache() { try { return !!(window.caches && caches.open); } catch (e) { return false; } }
+  function shotGet(id) {
+    if (!hasCache()) return Promise.resolve(null);
+    return caches.open(QCACHE).then(function (c) { return c.match(shotUrl(id)); }).then(function (r) { return r ? r.blob() : null; }).catch(function () { return null; });
+  }
+  function shotDel(id) { if (hasCache()) caches.open(QCACHE).then(function (c) { return c.delete(shotUrl(id)); }).catch(function () {}); }
+  function toBlob(d) {
+    var bin = atob(String(d).slice(String(d).indexOf(',') + 1)), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return new Blob([u], { type: 'image/jpeg' });
+  }
+  function toData(b) { return new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { res(String(fr.result || '')); }; fr.onerror = function () { res(''); }; fr.readAsDataURL(b); }); }
+  function smaller(c) { // scale 1 (the capture is 1.5×), JPEG 0.6
+    try { var w = Math.max(1, Math.round(c.width / 1.5)), h = Math.max(1, Math.round(c.height / 1.5)), s = document.createElement('canvas');
+      s.width = w; s.height = h; s.getContext('2d').drawImage(c, 0, 0, w, h); return s.toDataURL('image/jpeg', 0.6); } catch (e) { return null; }
+  }
+  // the picture goes to Cache Storage, never localStorage; queued pictures stay under 2 MB (the oldest give way, their notes stay)
+  function keepShot(id, shot, canvas) {
+    var blob = null;
+    try { blob = toBlob(shot); if (blob.size > QBIG && canvas) { var s2 = smaller(canvas); if (s2) blob = toBlob(s2); } } catch (e) { blob = null; }
+    if (!blob || blob.size > QSHOTS || !hasCache()) { qEdit(id, function (x) { x.shot = 0; }); return; }
+    caches.open(QCACHE).then(function (c) {
+      return c.put(shotUrl(id), new Response(blob, { headers: { 'content-type': 'image/jpeg' } }));
+    }).then(function () {
+      var a = qLoad(), me = null, tot = blob.size, drop = [];
+      a.forEach(function (x) { if (x.id === id) me = x; else tot += x.shot > 0 ? x.shot : 0; });
+      if (!me) { shotDel(id); return; }                  // sent or discarded meanwhile
+      me.shot = blob.size;
+      for (var i = 0; i < a.length && tot > QSHOTS; i++) if (a[i].id !== id && a[i].shot > 0) { tot -= a[i].shot; a[i].shot = 0; drop.push(a[i].id); }
+      qSave(a); drop.forEach(shotDel);
+    }).catch(function () { qEdit(id, function (x) { x.shot = 0; }); shotDel(id); }); // no room: the note goes on its own
+  }
+  function enqueue(item, shot, canvas) { // → false when the phone can't hold it (20 notes waiting, or storage full)
+    var a = qLoad();
+    if (a.length >= QMAX) return false;
+    item.shot = shot ? -1 : 0; a.push(item);             // -1: the picture is still being stored
+    if (!qSave(a)) return false;
+    if (shot) keepShot(item.id, shot, canvas);
+    qPaint();
+    return true;
+  }
+  function payload(x, img) { return { token: TOKEN, name: x.name, note: x.note, screen: x.screen, route: x.route, ua: x.ua, image: img || null, id: x.id }; }
+  // → 'ok' | 'net' (no answer, a timeout, or a server error: try again later) | 'no:<what the relay said>' (a refusal)
+  function post(body) {
+    var ac = null; try { if (typeof AbortController !== 'undefined') ac = new AbortController(); } catch (e0) {}
+    var to = ac ? setTimeout(function () { try { ac.abort(); } catch (e1) {} }, 15000) : null;
+    var p;
+    try {
+      p = fetch(FEEDBACK_URL, { method: 'POST', body: JSON.stringify(body), signal: ac ? ac.signal : undefined }).then(function (r) {
+        return r.text().then(function (txt) {
+          txt = (txt || '').trim();
+          if (txt.indexOf('ok') === 0) return 'ok';
+          if (r.status >= 500 || r.status === 429 || r.status === 408) return 'net';
+          return 'no:' + (txt ? txt.slice(0, 40) : 'nothing');
+        });
+      });
+    } catch (e2) { p = Promise.reject(e2); }
+    return p.catch(function () { return 'net'; }).then(function (v) { if (to) clearTimeout(to); return v; });
+  }
+  var F = { busy: false, timer: null, at: 0, back: 0 };
+  function soon(ms) {
+    var at = Date.now() + ms;
+    if (F.timer && F.at <= at) return;
+    if (F.timer) clearTimeout(F.timer);
+    F.at = at; F.timer = setTimeout(function () { F.timer = null; flush(); }, ms);
+  }
+  function flush() { // oldest first, one at a time
+    if (F.busy || !FEEDBACK_URL) return;
+    var a = qLoad(), x = null, now = Date.now();
+    for (var i = 0; i < a.length && !x; i++) if ((a[i].tries || 0) < QTRIES) x = a[i];
+    if (!x || navigator.onLine === false) return;        // offline: the 'online' event brings it back
+    if (x.shot === -1 && now - x.t < 15000) { soon(2000); return; }
+    F.busy = true;
+    shotGet(x.id).then(function (b) { return b ? toData(b) : ''; }).then(function (img) { return post(payload(x, img)); }).then(function (res) {
+      F.busy = false;
+      if (res === 'ok') { qSave(qLoad().filter(function (y) { return y.id !== x.id; })); shotDel(x.id); F.back = 0; qPaint(); soon(1500); return; }
+      if (res === 'net') { F.back = Math.min(300000, F.back ? F.back * 2 : 20000); soon(F.back); return; }
+      qEdit(x.id, function (y) { y.tries = (y.tries || 0) + 1; y.err = res.slice(3); }); // refused: after 3, About offers Email it · Discard
+      qPaint(); soon(20000);
+    }).catch(function () { F.busy = false; soon(60000); });
+  }
+  function queued(item, why) {
+    var b = $('fb-send');
+    if (!enqueue(item, SHOT, SHOTC)) { // 20 notes already waiting (or no room): today's email fallback
+      resetSend();
+      $('fb-hint').textContent = EMAIL ? 'Couldn\u2019t send \u2014 opening your email app instead.' : 'Couldn\u2019t send \u2014 try again when you have signal.';
+      if (EMAIL) setTimeout(function () { viaMail(item.name, item.note, { t: item.screen, h: item.route }); }, 600);
+      return;
+    }
+    b.disabled = true; b.textContent = 'Saved \u2713';
+    $('fb-hint').textContent = why === 'no' ? 'Couldn\u2019t send right now \u2014 ToolBox will try again on its own.' : 'You\u2019re offline \u2014 it\u2019ll send automatically when you have signal.';
+    setTimeout(function () { ov.hidden = true; $('fb-note').value = ''; resetSend(); }, 1800);
+    soon(why === 'offline' ? 60000 : 20000);             // (offline: the 'online' event is the real trigger)
   }
   $('fb-send').addEventListener('click', function () {
     var name = $('fb-name').value.trim();
-    var note = $('fb-note').value.trim();
+    var note = $('fb-note').value.trim().slice(0, QNOTE);
     if (!note) { $('fb-note').focus(); return; }
     var c = ctx();
+    keepName(name);
     if (!FEEDBACK_URL) return viaMail(name, note, c);
+    var item = { id: qId(), t: Date.now(), name: name, note: note, screen: c.t, route: c.h, ua: navigator.userAgent, tries: 0, err: '' };
+    if (navigator.onLine === false) return queued(item, 'offline');
     var b = $('fb-send'); b.disabled = true; b.textContent = 'Sending\u2026';
-    var fail = function (reason) {
-      resetSend();
-      $('fb-hint').textContent = 'Silent send failed (' + reason + ') \u2014 opening your email app instead.';
-      setTimeout(function () { viaMail(name, note, c); }, 600);
-    };
-    fetch(FEEDBACK_URL, {
-      method: 'POST',
-      body: JSON.stringify({ token: TOKEN, name: name, note: note, screen: c.t, route: c.h, ua: navigator.userAgent, image: SHOT })
-    }).then(function (r) { return r.text(); }).then(function (txt) {
-      txt = (txt || '').trim();
-      if (txt.indexOf('ok') === 0) {
+    post(payload(item, SHOT)).then(function (res) {
+      if (res === 'ok') {
         b.textContent = 'Sent \u2713';
         setTimeout(function () { ov.hidden = true; $('fb-note').value = ''; resetSend(); }, 900);
-      } else {
-        fail('relay said: ' + (txt ? txt.slice(0, 24) : 'nothing'));
+        soon(1500); // signal is back: anything waiting goes too
+        return;
       }
-    }).catch(function () { fail('network'); });
+      if (res !== 'net') { item.tries = 1; item.err = res.slice(3); }
+      queued(item, res === 'net' ? 'net' : 'no');
+    });
   });
+
+  // About: what is waiting, and the notes that couldn't go (Email it · Discard)
+  function qPaint() {
+    var el = document.getElementById('fbq-note'); if (!el) return;
+    var a = qLoad(), dead = a.filter(function (x) { return (x.tries || 0) >= QTRIES; }), wait = a.length - dead.length, h = '';
+    if (wait) h += '<div class="tip fbq-wait">' + wait + ' feedback note' + (wait === 1 ? ' is' : 's are') + ' waiting for signal \u2014 ' + (wait === 1 ? 'it sends' : 'they send') + ' automatically.</div>';
+    if (dead.length) {
+      h += '<div class="tip fbq-dead"><b>' + dead.length + ' feedback note' + (dead.length === 1 ? '' : 's') + ' couldn\u2019t send</b>';
+      dead.forEach(function (x) {
+        var s = String(x.note).replace(/\s+/g, ' '); s = s.length > 60 ? s.slice(0, 60) + '\u2026' : s;
+        h += '<div class="fbq-row"><span class="fbq-s">\u201C' + fbEsc(s) + '\u201D</span> ' +
+          (EMAIL ? '<button type="button" class="footlink" data-fbq="mail" data-fbq-id="' + fbEsc(x.id) + '">Email it</button>' :
+            '<button type="button" class="footlink" data-fbq="retry" data-fbq-id="' + fbEsc(x.id) + '">Try again</button>') +
+          '<span class="footsep">&middot;</span><button type="button" class="footlink" data-fbq="drop" data-fbq-id="' + fbEsc(x.id) + '">Discard</button></div>';
+      });
+      h += '</div>';
+    }
+    el.innerHTML = h;
+  }
+  function fbEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest ? e.target.closest('[data-fbq]') : null; if (!t) return;
+    var id = t.getAttribute('data-fbq-id'), act = t.getAttribute('data-fbq'), x = qLoad().filter(function (y) { return y.id === id; })[0];
+    if (!x) { qPaint(); return; }
+    if (act === 'retry') { qEdit(id, function (y) { y.tries = 0; y.err = ''; }); qPaint(); soon(0); return; }
+    if (act === 'mail' && EMAIL) location.href = mailHref(x.name, x.note, { t: x.screen, h: x.route }); // text only, like before
+    qSave(qLoad().filter(function (y) { return y.id !== id; })); shotDel(id); qPaint();
+  });
+  window.TBX_FBQ = { paint: qPaint, flush: function () { soon(0); }, list: qLoad };
+  setTimeout(function () { soon(0); }, 5000);                                   // 5 s after start
+  window.addEventListener('online', function () { soon(1000); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) soon(2000); });
+  qPaint();
 };

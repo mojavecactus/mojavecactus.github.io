@@ -246,12 +246,143 @@ function fakeGas() {
   check('project: no global name collisions across UsageCore/Usage/Code', dupes.length === 0, dupes);
   G.ctx.usageSetup();
   const post = (o) => JSON.parse(G.ctx.doPost({ postData: { contents: JSON.stringify(o) } }).getContent());
-  check('project: doPost JSON body reaches usageHandle', post({ action: 'u_ping' }).v === 1);
+  check('project: doPost JSON body reaches usageHandle', post({ action: 'u_ping' }).v === U.VER && U.VER === 2);
   check('project: doGet ?action=u_ping answers', JSON.parse(G.ctx.doGet({ parameter: { action: 'u_ping' } }).getContent()).ok === true);
   check('project: doPost with a broken body falls back to the query string', JSON.parse(G.ctx.doPost({ postData: { contents: '{nope' }, parameter: { action: 'u_ping' } }).getContent()).ok === true);
   const wk = G.props.USAGE_WKEY, ak = G.props.USAGE_AKEY, now = Date.now();
   check('project: ingest through doPost', post({ action: 'u_ev', key: wk, d: 'abcdefghij', b: 'projbatch001', e: [[now - 1000, 'card', '3910500580', '', 'sess0001']] }).n === 1);
   check('project: live through doPost', post({ action: 'u_live', key: ak }).today.cards === 1);
+}
+
+// ---------- N9 review queue: core ----------
+{
+  const now = Date.parse('2026-09-23T18:30:00Z'), iso = (ms) => new Date(ms).toISOString(), rows = [];
+  const add = (ms, d, ty, k, x) => rows.push([iso(ms), d, 's1', ty, k, x || '']);
+  add(now - 5 * DAY, 'aaaaaaaaaa', 'search', 'tightrope', '0');
+  add(now - 4 * DAY, 'bbbbbbbbbb', 'search', 'TightRope  ', '0');       // case / spacing variants are one term
+  add(now - 3 * DAY, 'bbbbbbbbbb', 'search', 'tightrope', '0');
+  add(now - 2 * DAY, 'dddddddddd', 'search', 'swivelock', '0');
+  add(now - 1 * DAY, 'dddddddddd', 'search', 'swivelock', '3');         // latest try found something → not in the queue
+  add(now - 6 * DAY, 'aaaaaaaaaa', 'search', 'healicoil', '2');
+  add(now - 1 * DAY, 'aaaaaaaaaa', 'search', 'healicoil', '0');         // latest try found nothing → in, ok = 1
+  add(now - 31 * DAY, 'aaaaaaaaaa', 'search', 'oldterm', '0');          // outside 30 days
+  add(now - 2 * DAY, 'cccccccccc', 'search', 'adminterm', '0');         // admin device
+  add(now - 2 * DAY, 'aaaaaaaaaa', 'scan', '00887868123456', 'unknown');
+  add(now - 1 * DAY, 'bbbbbbbbbb', 'scan', '00887868123456', 'unknown');
+  add(now - 1 * DAY, 'aaaaaaaaaa', 'scan', 'B504CAT1234X', 'unknown');
+  add(now - 1 * DAY, 'aaaaaaaaaa', 'scan', '3910500580', 'card');       // found → not in the queue
+  add(now - 1 * DAY, 'aaaaaaaaaa', 'scan', 'CAT00227', 'moved');
+  add(now - 3 * DAY, 'aaaaaaaaaa', 'scan', '0234020123', 'nocard');     // scanned …
+  add(now - 2 * DAY, 'bbbbbbbbbb', 'card', '234-020-123', 'missing');   // … and linked: one part number
+  add(now - 1 * DAY, 'bbbbbbbbbb', 'card', 'NOTAPART99', 'missing');
+  add(now - 1 * DAY, 'bbbbbbbbbb', 'card', '3910500580', '');           // a card that exists → not in the queue
+  const Q = U.queue(rows, { now, days: 30, excl: { cccccccccc: 1 } });
+  check('queue: zero-result terms whose latest try still found nothing, most people first', Q.search.map(x => x.k).join() === 'tightrope,healicoil', Q.search);
+  check('queue: case/spacing variants merged; n = tries that found nothing, dev = people', Q.search[0].n === 3 && Q.search[0].dev === 2 && Q.search[0].first === now - 5 * DAY && Q.search[0].last === now - 3 * DAY, Q.search[0]);
+  check('queue: a term that sometimes worked keeps ok = successful tries', Q.search[1].ok === 1 && Q.search[1].n === 1, Q.search[1]);
+  check('queue: outside the window and admin devices left out', !Q.search.some(x => /oldterm|adminterm|swivelock/.test(x.k)));
+  check('queue: unknown barcodes ranked by people', Q.barcode.map(x => x.k + ':' + x.dev).join() === '00887868123456:2,B504CAT1234X:1', Q.barcode);
+  const pt = Q.part.find(x => x.id === '234020123');
+  check('queue: no-card scans and missing-card links merge on the number (dashes, leading zeros)', pt && pt.n === 2 && pt.scan === 1 && pt.link === 1 && pt.dev === 2 && pt.k === '234-020-123' && Q.part.length === 2, Q.part);
+  check('queue: tot counts + v', Q.tot.search === 2 && Q.tot.barcode === 2 && Q.tot.part === 2 && Q.v === 2 && Q.days === 30);
+  const Qc = U.queue(rows, { now, days: 30, excl: {}, cap: 1 });
+  check('queue: cap per list, tot before the cap, admin included when not excluded', Qc.search.length === 1 && Qc.tot.search === 3 && Qc.barcode.length === 1 && Qc.tot.barcode === 2, Qc.tot);
+  check('queue: 7-day window', U.queue(rows, { now, days: 7, excl: {} }).search.every(x => x.last >= U.windowStart(now, 7)));
+  check('queue: empty input', U.queue([], { now, days: 30 }).search.length === 0);
+  check('qKey: search lower-cased + trimmed + "=" stripped; barcode A-Z0-9; part without dashes/leading zeros',
+    U.qKey('search', '  =TightRope   RT ') === 'tightrope rt' && U.qKey('barcode', '(01)0088-7868') === '0100887868' && U.qKey('part', '0234-020-123') === '234020123' && U.qKey('part', '---') === '' && U.qKey('nope', 'x') === '');
+  // the app echoes row.k / row.id back in u_mark, so a second pass must never change a key ("= x" → "x", not " x")
+  const tricky = ['== = x', '= TightRope', 'a'.repeat(79) + ' b', '\t=\tfoo  bar ', 'x'.repeat(100), '  ', '=', '(01)00887868123456(17)270101', '0234-020-123', 'ÅngströM 5mm'];
+  const drift = []; ['search', 'barcode', 'part'].forEach(t => tricky.forEach(s => { if (U.qKey(t, U.qKey(t, s)) !== U.qKey(t, s)) drift.push(t + ':' + JSON.stringify(s)); }));
+  check('qKey: idempotent for every type (a key echoed back by the app always matches its row)', drift.length === 0 && U.qKey('search', '== = x') === 'x' && U.qKey('search', 'a'.repeat(79) + ' b') === 'a'.repeat(79), drift);
+  const at = (ms) => new Date(ms).toISOString();
+  const M = U.mergeReview(U.queue(rows, { now, days: 30, excl: { cccccccccc: 1 } }), {
+    'search\ttightrope': { st: 'done', note: 'alias added', at: at(now - 4 * DAY) },          // happened again after → back
+    'search\thealicoil': { st: 'done', note: '', at: at(now - 1 * DAY - 60000) },           // 1 min before the last try: inside the grace
+    'barcode\t00887868123456': { st: 'ignore', note: 'test label', at: at(now - 3 * DAY) }, // ignore never comes back
+    'part\t234020123': { st: 'todo', note: 'ask Nate', at: at(now) },
+    'part\tNOTAPART99': { st: 'weird', at: at(now) }                                        // unknown status: ignored
+  });
+  const r = (t, k) => M[t].find(x => (x.id || x.k) === k);
+  check('merge: done + happened again later → back', r('search', 'tightrope').st === 'done' && r('search', 'tightrope').back === 1 && r('search', 'tightrope').note === 'alias added');
+  check('merge: done within the 2-minute grace → not back', r('search', 'healicoil').st === 'done' && !r('search', 'healicoil').back);
+  check('merge: ignore stays quiet', r('barcode', '00887868123456').st === 'ignore' && !r('barcode', '00887868123456').back);
+  check('merge: todo + note on a part (matched on its id)', r('part', '234020123').st === 'todo' && r('part', '234020123').note === 'ask Nate');
+  check('merge: unknown status ignored', !r('part', 'NOTAPART99').st);
+}
+
+// ---------- N9 review queue: hub (u_queue / u_mark / Review tab) ----------
+{
+  const G = fakeGas();
+  ['usage-core.js', 'usage-hub.js', 'usage-main.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), G.ctx, { filename: f }));
+  G.ctx.usageSetup();
+  const call = (p) => JSON.parse(G.ctx.usageHandle(p).getContent());
+  const wk = G.props.USAGE_WKEY, ak = G.props.USAGE_AKEY, now = Date.now();
+  const book = G.ctx.SpreadsheetApp.openById(G.props.USAGE_SHEET_ID), ev = book.getSheetByName('Events'), rv = book.getSheetByName('Review');
+  check('hub/q: setup adds the Review tab (header, plain text, frozen) and stays idempotent', rv && rv._data()[0].join() === 'type,key,status,note,updated' && rv.frozen === 1 && (G.ctx.usageSetup(), book.getSheets().filter(s => s.name === 'Review').length === 1));
+  let bi = 1; const post = (d, list, a) => call({ action: 'u_ev', key: wk, d, b: 'qbatch' + String(bi++).padStart(6, '0'), a: a || 0, e: list });
+  post('aaaaaaaaaa', [[now - 60000, 'search', 'tightrope', '0', 'sess0001'], [now - 50000, 'scan', '00887868123456', 'unknown', 'sess0001'], [now - 40000, 'scan', '0234020123', 'nocard', 'sess0001']]);
+  post('bbbbbbbbbb', [[now - 30000, 'search', 'tightrope', '0', 'sess0002'], [now - 20000, 'card', 'NOTAPART99', 'missing', 'sess0002']]);
+  post('cccccccccc', [[now - 10000, 'search', 'adminonly', '0', 'sess0003']], 1);
+  check('hub/q: u_queue needs the admin key', call({ action: 'u_queue', key: wk }).err === 'key' && call({ action: 'u_queue' }).err === 'key');
+  let reads = 0; const orig = ev.getRange;
+  ev.getRange = (...a) => { const rg = orig(...a); const gv = rg.getValues; rg.getValues = () => { reads++; return gv(); }; return rg; };
+  const Q1 = call({ action: 'u_queue', key: ak });
+  check('hub/q: lists come back (admin devices left out)', Q1.ok && Q1.search.length === 1 && Q1.search[0].k === 'tightrope' && Q1.search[0].dev === 2 && Q1.barcode.length === 1 && Q1.part.length === 2, Q1);
+  check('hub/q: aggregate cached 5 min under uq:30:0', !!G.cache['uq:30:0'] && JSON.parse(G.cache['uq:30:0']).tot.search === 1);
+  check('hub/q: incl=1 counts the admin device (own cache key)', call({ action: 'u_queue', key: ak, incl: 1 }).search.length === 2 && !!G.cache['uq:30:1']);
+  check('hub/q: u_mark refuses bad type / status / empty key, and the write key', call({ action: 'u_mark', key: ak, t: 'nope', k: 'x', st: 'done' }).err === 'type' &&
+    call({ action: 'u_mark', key: ak, t: 'search', k: 'x', st: 'fixed' }).err === 'status' && call({ action: 'u_mark', key: ak, t: 'part', k: '--', st: 'done' }).err === 'bad' &&
+    call({ action: 'u_mark', key: wk, t: 'search', k: 'x', st: 'done' }).err === 'key');
+  const reads0 = reads;
+  const m1 = call({ action: 'u_mark', key: ak, t: 'search', k: '  TightRope ', st: 'done', note: '=alias\nadded in 4.143' });
+  check('hub/q: u_mark stores the normalized key, a cleaned note (no "=", no control chars), ISO time', m1.ok && m1.k === 'tightrope' && m1.note === 'alias added in 4.143' && /^\d{4}-\d\d-\d\dT/.test(m1.at), m1);
+  check('hub/q: Review row written as plain text', rv.getLastRow() === 2 && rv._data()[1].slice(0, 4).join('|') === 'search|tightrope|done|alias added in 4.143' && typeof rv._data()[1][4] === 'string');
+  const Q2 = call({ action: 'u_queue', key: ak });
+  check('hub/q: the mark shows at once without re-reading Events (statuses merged per request)', Q2.search[0].st === 'done' && Q2.search[0].note === 'alias added in 4.143' && reads === reads0, [Q2.search[0], reads, reads0]);
+  const m2 = call({ action: 'u_mark', key: ak, t: 'search', k: 'tightrope', st: 'todo' });
+  check('hub/q: marking again updates the same row; the note stays when none is sent', m2.ok && rv.getLastRow() === 2 && rv._data()[1][2] === 'todo' && m2.note === 'alias added in 4.143');
+  call({ action: 'u_mark', key: ak, t: 'search', k: 'tightrope', st: 'done', note: '' });
+  check('hub/q: an empty note clears it', rv._data()[1][3] === '');
+  call({ action: 'u_mark', key: ak, t: 'part', k: '234-020-123', st: 'ignore' });
+  check('hub/q: part keys stored without dashes / leading zeros and matched to the row', rv._data()[2][1] === '234020123' && call({ action: 'u_queue', key: ak }).part.find(x => x.id === '234020123').st === 'ignore');
+  rv._data()[1][4] = new Date(now - 3600000).toISOString(); delete G.cache['urv'];      // as if "done" was set an hour ago
+  const Q3 = call({ action: 'u_queue', key: ak, fresh: 1 });
+  check('hub/q: done an hour ago + tried again since → back', Q3.search[0].st === 'done' && Q3.search[0].back === 1, Q3.search[0]);
+  check('hub/q: fresh=1 re-reads events and statuses', reads > reads0);
+  call({ action: 'u_mark', key: ak, t: 'barcode', k: '=HYPERLINK("x")', st: 'ignore' });
+  check('hub/q: a formula-looking key is stored as inert text', rv._data()[3][1] === 'HYPERLINKX');
+  G.ctx.U_RMAX = 3;
+  check('hub/q: the Review tab is capped (err full), updates to existing rows still work', call({ action: 'u_mark', key: ak, t: 'search', k: 'one more', st: 'done' }).err === 'full' && call({ action: 'u_mark', key: ak, t: 'search', k: 'tightrope', st: 'ignore' }).ok);
+  G.ctx.U_RMAX = 5000;
+  // a decision typed into the Review tab by hand (any case, dashes, stray spaces) applies, and u_mark updates that row
+  const hand = rv.getLastRow() + 1;
+  rv.getRange(hand, 1, 1, 5).setNumberFormat('@').setValues([['Part ', ' 0NOTAPART99 ', 'Done ', 'typed by hand', new Date(now - 600000).toISOString()]]);
+  delete G.cache['urv'];
+  const hq = call({ action: 'u_queue', key: ak }).part.find(x => x.id === 'NOTAPART99');
+  check('hub/q: a row typed by hand in the Review tab (odd case / spacing / leading zero) applies', hq && hq.st === 'done' && hq.note === 'typed by hand', hq);
+  const m4 = call({ action: 'u_mark', key: ak, t: 'part', k: 'NOTAPART99', st: 'todo' });
+  check('hub/q: u_mark updates the hand-typed row in place (no duplicate), keeping its note', m4.ok && rv.getLastRow() === hand && rv._data()[hand - 1].slice(0, 4).join('|') === 'part|NOTAPART99|todo|typed by hand', rv._data()[hand - 1]);
+  const G2 = fakeGas();
+  ['usage-core.js', 'usage-hub.js', 'usage-main.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), G2.ctx, { filename: f }));
+  G2.ctx.usageSetup(); const b2 = G2.ctx.SpreadsheetApp.openById(G2.props.USAGE_SHEET_ID); b2.deleteSheet(b2.getSheetByName('Review'));
+  const m3 = JSON.parse(G2.ctx.usageHandle({ action: 'u_mark', key: G2.props.USAGE_AKEY, t: 'search', k: 'x y', st: 'done' }).getContent());
+  check('hub/q: a hub pasted without re-running usageSetup creates the Review tab on the first mark', m3.ok && b2.getSheetByName('Review') && b2.getSheetByName('Review').getLastRow() === 2);
+  // 30 days at a busy team's pace: ~45,000 events → time the compute (the fake sheet has no I/O cost)
+  const G3 = fakeGas();
+  ['usage-core.js', 'usage-hub.js', 'usage-main.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), G3.ctx, { filename: f }));
+  G3.ctx.usageSetup();
+  const t0 = U.windowStart(now, 30) + 3600000, span = now - 60000 - t0, big = [], TY = ['view', 'card', 'card', 'search', 'scan', 'ping', 'ping'];
+  for (let i = 0; i < 45000; i++) {
+    const t = t0 + Math.floor(span * i / 45000), ty = TY[i % 7], d = 'dev' + String(i % 30).padStart(7, '0');
+    big.push([new Date(t).toISOString(), d, 'sess0001', ty, ty === 'search' ? 'term' + (i % 400) : ty === 'scan' ? (i % 3 ? '3910500580' : '0088786' + (i % 500)) : 'SKU' + (i % 300), ty === 'search' ? String(i % 5 ? 3 : 0) : ty === 'scan' ? (i % 3 ? 'card' : 'unknown') : '']);
+  }
+  for (let i = 0; i < big.length; i += 5000) G3.ctx.uAppend_(big.slice(i, i + 5000));
+  const tq = Date.now(), Qb = JSON.parse(G3.ctx.usageHandle({ action: 'u_queue', key: G3.props.USAGE_AKEY }).getContent()), qms = Date.now() - tq;
+  check('hub/q: 45,000 events (30 days) → queue in < 3 s compute (vm, fake sheet), lists capped at 100', Qb.ok && Qb.search.length === Math.min(100, Qb.tot.search) && Qb.tot.search > 0 && Qb.barcode.length === 100 && Qb.tot.barcode === 500 && qms < 3000, [qms + ' ms', Qb.tot]);
+  const qBytes = G3.cache['uq:30:0'] ? G3.cache['uq:30:0'].length : 0;
+  check('hub/q: the cached aggregate fits CacheService (≤100 KB)', qBytes > 0 && qBytes < 100000, qBytes);
+  console.log('      (queue over 45k rows: ' + qms + ' ms; cached aggregate ' + Math.round(qBytes / 1024) + ' KB)');
 }
 
 const failed = results.filter(r => !r.ok).length;

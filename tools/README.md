@@ -89,7 +89,9 @@ from the global install. Suites marked *data.js* need the decrypted catalog (ste
 
 - `node tools/verify.mjs` — data checks; must print VERIFY PASSED.
 - `cd tools/cc-test && TZ=UTC APP_PW=<catalog pw> node run.js` — cycle-count sync engine (see its README).
-- `node tools/usage/test.js`, `APP_PW=<catalog pw> node tools/usage/app-test.js` — usage hub and dashboard.
+- `node tools/usage/test.js`, `APP_PW=<catalog pw> node tools/usage/app-test.js` — usage hub, dashboard and its
+  "To review" card, feedback kept offline; `UHUB=new` runs the dashboard sections against the v2 hub (see
+  `tools/usage/README.md`, which also has the hub deploy steps: hub first, then the app).
 - `node tools/bo/test.js`, `cd tools/bo && APP_PW=<catalog pw> node app-test.js` — Backorder Report
   (fixtures in `tools/bo/fixtures/`, gitignored).
 - `APP_PW=… CT_PW=… FA_PW=… FIXED=1 tools/fa2-test/launch.sh` — F&A (Playwright).
@@ -147,6 +149,14 @@ from the global install. Suites marked *data.js* need the decrypted catalog (ste
     - a touchcancel, leaving the screen or the app going to the background mid-pull leaves no ↻ behind;
     - a refresh that never settles lets go of the ↻ after 20 s, and the next pull works;
     - a pull on the Backorder Report fetches it once and spins its ↻; offline, the arrow still clears.
+    every login but keeps unsent scans, unsent feedback and the rep's own data (5 checks).
+  - `APP_PW=<catalog pw> node tools/platform-test/feedback-offline.js [--engine webkit]` — feedback written
+    without signal is kept (note in `tbx_fbq`, screenshot in Cache Storage `tbx-fbq`), survives a reload, is sent
+    exactly once when signal returns; the name is remembered; the 2 MB picture budget; a service-worker update
+    keeps the queue (16 checks). Its fake relay listens on `--port` + 1.
+  - These harnesses never put a live hub URL in the page (TOOLBOX.usage / .bo / .fb are removed or faked): in
+    WebKit, Playwright's `route()` does not apply once a service worker controls the page, so a real URL would be
+    called. Pass `--port` to keep to an agreed port range.
   - WebKit (the iPhone engine) needs a Playwright WebKit build: set `PLAYWRIGHT_BROWSERS_PATH` to the folder
     holding it. Never run `playwright install` into system paths for this.
 - `tools/nav-test/` — navigation (Back keeps your place, bottom-bar Back, lists, report) and the cycle-count / F&A fence.

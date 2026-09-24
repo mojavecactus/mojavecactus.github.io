@@ -29,9 +29,9 @@ async function installed(b) {
   await ctx.addInitScript(() => {
     try { localStorage.setItem('tbx_tour_done', '1'); localStorage.setItem('tbx_a2hs_x', '1'); localStorage.setItem('tbx_wn_seen', '99'); } catch (e) {}
     const mode = localStorage.getItem('__sim');
-    if (mode === 'bug' || mode === 'stall') {
-      let t; Object.defineProperty(window, 'TOOLBOX', { configurable: true, get() { return t; }, set(v) { if (v && mode === 'bug') v.probes = null; t = mode === 'stall' ? undefined : v; } });
-    }
+    // hermetic: no live hub in the page (usage / backorder / feedback) — in WebKit, context.route() doesn't apply once a
+    // service worker controls the page, so the payload's real URLs would be called
+    let t; Object.defineProperty(window, 'TOOLBOX', { configurable: true, get() { return t; }, set(v) { if (v) { delete v.usage; delete v.bo; delete v.fb; if (mode === 'bug') v.probes = null; } t = mode === 'stall' ? undefined : v; } });
   });
   await ctx.route(/^https?:\/\/(?!localhost)/, r => r.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":false}' }));
   const p = await ctx.newPage();

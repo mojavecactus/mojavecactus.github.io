@@ -2,19 +2,25 @@
 // Apps Script project "TBX Usage Hub", next to UsageCore.gs (= tools/usage/usage-core.js) and Code.gs
 // (= tools/usage/usage-main.js, the doGet/doPost entry points). Separate from the backorder hub on purpose.
 //
-// First run (from the editor): usageSetup() → creates "SM ToolBox — Usage" (tab Events), the write key and the
-// admin key (Script Properties USAGE_*), and logs them. Then deploy the web app (Execute as me · Anyone).
+// First run (from the editor): usageSetup() → creates "SM ToolBox — Usage" (tabs Events + Review), the write key and
+// the admin key (Script Properties USAGE_*), and logs them. Then deploy the web app (Execute as me · Anyone).
+// Re-running usageSetup() is safe (it only adds what is missing); the first u_mark also creates the Review tab.
 //
 // API (POST text/plain JSON, like the other hubs):
 //   {action:'u_ev', key: writeKey, d: deviceId, a: 0|1, b: batchId, e: [[ms, type, key, extra, session], …]}
 //        → {ok, n}   (a repeated batch id is acknowledged and dropped — phones resend after a lost reply)
 //   {action:'u_live',  key: adminKey, incl: 0|1}          → UCORE.live   (cached 15 s)
 //   {action:'u_stats', key: adminKey, days: 1|7|30, incl} → UCORE.stats  (cached 60 s today / 5 min otherwise)
+//   {action:'u_queue', key: adminKey, days: 30|7, incl, fresh} → UCORE.queue + the Review tab's statuses
+//        (the event aggregate is cached 5 min, the statuses 10 min; u_mark clears only the statuses; fresh=1 skips both)
+//   {action:'u_mark', key: adminKey, t: 'search'|'barcode'|'part', k, st: 'todo'|'done'|'ignore', note?}
+//        → {ok, t, k, st, note, at}   (upsert on type + normalized key; note left as is when not sent; ≤140 chars)
 //   {action:'u_ping'} → {ok, v}
 // incl=1 counts the admin's own devices (any device that has the admin key is flagged via a=1).
 
 var U_PROPS = PropertiesService.getScriptProperties();
 var U_TAB = 'Events';
+var U_RTAB = 'Review', U_RCOLS = ['type', 'key', 'status', 'note', 'updated'], U_RMAX = 5000; // owner decisions on queue rows
 
 function usageSetup() {
   var id = U_PROPS.getProperty('USAGE_SHEET_ID'), ss;
@@ -24,6 +30,7 @@ function usageSetup() {
   if (sh.getLastRow() === 0) sh.getRange(1, 1, 1, UCORE.COLS.length).setValues([UCORE.COLS]).setFontWeight('bold');
   sh.getRange(1, 1, sh.getMaxRows(), UCORE.COLS.length).setNumberFormat('@'); // plain text: part numbers like 24E01 must never become numbers
   sh.setFrozenRows(1);
+  uReviewTab_(ss);
   var s1 = ss.getSheetByName('Sheet1'); if (s1 && ss.getSheets().length > 1) ss.deleteSheet(s1);
   if (!U_PROPS.getProperty('USAGE_WKEY')) U_PROPS.setProperty('USAGE_WKEY', uKey_(24));
   if (!U_PROPS.getProperty('USAGE_AKEY')) U_PROPS.setProperty('USAGE_AKEY', uKey_(32));
@@ -35,6 +42,59 @@ function uKey_(n) { var a = 'abcdefghijklmnopqrstuvwxyz0123456789', s = ''; for 
 function uSheet_() {
   var id = U_PROPS.getProperty('USAGE_SHEET_ID'); if (!id) throw new Error('run usageSetup() first');
   return SpreadsheetApp.openById(id).getSheetByName(U_TAB);
+}
+// Review tab (created by usageSetup, or by the first u_mark): plain text everywhere — keys are what people typed.
+function uReviewTab_(ss) {
+  var sh = ss.getSheetByName(U_RTAB) || ss.insertSheet(U_RTAB);
+  if (sh.getLastRow() === 0) sh.getRange(1, 1, 1, U_RCOLS.length).setValues([U_RCOLS]).setFontWeight('bold');
+  sh.getRange(1, 1, sh.getMaxRows(), U_RCOLS.length).setNumberFormat('@');
+  sh.setFrozenRows(1);
+  return sh;
+}
+// {'<type>\t<key>': {st, note, at}} — small (one row per decision), cached 10 min, dropped by every u_mark
+function uReviewMap_(fresh) {
+  var cache = CacheService.getScriptCache(), hit = fresh ? null : cache.get('urv');
+  if (hit) return JSON.parse(hit);
+  var sh = SpreadsheetApp.openById(U_PROPS.getProperty('USAGE_SHEET_ID')).getSheetByName(U_RTAB), map = {};
+  if (sh && sh.getLastRow() > 1) {
+    var v = sh.getRange(2, 1, sh.getLastRow() - 1, U_RCOLS.length).getValues();
+    for (var i = 0; i < v.length; i++) { // rows typed or fixed by hand in the Sheet count too: type, key and status are re-normalized
+      var t = String(v[i][0] || '').trim().toLowerCase(), k = UCORE.qKey(t, v[i][1] == null ? '' : v[i][1]), up = v[i][4];
+      if (t && k) map[t + '\t' + k] = { st: String(v[i][2] || '').trim().toLowerCase(), note: String(v[i][3] == null ? '' : v[i][3]), at: up instanceof Date ? up.toISOString() : String(up || '') };
+    }
+  }
+  try { cache.put('urv', JSON.stringify(map), 600); } catch (eC) {}
+  return map;
+}
+function uMark_(p) {
+  var t = String(p.t || ''), st = String(p.st || '');
+  if (!UCORE.QTYPES.hasOwnProperty(t)) return { ok: false, err: 'type' };
+  if (!UCORE.QST.hasOwnProperty(st)) return { ok: false, err: 'status' };
+  var k = UCORE.qKey(t, p.k);
+  if (!k) return { ok: false, err: 'bad' };                 // never 'key': the app reads that as "admin key revoked"
+  var at = new Date().toISOString(), note = p.note == null ? null : UCORE.clean(p.note, 140);
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, err: 'busy' };
+  try {
+    var ss = SpreadsheetApp.openById(U_PROPS.getProperty('USAGE_SHEET_ID')), sh = ss.getSheetByName(U_RTAB) || uReviewTab_(ss);
+    var last = sh.getLastRow(), row = 0;
+    if (last > 1) {
+      var v = sh.getRange(2, 1, last - 1, 4).getValues();
+      for (var i = v.length - 1; i >= 0; i--) {
+        if (String(v[i][0] || '').trim().toLowerCase() !== t || UCORE.qKey(t, v[i][1] == null ? '' : v[i][1]) !== k) continue;
+        row = i + 2; if (note === null) note = String(v[i][3] == null ? '' : v[i][3]); break;
+      }
+    }
+    if (!row) {
+      if (last - 1 >= U_RMAX) return { ok: false, err: 'full' };
+      row = Math.max(2, last + 1);
+      if (row > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), 500);
+    }
+    if (note === null) note = '';
+    sh.getRange(row, 1, 1, U_RCOLS.length).setNumberFormat('@').setValues([[t, k, st, note, at]]);
+    CacheService.getScriptCache().remove('urv');
+  } finally { lock.releaseLock(); }
+  return { ok: true, t: t, k: k, st: st, note: note, at: at };
 }
 function uOut_(s) { return ContentService.createTextOutput(s).setMimeType(ContentService.MimeType.JSON); }
 function uJson_(o) { return uOut_(JSON.stringify(o)); }
@@ -97,12 +157,19 @@ function usageHandle(p) {
   try {
     if (a === 'u_ev') return uJson_(uIngest_(p));
     if (a === 'u_ping') return uJson_({ ok: true, v: UCORE.VER });
-    if (a === 'u_live' || a === 'u_stats') {
+    if (a === 'u_live' || a === 'u_stats' || a === 'u_queue' || a === 'u_mark') {
       var ak = U_PROPS.getProperty('USAGE_AKEY');
       if (!ak || String(p.key || '') !== ak) return uJson_({ ok: false, err: 'key' });
+      if (a === 'u_mark') return uJson_(uMark_(p));
       var incl = +p.incl === 1, excl = {};
       if (!incl) uAdmins_().forEach(function (d) { excl[d] = 1; });
       var cache = CacheService.getScriptCache(), now = Date.now(), ck, hit, s;
+      if (a === 'u_queue') { // the 30-day read is cached 5 min; statuses are merged per request so a mark never forces a re-read
+        var qd = +p.days === 7 ? 7 : 30;
+        ck = 'uq:' + qd + ':' + (incl ? 1 : 0); hit = p.fresh ? null : cache.get(ck);
+        if (!hit) { hit = JSON.stringify(UCORE.queue(uRead_(UCORE.windowStart(now, qd), 0), { now: now, days: qd, excl: excl })); try { cache.put(ck, hit, 300); } catch (eQ) {} }
+        return uJson_(UCORE.mergeReview(JSON.parse(hit), uReviewMap_(!!p.fresh)));
+      }
       if (a === 'u_live') {
         ck = 'ul:' + (incl ? 1 : 0); hit = cache.get(ck);
         if (hit) return uOut_(hit);

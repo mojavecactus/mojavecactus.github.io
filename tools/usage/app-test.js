@@ -5,7 +5,7 @@
 // #/usage gate and dashboard rendered from real UCORE output; the 5-tap entry; no page errors.
 //   cd tools/bo && npm i jsdom@24 (once; this suite borrows it) && APP_PW=<catalog pw> node ../usage/app-test.js
 const path = require('path');
-const { JSDOM } = require(require.resolve('jsdom', { paths: [path.join(__dirname, '../bo/node_modules'), path.join(__dirname, '../cc-test/node_modules'), __dirname] }));
+const { JSDOM, VirtualConsole } = require(require.resolve('jsdom', { paths: [path.join(__dirname, '../bo/node_modules'), path.join(__dirname, '../cc-test/node_modules'), __dirname] }));
 const fs = require('fs'); const crypto = require('crypto');
 const U = require('./usage-core.js');
 const R = path.resolve(__dirname, '../..');
@@ -30,9 +30,12 @@ function decryptPayload(pw) {
 const PAYLOAD = decryptPayload(process.env.APP_PW || '');
 
 // A believable hub: stores every u_ev row through the real core, answers u_live / u_stats with the real core.
+// v2 (N9) also answers u_queue / u_mark like Usage.gs does (review statuses merged per request). The default is the
+// hub that is live today (no u_queue → err 'action'); UHUB=new runs sections 1–6 against the new one instead.
 function Hub(opts) {
   opts = opts || {};
-  const hub = { rows: [], batches: [], seen: {}, down: false, admin: {}, calls: [], akey: 'admin-key-123' };
+  const v2 = opts.v2 !== undefined ? !!opts.v2 : process.env.UHUB === 'new';
+  const hub = { rows: [], batches: [], seen: {}, down: false, admin: {}, calls: [], akey: 'admin-key-123', v2, review: {}, marks: [] };
   hub.handle = (b, now) => {
     if (b.action === 'u_ev') {
       if (b.key !== 'write-key') return { ok: false, err: 'key' };
@@ -48,16 +51,36 @@ function Hub(opts) {
       const excl = +b.incl === 1 ? {} : hub.admin, rows = hub.rows.concat(hub.extra || []);
       return b.action === 'u_live' ? U.live(rows, { now, excl }) : U.stats(rows, { now, days: +b.days || 7, excl });
     }
+    if (hub.v2 && b.action === 'u_queue') {
+      if (b.key !== hub.akey) return { ok: false, err: 'key' };
+      if (hub.qdown) return { ok: false, err: 'server' };
+      const excl = +b.incl === 1 ? {} : hub.admin;
+      return U.mergeReview(U.queue(hub.rows.concat(hub.extra || []), { now, days: +b.days || 30, excl }), JSON.parse(JSON.stringify(hub.review)));
+    }
+    if (hub.v2 && b.action === 'u_mark') {
+      if (b.key !== hub.akey) return { ok: false, err: 'key' };
+      if (hub.markDown) return { ok: false, err: 'busy' };
+      if (!U.QTYPES.hasOwnProperty(b.t)) return { ok: false, err: 'type' };
+      if (!U.QST.hasOwnProperty(b.st)) return { ok: false, err: 'status' };
+      const k = U.qKey(b.t, b.k); if (!k) return { ok: false, err: 'bad' };
+      const prev = hub.review[b.t + '\t' + k], at = new Date(now).toISOString();
+      const note = b.note == null ? (prev ? prev.note : '') : U.clean(b.note, 140);
+      hub.review[b.t + '\t' + k] = { st: b.st, note, at }; hub.marks.push({ t: b.t, k, st: b.st, note, sent: b.note });
+      return { ok: true, t: b.t, k, st: b.st, note, at };
+    }
     return { ok: false, err: 'action' };
   };
   return hub;
 }
+const until = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < (ms || 3000)) { try { if (fn()) return true; } catch (e) {} await sleep(40); } return false; };
 
 async function boot(opts) {
   opts = opts || {};
   const APP = /<script src="(app[^"]*\.js)"/.exec(fs.readFileSync(R + '/index.html', 'utf8'))[1];
   const html = fs.readFileSync(R + '/index.html', 'utf8').replace(/<script src="lib\/zxing-reader.js"><\/script>/, '').replace(/<script src="app[^"]*\.js"><\/script>/, '');
-  const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'https://sportsmedtoolbox.com/' + (opts.hash || '#/'), pretendToBeVisual: true });
+  const vc = new VirtualConsole(); vc.sendTo(console, { omitJSDOMErrors: true }); // a mailto: hand-off (P45 email fallback) is not an error here
+  vc.on('jsdomError', (e) => { if (!/Not implemented: navigation/.test(e.message)) console.error(e); });
+  const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'https://sportsmedtoolbox.com/' + (opts.hash || '#/'), pretendToBeVisual: true, virtualConsole: vc });
   const w = dom.window; const errs = []; const calls = []; const hub = opts.hub || Hub();
   const UA = opts.ua || 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
   Object.defineProperty(w.navigator, 'userAgent', { get: () => UA, configurable: true });
@@ -70,6 +93,11 @@ async function boot(opts) {
   w.fetch = (url, o) => {
     const body = (() => { try { return o && o.body ? JSON.parse(o.body) : null; } catch (e) { return null; } })();
     calls.push({ url: String(url), body, t: Date.now() - t0, keepalive: !!(o && o.keepalive), hash: w.location.hash });
+    if (opts.relay && body && body.token !== undefined && body.note !== undefined) { // the feedback relay (P45)
+      const r = opts.relay(body);
+      if (r === 'down') return Promise.reject(new TypeError('Failed to fetch'));
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(r), json: () => Promise.resolve({}) });
+    }
     if (String(url) === BOURL) return Promise.resolve({ ok: true, json: () => Promise.resolve(BOAPI), text: () => Promise.resolve(JSON.stringify(BOAPI)) });
     if (String(url) === HUB) {
       if (hub.down) return Promise.reject(new Error('net'));
@@ -258,6 +286,9 @@ const typeQ = async (t, v) => { const q = t.$('#q'); q.value = v; q.dispatchEven
     check('dashboard: 7 daily columns + table', t.$$('#ug-period .ug-col').length === 7 && t.$$('#ug-period .ug-tbl tbody tr').length === 7);
     check('dashboard: scans breakdown lists the no-card part', /234020123/.test(t.txt('#ug-period')) && /Part number with no card\s*1/.test(t.txt('#ug-period')));
     check('dashboard: phones & versions', /iPhone app/.test(t.txt('#ug-period')) && /Android browser/.test(t.txt('#ug-period')) && new RegExp('App v' + VER.replace(/\./g, '\\.') + '\\s*current', 'i').test(t.txt('#ug-period')));
+    await until(() => /To review/.test(t.txt('#ug-rq') || '') && !/Loading/.test(t.txt('#ug-rq')), 3000);
+    if (!hub.v2) check('review queue (hub without u_queue): one quiet line, the rest of the dashboard works', /^To review\s*The review list needs the usage-hub update\.$/.test(t.txt('#ug-rq')) && !t.$('#ug-rq .ug-rqr, #ug-rq [data-rq-tab]') && !!t.$('.ug-hero') && t.$$('#ug-period .ug-col').length === 7, t.txt('#ug-rq'));
+    else check('review queue (new hub): "To review" lists the no-result search and the no-card part', t.$$('#ug-rq [data-rq-tab]').length === 3 && /“zzkx”/.test(t.txt('#ug-rq')) && /Missing cards\s*1/.test(t.txt('#ug-rq')), t.txt('#ug-rq'));
     t.$('[data-ug-days="30"]').click(); await sleep(120);
     const last = usageCalls(t).filter(c => c.body.action === 'u_stats').slice(-1)[0];
     check('filters: 30 days asks the hub for 30 and redraws', last && last.body.days === 30 && t.$$('#ug-period .ug-col').length === 30 && t.$('[data-ug-days="30"]').classList.contains('on'));
@@ -292,6 +323,172 @@ const typeQ = async (t, v) => { const q = t.$('#q'); q.value = v; q.dispatchEven
     check('coexist: backorder banner on the card', /backorder/i.test(t.txt('#content')));
     check('coexist: usage records the report screen and the card', t.events().some(e => e[1] === 'view' && e[2] === 'bo') && t.events().some(e => e[1] === 'card' && e[2] === '3910500580'));
     check('coexist: backorder fetch went to its own hub, usage to its own', t.calls.some(c => c.url === BOURL && c.body.action === 'bo') && usageCalls(t).every(c => c.body.action === 'u_ev'));
+    check('no page errors', t.errs.length === 0, t.errs); }
+
+  // ---- 7. N9 "To review" against the new hub (u_queue / u_mark answered by the real core) ----
+  { const hub = Hub({ v2: true }); const now = Date.now(), H = 3600000, iso = (ms) => new Date(Math.min(ms, now)).toISOString();
+    const XSS = '<img src=x onerror=alert(1)>"\'';
+    hub.extra = [
+      [iso(now - 5 * H), 'aaaaaaaaaa', 'sa', 'search', 'tightrope', '0'], [iso(now - 4 * H), 'bbbbbbbbbb', 'sb', 'search', 'tightrope', '0'],
+      [iso(now - 3 * H), 'bbbbbbbbbb', 'sb', 'search', 'TightRope', '0'],                     // case variant: the same term
+      [iso(now - 2 * H), 'aaaaaaaaaa', 'sa', 'search', 'zzkx', '0'], [iso(now - 2 * H + 1000), 'aaaaaaaaaa', 'sa', 'search', XSS, '0'],
+      [iso(now - 100 * 60000), 'dddddddddd', 'sd', 'search', 'alphavent', '0'],               // an older phone missed it; this catalog finds it
+      [iso(now - 90 * 60000), 'dddddddddd', 'sd', 'search', 'nanotack', '0'],                 // done earlier, asked again, but found now
+      [iso(now - 80 * 60000), 'aaaaaaaaaa', 'sa', 'scan', '00887868123456', 'unknown'],
+      [iso(now - 70 * 60000), 'aaaaaaaaaa', 'sa', 'scan', '0234020123', 'nocard'], [iso(now - 60 * 60000), 'bbbbbbbbbb', 'sb', 'card', '234-020-123', 'missing'],
+      [iso(now - 50 * 60000), 'bbbbbbbbbb', 'sb', 'card', 'NOTAPART99', 'missing']
+    ];
+    hub.review = { 'search\tzzkx': { st: 'done', note: 'alias added', at: iso(now - 3 * H) }, 'search\tnanotack': { st: 'done', note: '', at: iso(now - 3 * H) } };
+    const t = await boot({ hub, storage: { tbx_uadm: 'admin-key-123' } }); await sleep(2700);
+    const clip = []; Object.defineProperty(t.w.navigator, 'clipboard', { configurable: true, value: { writeText: (s) => { clip.push(s); return Promise.resolve(); } } });
+    await t.go('#/usage');
+    await until(() => /Now finds/i.test(t.txt('#ug-rq') || ''), 6000);
+    const rq = t.$('#ug-rq'), rows = () => t.$$('#ug-rq .ug-rqr'), row = (re) => rows().find(r => re.test(r.querySelector('.ug-rqm').textContent));
+    const chip = (k) => (t.$('#ug-rq [data-rq-tab="' + k + '"]') || { textContent: '' }).textContent.replace(/\s+/g, '');
+    const qc = usageCalls(t).filter(c => c.body.action === 'u_queue'), sc = usageCalls(t).filter(c => c.body.action === 'u_stats');
+    check('N9: "To review" sits right under the Live card, before Latest activity', rq && rq.previousElementSibling.classList.contains('ug-live') && /Latest activity/.test(rq.nextElementSibling.textContent));
+    check('N9: u_queue asks for 30 days with the "Include my devices" flag, after the period report', qc.length >= 1 && qc[0].body.days === 30 && qc[0].body.incl === 0 && sc.length && sc[0].t <= qc[0].t, qc.map(c => c.body));
+    check('N9: three lists with open counts — Searches 4 · Barcodes 1 · Missing cards 2', chip('search') === 'Searches4' && chip('barcode') === 'Barcodes1' && chip('part') === 'Missingcards2', [chip('search'), chip('barcode'), chip('part')]);
+    const r0 = rows()[0];
+    check('N9: most people first; the row says who, how often, how recently', /“tightrope”/.test(r0.textContent) && /2 people · 3 tries · last 3h ago/.test(r0.textContent), r0.textContent);
+    const xr = row(/onerror/);
+    check('N9: hub text is escaped — no <img> in the card, the literal text shows, Copy carries the raw string', !t.$('#ug-rq img') && xr && xr.textContent.indexOf(XSS) > -1 && xr.querySelector('[data-copy]').getAttribute('data-copy') === XSS);
+    const av = row(/alphavent/);
+    check('N9: an open term this catalog answers now shows NOW FINDS n', av && /Now finds \d+/.test(av.querySelector('.ug-pill.ok').textContent), av && av.textContent);
+    const zz = row(/zzkx/);
+    check('N9: done, then asked again → BACK, "done … — asked again since" and the note', zz && /Back/.test(zz.querySelector('.ug-pill.warn').textContent) && /asked again since/.test(zz.textContent) && /“alias added”/.test(zz.textContent), zz && zz.textContent);
+    check('N9: done + back but this catalog answers it now → stays closed', !row(/nanotack/));
+    check('N9: Search it / Copy / Done / Ignore / Note on a search row', ['go', 'done', 'ignore', 'note'].every(a => r0.querySelector('[data-rq-act="' + a + '"]')) && !!r0.querySelector('[data-copy]'));
+    await t.flush(); const evN = t.events().length;
+    r0.querySelector('[data-rq-act="go"]').click(); await sleep(250);
+    check('N9: Search it runs the term in the catalog search', t.w.location.hash === '#/?q=tightrope' && /No matches for “tightrope”/.test(t.txt('#content')), t.w.location.hash + ' ' + t.txt('#content').slice(0, 100));
+    t.w.history.back(); await sleep(400);
+    if (t.w.location.hash !== '#/usage') { await t.go('#/usage'); await sleep(200); }
+    check('N9: Back returns to a working dashboard with the list', t.w.location.hash === '#/usage' && rows().length === 4 && !!t.$('.ug-hero'), t.w.location.hash);
+    await t.flush(); const after = t.events().slice(evN);
+    check('N9: Search it logs nothing (no search event, no screen view)', !after.some(e => e[1] === 'search' || (e[1] === 'view' && e[2] === 'home')), after);
+    rows()[0].querySelector('[data-copy]').click(); await sleep(60);
+    check('N9: Copy puts the exact term on the clipboard', clip[clip.length - 1] === 'tightrope', clip);
+    const m0 = hub.marks.length;
+    row(/tightrope/).querySelector('[data-rq-act="done"]').click(); await sleep(200);
+    check('N9: Done → u_mark {search, tightrope, done}; the row leaves and the chip drops to 3', hub.marks.length === m0 + 1 && hub.marks[m0].t === 'search' && hub.marks[m0].k === 'tightrope' && hub.marks[m0].st === 'done' && !row(/tightrope/) && chip('search') === 'Searches3', [hub.marks.slice(m0), chip('search')]);
+    await until(() => /Marked done/.test(t.txt('#toast')) && t.$('#toast button'), 4000);
+    check('N9: toast "Marked done" with Undo', /Marked done/.test(t.txt('#toast')) && /Undo/.test((t.$('#toast button') || {}).textContent || ''), t.txt('#toast'));
+    t.$('#toast button').click(); await sleep(200);
+    check('N9: Undo → u_mark todo and the row is back', hub.marks.length === m0 + 2 && hub.marks[m0 + 1].st === 'todo' && hub.marks[m0 + 1].k === 'tightrope' && !!row(/tightrope/) && chip('search') === 'Searches4', hub.marks.slice(m0));
+    row(/zzkx/).querySelector('[data-rq-act="ignore"]').click(); await sleep(200);
+    check('N9: Ignore hides the row (u_mark ignore)', !row(/zzkx/) && hub.review['search\tzzkx'].st === 'ignore' && chip('search') === 'Searches3');
+    const tg = t.$('#ug-rqall'); tg.checked = true; tg.dispatchEvent(new t.w.Event('change', { bubbles: true })); await sleep(120);
+    const zi = row(/zzkx/), ni = row(/nanotack/);
+    check('N9: "Show done & ignored" lists them dimmed: IGNORED + Reopen, and the answered one with NOW FINDS', /Show done & ignored \(2\)/.test(t.txt('#ug-rq')) && zi && zi.classList.contains('closed') && /Ignored/.test(zi.textContent) && !!zi.querySelector('[data-rq-act="reopen"]') && ni && /Now finds \d+/.test(ni.textContent) && /Done/.test(ni.querySelector('.ug-pill:not(.ok)').textContent), t.txt('#ug-rq').slice(0, 300));
+    zi.querySelector('[data-rq-act="reopen"]').click(); await sleep(200);
+    check('N9: Reopen → u_mark todo, the row is open again', hub.marks.slice(-1)[0].st === 'todo' && hub.marks.slice(-1)[0].k === 'zzkx' && row(/zzkx/) && !row(/zzkx/).classList.contains('closed'));
+    const tg2 = t.$('#ug-rqall'); if (tg2) { tg2.checked = false; tg2.dispatchEvent(new t.w.Event('change', { bubbles: true })); await sleep(80); }
+    row(/tightrope/).querySelector('[data-rq-act="note"]').click(); await sleep(60);
+    const inp = t.$('#ug-rqnote');
+    check('N9: Note opens an inline field (≤140 chars) with the keyboard focus', inp && inp.maxLength === 140 && t.w.document.activeElement === inp);
+    const NOTE = '<b>alias</b> "tr" in 4.144';
+    inp.value = NOTE; row(/tightrope/).querySelector('[data-rq-act="save"]').click(); await sleep(200);
+    const lm = hub.marks.slice(-1)[0], tr = row(/tightrope/);
+    check('N9: Save → u_mark with the note (the row stays open) and the note shows escaped', lm.k === 'tightrope' && lm.sent === NOTE && lm.st === 'todo' && tr && tr.textContent.indexOf('“' + NOTE + '”') > -1 && !tr.querySelector('.ug-rqs b') && /Edit note/.test(tr.textContent), [lm, tr && tr.textContent]);
+    row(/tightrope/).querySelector('[data-rq-act="note"]').click(); await sleep(40);
+    row(/alphavent/).querySelector('[data-rq-act="ignore"]').click(); await sleep(200);
+    check('N9: another tap closes an open note field (and still does its job)', !t.$('#ug-rqnote') && hub.marks.slice(-1)[0].k === 'alphavent' && hub.marks.slice(-1)[0].st === 'ignore' && !row(/alphavent/), hub.marks.slice(-1));
+    t.$('#ug-rq [data-rq-tab="barcode"]').click(); await sleep(80);
+    const br = rows();
+    check('N9: Barcodes: the unknown GTIN, 1 scan; Copy/Done/Ignore/Note — no Search it, no teach', br.length === 1 && /00887868123456/.test(br[0].textContent) && /1 person · 1 scan/.test(br[0].textContent) && !br[0].querySelector('[data-rq-act="go"]') && !/teach/i.test(t.txt('#ug-rq')));
+    t.$('#ug-rq [data-rq-act="gtins"]').click(); await sleep(60);
+    check('N9: "Copy GTINs for the FDA lookup" copies ["00887868123456"]', clip[clip.length - 1] === '["00887868123456"]', clip.slice(-1));
+    t.$('#ug-rq [data-rq-tab="part"]').click(); await sleep(80);
+    const pr = rows(), p0 = row(/234-020-123/);
+    check('N9: Missing cards merges a no-card scan and a missing-card link', pr.length === 2 && p0 && /2 people · scanned 1 · from a link 1/.test(p0.textContent) && !!row(/NOTAPART99/), pr.map(r => r.textContent));
+    p0.querySelector('[data-rq-act="go"]').click(); await sleep(250);
+    check('N9: Search it on a part number', t.w.location.hash === '#/?q=' + encodeURIComponent('234-020-123'), t.w.location.hash);
+    await t.go('#/usage'); await sleep(150);
+    check('N9: the chosen list is kept when coming back', /Missingcards/.test(t.$('#ug-rq .ug-chip.on').textContent.replace(/\s+/g, '')));
+    t.$('#ug-rq [data-rq-tab="search"]').click(); await sleep(60);
+    hub.markDown = true;
+    const ft = rows()[0].querySelector('.ug-rqm').textContent;
+    rows()[0].querySelector('[data-rq-act="done"]').click(); await sleep(120);
+    const gone = !rows().some(r => r.querySelector('.ug-rqm').textContent === ft);
+    await until(() => /Couldn’t save/.test(t.txt('#toast')), 5000);
+    check('N9: a mark the hub can\'t take (busy, then busy again) puts the row back and says so', gone && rows().some(r => r.querySelector('.ug-rqm').textContent === ft) && /Couldn’t save — check your signal/.test(t.txt('#toast')), [gone, t.txt('#toast')]);
+    hub.markDown = false;
+    const inc = t.$('#ug-incl'); inc.checked = true; inc.dispatchEvent(new t.w.Event('change', { bubbles: true }));
+    await until(() => usageCalls(t).filter(c => c.body.action === 'u_queue').slice(-1)[0].body.incl === 1, 3000);
+    check('N9: the list follows "Include my devices" (u_queue incl=1)', usageCalls(t).filter(c => c.body.action === 'u_queue').slice(-1)[0].body.incl === 1);
+    await sleep(300); const nq = usageCalls(t).filter(c => c.body.action === 'u_queue').length;
+    t.$('#ug-rf').click(); await until(() => usageCalls(t).filter(c => c.body.action === 'u_queue').length > nq, 3000);
+    const fq = usageCalls(t).filter(c => c.body.action === 'u_queue').slice(-1)[0], fs1 = usageCalls(t).filter(c => c.body.action === 'u_stats').slice(-1)[0];
+    check('N9: ↻ asks for a fresh list once the report is back (fresh=1)', fq.body.fresh === 1 && fs1.body.fresh === 1 && fs1.t <= fq.t, [fq.body, fs1.body]);
+    await t.go('#/usage?q=zz'); await sleep(200);
+    check('N9 (#34): #/usage?q=… shows the search instead of crashing', t.errs.length === 0 && t.txt('#title') === 'Search', [t.errs, t.txt('#title')]);
+    await typeQ(t, ''); await until(() => rows().length > 0, 3000);
+    check('N9 (#34): clearing the search brings the dashboard and the list back', !!t.$('.ug-hero') && rows().length > 0);
+    t.$('#ug-forget').click(); await sleep(50);
+    check('N9: Forget the key clears the list too', t.w.TBX_DEV.usage.UGD.q === null && !!t.$('#ug-key'));
+    await t.flush();
+    check('N9: the admin screen itself is never recorded', !t.events().some(e => e[2] === 'usage'));
+    check('no page errors', t.errs.length === 0, t.errs); }
+  { // the queue can't be read: one line with Try again, the rest of the dashboard is untouched
+    const hub = Hub({ v2: true }); hub.qdown = true;
+    const t = await boot({ hub, storage: { tbx_uadm: 'admin-key-123' } }); await sleep(2700);
+    await t.go('#/usage'); await until(() => /Couldn’t load the review list/.test(t.txt('#ug-rq') || ''), 3000);
+    check('N9: queue down → "Couldn’t load the review list. Try again", the dashboard is intact', /Couldn’t load the review list\. Try again/.test(t.txt('#ug-rq')) && !!t.$('.ug-hero') && t.$$('#ug-period .ug-col').length === 7, t.txt('#ug-rq'));
+    hub.qdown = false; t.$('#ug-rq [data-rq-act="retry"]').click(); await until(() => t.$$('#ug-rq [data-rq-tab]').length === 3, 3000);
+    check('N9: Try again loads it (empty lists say so)', t.$$('#ug-rq [data-rq-tab]').length === 3 && /Every search in the last 30 days found something/.test(t.txt('#ug-rq')), t.txt('#ug-rq'));
+    check('no page errors', t.errs.length === 0, t.errs); }
+
+  // ---- 8. P45 feedback: remembered name, focus, kept offline and sent once when back, refusals, About ----
+  { let mode = 'ok'; const got = [];
+    const t = await boot({ relay: (b) => { got.push(b); return mode === 'down' ? 'down' : mode === 'refuse' ? 'error: bad token' : 'ok'; } });
+    await sleep(300);
+    const fb = () => t.$('#fb-ov'), send = async () => { t.$('#fb-send').click(); await sleep(80); };
+    check('P45: the feedback bubble is there (relay configured)', !!t.$('#fb-fab'));
+    t.$('#fb-fab').click(); await sleep(30);
+    check('P45: first time: the name field has the focus (inside the tap)', !fb().hidden && t.w.document.activeElement === t.$('#fb-name'));
+    t.$('#fb-name').value = 'Nate R'; t.$('#fb-note').value = 'first note'; await send(); await sleep(100);
+    check('P45: online send → one POST with the note, the name and an id; name remembered', got.length === 1 && got[0].note === 'first note' && got[0].name === 'Nate R' && /^[a-z0-9]{8,}$/.test(got[0].id) && t.w.localStorage.getItem('tbx_fb_name') === 'Nate R', got.map(b => b.note));
+    await sleep(900);
+    t.$('#fb-name').value = ''; t.$('#fb-fab').click(); await sleep(30);
+    check('P45: next time the name is filled in and the note has the focus', t.$('#fb-name').value === 'Nate R' && t.w.document.activeElement === t.$('#fb-note'));
+    t.setOnline(false);
+    t.$('#fb-note').value = 'offline note'; await send();
+    const q1 = JSON.parse(t.w.localStorage.getItem('tbx_fbq') || '[]');
+    check('P45: offline → kept: "Saved ✓", the offline hint, nothing sent', got.length === 1 && t.$('#fb-send').textContent === 'Saved ✓' && /offline — it’ll send automatically/.test(t.txt('#fb-hint')), [t.$('#fb-send').textContent, t.txt('#fb-hint')]);
+    check('P45: the note waits in tbx_fbq — words only, no picture in localStorage, small', q1.length === 1 && q1[0].note === 'offline note' && q1[0].name === 'Nate R' && !('image' in q1[0]) && JSON.stringify(q1[0]).length < 4096 && !/data:image/.test(JSON.stringify(t.w.localStorage)), q1);
+    await sleep(1900);
+    check('P45: the form closes after "Saved"', fb().hidden && t.$('#fb-note').value === '');
+    await t.go('#/about'); await sleep(60);
+    check('P45: About says it is waiting for signal', /1 feedback note is waiting for signal/.test(t.txt('#fbq-note')), t.txt('#fbq-note'));
+    t.setOnline(true); t.w.dispatchEvent(new t.w.Event('online')); await until(() => got.length === 2, 4000); await sleep(100);
+    check('P45: back online → sent once, with its id; the queue is empty', got.length === 2 && got[1].note === 'offline note' && got[1].id === q1[0].id && t.w.localStorage.getItem('tbx_fbq') === null && !t.txt('#fbq-note'), got.map(b => b.note));
+    t.w.dispatchEvent(new t.w.Event('online')); t.w.document.dispatchEvent(new t.w.Event('visibilitychange')); t.w.TBX_FBQ.flush(); await sleep(2600);
+    check('P45: no second copy (online again, foreground, flush)', got.length === 2);
+    mode = 'down'; t.$('#fb-fab').click(); await sleep(30); t.$('#fb-note').value = 'no answer note'; await send(); await sleep(50);
+    check('P45: a send with no answer is kept too (not the email fallback)', got.length === 3 && t.$('#fb-send').textContent === 'Saved ✓' && JSON.parse(t.w.localStorage.getItem('tbx_fbq')).length === 1);
+    mode = 'ok'; await sleep(1900); t.w.TBX_FBQ.flush(); await until(() => got.length === 4, 3000); await sleep(50);
+    check('P45: …and goes out on the next try', got.length === 4 && got[3].note === 'no answer note' && t.w.localStorage.getItem('tbx_fbq') === null);
+    mode = 'refuse'; t.$('#fb-fab').click(); await sleep(30); t.$('#fb-note').value = 'refused note'; await send(); await sleep(1900);
+    for (let i = 0; i < 2; i++) { const n = got.length; t.w.TBX_FBQ.flush(); await until(() => got.length > n, 3000); await sleep(60); }
+    const q3 = JSON.parse(t.w.localStorage.getItem('tbx_fbq') || '[]');
+    check('P45: three refusals → it stops retrying', got.length === 7 && q3.length === 1 && q3[0].tries === 3 && q3[0].err === 'error: bad token', [got.length, q3]);
+    t.w.TBX_FBQ.flush(); await sleep(300);
+    check('P45: …no fourth try', got.length === 7);
+    await t.go('#/'); await t.go('#/about'); await sleep(60);
+    check('P45: About: "1 feedback note couldn’t send" — Email it · Discard', /1 feedback note couldn’t send/.test(t.txt('#fbq-note')) && /“refused note”/.test(t.txt('#fbq-note')) && !!t.$('#fbq-note [data-fbq="mail"]') && !!t.$('#fbq-note [data-fbq="drop"]'), t.txt('#fbq-note'));
+    t.$('#fbq-note [data-fbq="drop"]').click(); await sleep(60);
+    check('P45: Discard removes it', t.w.localStorage.getItem('tbx_fbq') === null && !t.txt('#fbq-note'));
+    const full = Array.from({ length: 20 }, (_, i) => ({ id: 'seed' + String(i).padStart(4, '0'), t: Date.now() - 1000 * (30 - i), name: '', note: 'seed ' + i, screen: 'Home', route: '#/', ua: 'x', tries: 0, err: '', shot: 0 }));
+    t.setOnline(false); t.w.localStorage.setItem('tbx_fbq', JSON.stringify(full));
+    t.$('#fb-fab').click(); await sleep(30); t.$('#fb-note').value = 'the 21st'; await send();
+    check('P45: 20 notes already waiting → not kept; today\'s email fallback instead', JSON.parse(t.w.localStorage.getItem('tbx_fbq')).length === 20 && /opening your email app/.test(t.txt('#fb-hint')), t.txt('#fb-hint'));
+    await sleep(700); // the mailto hand-off (jsdom can't open it)
+    t.w.localStorage.removeItem('tbx_fbq'); t.setOnline(true);
+    await t.go('#/'); await typeQ(t, 'zzqxvk'); await sleep(60);
+    const ask = t.$('#content [data-act="asknate"]'); if (ask) ask.click(); await sleep(40);
+    check('P45 + P23: "Ask Nate to add …" opens prefilled, the name kept and the note focused at its end', ask && /^Please add “zzqxvk”/.test(t.$('#fb-note').value) && t.$('#fb-name').value === 'Nate R' && t.w.document.activeElement === t.$('#fb-note') && t.$('#fb-note').selectionStart === t.$('#fb-note').value.length);
+    await sleep(700);
     check('no page errors', t.errs.length === 0, t.errs); }
 
   const failed = results.filter(r => !r.ok).length;

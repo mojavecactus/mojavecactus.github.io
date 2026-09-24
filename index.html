@@ -562,6 +562,12 @@ body.ct-chrome-off #fb-fab{display:none;}
 #fb-shotrow{display:flex; align-items:center; gap:10px; margin-bottom:10px;}
 #fb-shot{height:72px; max-width:44%; object-fit:cover; border:1px solid var(--line); border-radius:8px; display:none;}
 #fb-shotcap{color:var(--muted); font-size:12.5px;}
+/* P45 — About: feedback waiting for signal / couldn't send */
+.fbq-wait{color:var(--muted);}
+.fbq-dead b{color:#FFD98A;}
+.fbq-row{margin-top:4px; overflow-wrap:anywhere;}
+.fbq-row .footlink{padding:6px 4px;}
+.fbq-s{color:var(--dim);}
 
 /* password gate */
 #lock{position:fixed; inset:0; z-index:100; background:var(--ink); display:flex;
@@ -1326,6 +1332,25 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 .ug-gate{padding:18px 16px;}
 .ug-gt{margin-bottom:6px; font-size:17px; font-weight:700;}
 .ug-gmsg{min-height:18px; margin-top:10px; color:#FFB3AE; font-size:13px;}
+/* N9 — "To review" under the Live card: Searches · Barcodes · Missing cards, row actions wrap on narrow phones */
+.ug .ug-pill{margin:0;} /* the global .warn rule (banners) leaked a 14px bottom margin into .ug-pill.warn */
+.ug-rqc{display:flex; flex-wrap:wrap; gap:6px; padding:10px 12px 4px;}
+.ug-rqc b{margin-left:5px; font-variant-numeric:tabular-nums;}
+.ug-rqi{margin:6px 14px 8px; color:var(--muted); font-size:12.5px; line-height:1.45;}
+.ug-rqr{padding:10px 14px; border-top:1px solid #313131;}
+.ug-rqr.closed{opacity:.6;}
+.ug-rqm{color:var(--bone); font-size:14px; line-height:1.35; overflow-wrap:anywhere;}
+.ug-rqm b{font-weight:600;}
+.ug-rqs{margin-top:2px; color:var(--muted); font-size:12px; line-height:1.4; overflow-wrap:anywhere;}
+.ug-rqa{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;}
+.ug-rqb{min-height:40px; padding:0 10px; border:1.5px solid #5a564e; border-radius:999px; background:none; color:var(--bone); font:inherit; font-size:13px; font-weight:700; cursor:pointer;}
+.ug-rqb:active{background:var(--panel2);}
+.ug-rqe{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px;}
+.ug-rqe .cc-in{flex:1 1 180px; min-width:0; width:auto; margin:0; padding:9px 12px;}
+.ug-rqf{display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; padding:6px 14px 8px; border-top:1px solid #313131;}
+.ug-rqf .ug-rqt{margin-left:0;}
+.ug-rqf .ug-rqg{margin-left:auto; padding:8px 0;}
+.ug-rqoff{margin:0 2px; color:var(--muted); font-size:12.5px;}
 .foot .ugver{-webkit-user-select:none; user-select:none;}
 @media (max-width:360px){.ug-tiles{grid-template-columns:repeat(2, minmax(0, 1fr));} .ug-hero b{font-size:48px;}}
 /* P4 — "ToolBox didn't open" card (above the lock, below nothing) */
@@ -1701,7 +1726,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.147.js"></script>
+<script src="app-4.148.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>
