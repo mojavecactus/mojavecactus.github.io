@@ -41,7 +41,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.150';
+  var APPVER = '4.151';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -263,15 +263,13 @@ var GLOSS = {
   function boTileSub() {
     var d = BO.data;
     if (!d) return BO.err === 'offline' ? 'Offline — report not loaded yet' : 'Weekly report · tap to load';
-    var parts = [d.backorders.length + ' on backorder', d.controlled.length + ' controlled'];
-    if ((d.cleared || []).length) parts.push(d.cleared.length + ' cleared');
-    return esc(parts.join(' · '));
+    return esc(plural(d.backorders.length, 'product')); // Nate, 2026-09-24: the tile says Backorder, the number on backorder beneath it
   }
   function boTileHTML() {
     if (!boOn()) return '';
     return '<button class="tile tile-bo" data-go="#/bo">' +
       '<span class="tico">' + catSvg('bo') + '</span>' +
-      '<span class="tl"><b><span class="tlt">Backorder Report</span></b><span class="n">' + boTileSub() + '</span></span>' +
+      '<span class="tl"><b><span class="tlt">Backorder</span></b><span class="n">' + boTileSub() + '</span></span>' +
       '<span class="ct">&#x203A;</span></button>';
   }
   function boEntryHTML(kind, r) {
@@ -2285,11 +2283,9 @@ var GLOSS = {
     var imgs = o.imgs || [];
     var built = rowsAll.length > 0 || !!o.note || !!o.bp || !!imgs.length;
     var tagb = (o.tags || []).map(function (tg) { return ' <span class="subtag">' + esc(tg) + '</span>'; }).join('');
-    // title + the small photo beside it (the photo-morph landing slot; lists never show photos)
-    var hero = imgs.length ? '<button type="button" class="pc-hero" data-lb="0" aria-label="Photos, open full screen">' +
-      photoImgHTML(imgs[0], '', 'data-hero="image" decoding="async"') + '</button>' : '';
+    // title only: no photo beside it (Nate, 2026-09-24) — the photos live in the strip further down; lists never show photos
     var head = '<div class="pc-head"><div class="pc-tt"><h1 data-hero="title">' + esc(o.name) + tagb + '</h1>' +
-      (o.fam ? '<div class="fam">' + esc(o.fam) + '</div>' : '') + '</div>' + hero + '</div>';
+      (o.fam ? '<div class="fam">' + esc(o.fam) + '</div>' : '') + '</div></div>';
     var kfHTML = kf.length ? '<div class="kf' + (kf.length === 2 ? ' kf2' : '') + '" role="list" aria-label="Key specs">' + kf.map(function (f) {
       return '<div class="kf-i' + (f.v.length > 10 ? ' kf-long' : '') + '" role="listitem"><span class="kf-k">' + esc(f.k) + '</span><span class="kf-v">' + esc(f.v) + '</span></div>';
     }).join('') + '</div>' : '';

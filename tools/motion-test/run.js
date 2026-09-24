@@ -351,7 +351,7 @@ job('T9-n11a', async () => {
   const { p, ctx } = await open(); await unlock(p); await sleep(1400);
   const r = await morphOrigin(p);
   check('T9 the title morph starts where the tapped title was (±2 px) on a list scrolled 1,400 px', r.morphStartsAtY != null && Math.abs(r.morphStartsAtY - r.tappedTitleY) <= 2 && r.scrollAfter === 0, r);
-  check('T9 N11b: the card photo morphs from the row (tbx-hero group)', !!r.hero, r.hero);
+  check('T9 N11b: no photo by the card title (Nate, 2026-09-24), so no photo morph (no tbx-hero group)', !r.hero, r.hero);
   check('T9 no leftover transition names, no errors', (await leftoverNames(p)) === 0 && !(await p.evaluate(() => window.__errs)).length);
   await ctx.close();
   if (BASE_SITE) {
@@ -384,7 +384,7 @@ job('T10-n11c', async () => {
   const a = await anims(p);
   const r = await p.evaluate(() => ({ sy: Math.round(scrollY), named: window.__named, ring: window.__ring, mode: window.__mode, left: [...document.querySelectorAll('*')].filter(e => e.style && e.style.viewTransitionName).length, ghost: document.querySelectorAll('.vt-ghost').length }));
   check('T10 Back restores the list exactly where it was (P35)', Math.abs(r.sy - before.sy) <= 2, { before: before.sy, after: r.sy });
-  check('T10 the title flies back to its row (tbx-title on the row, "back" transition with title + photo groups)', r.named === 'tbx-title' && r.mode === 'back' && a.vt.some(x => /group\(tbx-title\)/.test(x)) && a.vt.some(x => /group\(tbx-hero\)/.test(x)), { named: r.named, mode: r.mode, vt: a.vt });
+  check('T10 the title flies back to its row (tbx-title on the row, "back" transition, title group, no photo group)', r.named === 'tbx-title' && r.mode === 'back' && a.vt.some(x => /group\(tbx-title\)/.test(x)) && !a.vt.some(x => /group\(tbx-hero\)/.test(x)), { named: r.named, mode: r.mode, vt: a.vt });
   check('T10 the row you came from is marked, then everything is cleaned up', r.ring && r.left === 0 && r.ghost === 0, r);
   check('T10 no page errors', !(await p.evaluate(() => window.__errs)).length);
   await ctx.close();

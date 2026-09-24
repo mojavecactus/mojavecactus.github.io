@@ -61,13 +61,13 @@ async function boot(opts) {
     const tiles = t.$$('.tiles .tile');
     const iBo = tiles.findIndex(x => x.classList.contains('tile-bo')), iInv = tiles.findIndex(x => x.classList.contains('tile-inv'));
     check('home: Backorder Report tile sits directly above Inventory Management', iBo > -1 && iInv === iBo + 1 && iInv === tiles.length - 1, [iBo, iInv, tiles.length]);
-    check('home: tile carries its own colour class and label', tiles[iBo].classList.contains('tile-bo') && /Backorder Report/.test(tiles[iBo].textContent) && tiles[iBo].getAttribute('data-go') === '#/bo');
+    check('home: tile carries its own colour class and label', tiles[iBo].classList.contains('tile-bo') && (tiles[iBo].querySelector('.tlt') || {}).textContent === 'Backorder' && tiles[iBo].getAttribute('data-go') === '#/bo');
     check('home: before the fetch the subline says tap to load', /tap to load/i.test(t.txt('.tile-bo .n')), t.txt('.tile-bo .n'));
     check('home: no hub call on the render path (nothing fetched yet)', t.calls.filter(c => c.url === HUB).length === 0);
     await sleep(1700);
     const hubCalls = t.calls.filter(c => c.url === HUB);
     check('home: exactly one deferred hub call, after the tile had painted', hubCalls.length === 1 && hubCalls[0].tileInDom && hubCalls[0].body.action === 'bo' && hubCalls[0].body.key === 'test-key', hubCalls);
-    check('home: tile counts painted in place', t.txt('.tile-bo .n') === '77 on backorder · 10 controlled · 11 cleared', t.txt('.tile-bo .n'));
+    check('home: tile counts painted in place', t.txt('.tile-bo .n') === '77 products', t.txt('.tile-bo .n'));
     check('home: cache written', (() => { const j = JSON.parse(t.w.localStorage.getItem('tbx_bo')); return j && j.data.backorders.length === 77 && j.at > 0; })());
     check('home: category tiles untouched (7 + bo + inv)', tiles.length === 9 && tiles.filter(x => !x.classList.contains('tile-bo') && !x.classList.contains('tile-inv')).length === 7);
     // visibilitychange while fresh: no extra call
@@ -164,7 +164,7 @@ async function boot(opts) {
   // ---- 4. cached + offline / hub down ----
   { const cache = { tbx_bo: JSON.stringify({ at: Date.now() - 5 * 60000, data: API }) };
     const t = await boot({ storage: cache, hubDown: true });
-    check('cache: tile shows counts immediately from localStorage', /77 on backorder/.test(t.txt('.tile-bo .n')), t.txt('.tile-bo .n'));
+    check('cache: tile shows counts immediately from localStorage', t.txt('.tile-bo .n') === '77 products', t.txt('.tile-bo .n'));
     await sleep(1700);
     check('cache: fresh cache (5 min) → no hub call at boot', t.calls.filter(c => c.url === HUB).length === 0);
     await t.go('#/pn/CAT00776');

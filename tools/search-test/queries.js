@@ -12,6 +12,8 @@ module.exports = {
     { q: 'shaver' }, { q: 'shavers', expect: (r, all) => r.n >= Math.floor(all['shaver'].n * 0.9) || 'shavers ' + r.n + ' vs shaver ' + all['shaver'].n },
     { q: 'drill' }, { q: 'drills', expect: (r, all) => r.n >= Math.floor(all['drill'].n * 0.9) || 'drills ' + r.n + ' vs drill ' + all['drill'].n },
     { q: 'omega anchor' }, { q: 'omega anchors', expect: (r, all) => r.n >= all['omega anchor'].n - 1 || 'omega anchors ' + r.n + ' vs ' + all['omega anchor'].n },
+    // Nate, 2026-09-24: the G-Force guide rods by the name reps use
+    { q: 'suture passing guide rod', expect: (r) => (r.n === 2 && ['86PS1000', '86PS1000S'].every(s => r.top.includes(s))) || 'suture passing guide rod: ' + r.n + ' hits, top ' + r.top.slice(0, 3).join(' ') },
     { q: 'screws' }, { q: 'cannulas' }, { q: 'reamers' }, { q: 'wands' }, { q: 'passers' }, { q: 'boxes' },
     // P9 short / sized
     { q: 'tt', expect: (r, all, raw) => (!r.top.some(s => TT_BAD.includes(s)) && r.skus.every(s => /(^|[^A-Z0-9])TT([^A-Z0-9]|$)/i.test(raw(s)))) || 'tt: a hit without the whole word TT, or trochlea/talus' },

@@ -310,7 +310,7 @@ const typeQ = async (t, v) => { const q = t.$('#q'); q.value = v; q.dispatchEven
 
   // ---- 6. coexistence with the Backorder Report (same hub URL family, both on) ----
   { const t = await boot({ bo: true }); await sleep(2800);
-    check('coexist: backorder tile + counts still paint', !!t.$('.tile-bo') && /1 on backorder/.test(t.txt('.tile-bo .n')), t.txt('.tile-bo .n'));
+    check('coexist: backorder tile + counts still paint', !!t.$('.tile-bo') && t.txt('.tile-bo .n') === '1 product', t.txt('.tile-bo .n'));
     await t.go('#/bo'); await sleep(40);
     check('coexist: #/bo still renders its sections', t.$$('.bo-gh').length === 3, t.$$('.bo-gh').length);
     await t.go('#/pn/3910500580'); await sleep(30); await t.flush();

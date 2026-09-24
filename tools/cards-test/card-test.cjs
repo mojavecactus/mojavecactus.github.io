@@ -136,9 +136,9 @@ const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) +
   // ---- P32 strip + viewer ----
   await t.go('#/pn/3910200080');
   check('P32 Biosteon: 4-photo strip with counter 1/4, below the spec table', t.$$('.pgal-s').length === 4 && t.txt('.pgal-n') === '1/4' && t.$('.pgal[data-n="4"]') && kids(t).indexOf('cd-photos') > kids(t).indexOf('cd-specs'));
-  check('hooks: #pcard[data-sku][data-kind], h1[data-hero=title], one img[data-hero=image] (the title photo)', t.$('h1[data-hero="title"]') && t.$$('img[data-hero="image"]').length === 1 && t.$('.pc-hero img[data-hero="image"]') && t.$('#pcard').getAttribute('data-sku') === '3910200080' && t.$('#pcard').getAttribute('data-kind') === 'item');
+  check('hooks: #pcard[data-sku][data-kind], h1[data-hero=title]; no photo beside the title (Nate, 2026-09-24)', t.$('h1[data-hero="title"]') && t.$$('img[data-hero="image"]').length === 0 && !t.$('.pc-hero') && t.$('#pcard').getAttribute('data-sku') === '3910200080' && t.$('#pcard').getAttribute('data-kind') === 'item');
   const ph = t.w.TBX_DEV.card.photoImgHTML('img/x.jpg', 'A "b"', 'class="photo"');
-  check('photoImgHTML: one helper builds every product photo (one <img>, escaped)', ph === '<img src="img/x.jpg" alt="A &quot;b&quot;" class="photo">' && t.$$('#pcard img').length === 5 && t.$$('#pcard img').every(i => i.hasAttribute('alt')));
+  check('photoImgHTML: one helper builds every product photo (one <img>, escaped)', ph === '<img src="img/x.jpg" alt="A &quot;b&quot;" class="photo">' && t.$$('#pcard img').length === 4 && t.$$('#pcard img').every(i => i.hasAttribute('alt')));
   t.$$('.pgal-s')[2].click(); await sleep(5);
   const V = t.w.TBX_DEV.card.viewer;
   check('P32 tap photo 3 → viewer on 3 / 4 with the card\'s whole set', !t.$('#lb').hidden && V.state().idx === 2 && V.state().n === 4 && t.txt('#lb-n') === '3 / 4' && t.$$('#lb-track .lb-s img').length === 4);
@@ -154,8 +154,8 @@ const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) +
   check('P32 viewer locks page scroll', t.w.document.body.style.overflow === 'hidden');
   t.w.document.dispatchEvent(new t.w.KeyboardEvent('keydown', { key: 'Escape' })); await sleep(5);
   check('P32 Esc closes and releases the lock', t.$('#lb').hidden && t.w.document.body.style.overflow === '');
-  t.$('.pc-hero').click(); await sleep(5);
-  check('P32 the title photo opens the viewer on photo 1 of 4', !t.$('#lb').hidden && V.state().idx === 0 && V.state().n === 4 && t.txt('#lb-n') === '1 / 4');
+  t.$$('.pgal-s')[0].click(); await sleep(5);
+  check('P32 the first strip photo opens the viewer on photo 1 of 4', !t.$('#lb').hidden && V.state().idx === 0 && V.state().n === 4 && t.txt('#lb-n') === '1 / 4');
   t.$('#lb-close').click(); await sleep(5);
   check('P32 Close closes', t.$('#lb').hidden && t.w.document.body.style.overflow === '');
   await t.go('#/about'); { const im = t.w.document.createElement('img'); im.src = 'favicon.svg'; t.$('#content').appendChild(im); im.click(); } await sleep(5); // R7 N4: the About logo is the credits-drawer button now; any other <img> in #content still opens alone
