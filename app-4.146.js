@@ -39,7 +39,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.145';
+  var APPVER = '4.146';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -243,7 +243,7 @@ var GLOSS = {
   }
   function boWhen(r) { // one line for a backordered row
     var w;
-    if (r.clearDate) w = boPast(r.clearDate) ? 'Clear date passed (was ' + boFmt(r.clearDate) + ')' : 'Est. full clear ' + boFmt(r.clearDate);
+    if (r.clearDate) w = boPast(r.clearDate) ? '<span class="bo-late">Clear date passed</span> (was ' + boFmt(r.clearDate) + ')' : 'Est. full clear ' + boFmt(r.clearDate); // P47: overdue in red
     else if (r.clearText) w = 'Est. full clear ' + esc(r.clearText);
     else return r.since ? 'On backorder since week of ' + boFmt(r.since) : 'No clear date given';
     if (r.asOf) w += ' <span class="bo-asof">per ' + boShort(r.asOf) + ' report</span>';
@@ -255,8 +255,9 @@ var GLOSS = {
     if (e.st.bo) lines.push('<div class="bo-line"><span class="bopill bo">Backorder</span><span class="bo-w">' + boWhen(e.bo) + '</span></div>' + (e.bo.note ? '<div class="bo-msg">' + esc(e.bo.note) + '</div>' : ''));
     if (e.st.ctl) lines.push('<div class="bo-line"><span class="bopill ctl">Controlled</span><span class="bo-w">Inventory controlled · 24–36 hr shipping delay</span></div>' + (e.ctl.msg ? '<div class="bo-msg">' + esc(e.ctl.msg) + '</div>' : ''));
     if (e.st.clr && !e.st.bo) lines.push('<div class="bo-line"><span class="bopill clr">Cleared</span><span class="bo-w">Cleared backorder · week of ' + boFmt(e.clr.clearedOn) + '</span></div>');
-    return '<div class="bobanner">' + lines.join('') + '<button class="bo-more" data-go="#/bo">Backorder Report &#x203A;</button></div>';
+    return '<div class="bobanner">' + lines.join('') + '<button class="bo-more" data-go="' + boReportRoute(sku) + '">Backorder Report &#x203A;</button></div>';
   }
+  function boReportRoute(sku) { return '#/bo?bq=' + encodeURIComponent(sku || ''); } // P46: the report, filtered to this part
   function boTileSub() {
     var d = BO.data;
     if (!d) return BO.err === 'offline' ? 'Offline — report not loaded yet' : 'Weekly report · tap to load';
@@ -296,17 +297,20 @@ var GLOSS = {
     if (kind === 'clr') a.sort(function (x, y) { if (x.clearedOn !== y.clearedOn) return x.clearedOn < y.clearedOn ? 1 : -1; var a1 = tt(x), b1 = tt(y); return a1 < b1 ? -1 : a1 > b1 ? 1 : 0; });
     return a;
   }
+  // P46/P47: the filter and section live in the entry (BOV, restored by route() from its record or ?bq= / ?bs=), the
+  // filter takes words in any order, and the header is one status line (Highspot inline) + one scrolling row of chips.
   function boScreen() {
-    setTitle('Backorder ', 'Report'); backBtn.hidden = false;
-    if (!boOn()) { render(emptyHTML('&#x1F4E6;', 'Backorder Report isn’t set up', 'This build has no report hub configured.', '')); return; }
-    var q = '', sec = 'all';
+    setTitle('Backorder Report', ''); backBtn.hidden = false; // P41: plain screen title
+    if (!boOn()) { render(emptyHTML(ICON.box, 'Backorder Report isn’t set up', 'This build has no report hub configured.', '')); return; }
+    var q = String(BOV.q || '').trim(), sec = /^(bo|ctl|clr)$/.test(BOV.sec || '') ? BOV.sec : 'all', urlT = null, myNav = NAV.cur;
+    BOV = { q: q, sec: sec };
     render('<div class="card bo-card">' +
       '<div class="bo-head"><div class="bo-hl"><div class="bo-title">Weekly Stryker Inventory Report</div><div class="cc-sub bo-sub" id="bo-sub"></div></div>' +
-      '<button id="bo-refresh" class="ct-help bo-rf" type="button" aria-label="Refresh">↻</button></div>' +
-      '<div class="bo-src" id="bo-src"></div>' +
-      '<input id="bo-q" class="cc-in" type="search" autocomplete="off" placeholder="Filter by part number or description…">' +
-      '<div class="bo-chips" id="bo-chips"></div>' +
-      '</div><div id="bo-body"></div>');
+      '<button id="bo-refresh" class="ct-help bo-rf" type="button" aria-label="Refresh">' + ICON.refresh + '</button></div>' +
+      '<input id="bo-q" class="cc-in" type="search" autocomplete="off" placeholder="Filter by part number or description…" aria-label="Filter the report" value="' + esc(q) + '">' +
+      '<div class="bo-chips" id="bo-chips" role="group" aria-label="Report sections"></div>' +
+      '</div><div id="bo-body"></div><div class="bo-src" id="bo-src">Updated automatically from the weekly Inventory Report email.</div>');
+    NAV.extra = function () { return { bq: q, bs: sec }; }; // this entry's record keeps the live filter (the URL may lag by 300 ms)
     function subLine() {
       var d = BO.data, s = '';
       if (!d) return BO.busy ? 'Loading…' : BO.err === 'offline' ? 'Offline — not loaded yet' : BO.err ? 'Couldn’t reach the report hub' : 'Loading…'; // P15
@@ -317,33 +321,46 @@ var GLOSS = {
       else if (BO.err === 'net' && d) s += ' · hub unreachable, showing saved report';
       return s || 'Loading…';
     }
-    function matches(r) {
+    function matches(r) { // P46: the whole query (dash- and zero-tolerant part numbers), or every word, in any order
       if (!q) return true;
       var cat = boCatalog(r.sku), hay = [r.sku, r.desc, r.note || '', r.msg || '', cat ? (cat.rec.t || cat.rec.name || '') : ''].join(' ');
-      var nq = nrm(q), nz = boKeyZ(q), nh = nrm(hay);
-      return (nq && nh.indexOf(nq) > -1) || (nz.length > 1 && nh.indexOf(nz) > -1) || hay.toLowerCase().indexOf(q.toLowerCase()) > -1;
+      var nq = nrm(q), nz = boKeyZ(q), nh = nrm(hay), low = hay.toLowerCase();
+      if ((nq && nh.indexOf(nq) > -1) || (nz.length > 1 && nh.indexOf(nz) > -1) || low.indexOf(q.toLowerCase()) > -1) return true;
+      var words = q.toLowerCase().split(/\s+/).filter(Boolean);
+      return words.length > 1 && words.every(function (t) {
+        var nt = nrm(t), zt = nt.replace(/^0+/, '');
+        return low.indexOf(t) > -1 || (nt && nh.indexOf(nt) > -1) || (zt.length > 1 && nh.indexOf(zt) > -1);
+      });
+    }
+    function syncURL() { // ?bq= / ?bs= in this entry's URL (Back, reload, shared links) — never another entry's
+      clearTimeout(urlT); urlT = null;
+      if (NAV.cur !== myNav || (location.hash || '').split('?')[0] !== '#/bo') return;
+      BOV = { q: q, sec: sec }; stWrite();
     }
     function draw() {
-      var body = document.getElementById('bo-body'), sub = document.getElementById('bo-sub'), chips = document.getElementById('bo-chips'), src = document.getElementById('bo-src');
+      var body = document.getElementById('bo-body'), sub = document.getElementById('bo-sub'), chips = document.getElementById('bo-chips');
       if (!body) return;
-      if (sub) sub.textContent = subLine();
-      if (src) src.innerHTML = 'Updated automatically from the weekly Inventory Report email.' +
-        (BO.data && BO.data.highspot ? '<br><a class="bo-hs" href="' + esc(BO.data.highspot) + '" target="_blank" rel="noopener">Full report on Highspot &#x203A;</a>' : '');
       var d = BO.data;
+      // P47: the status line carries the Highspot link; the "Updated automatically" note is the footer (#bo-src)
+      if (sub) sub.innerHTML = esc(subLine()) + (d && d.highspot ? '<span class="bo-dot"> · </span><a class="bo-hs" href="' + esc(d.highspot) + '" target="_blank" rel="noopener">Highspot&nbsp;&#x203A;</a>' : '');
       var qiD = document.getElementById('bo-q'); if (qiD) qiD.hidden = !d; if (chips) chips.hidden = !d; // P15: nothing to filter until a report exists
+      var src = document.getElementById('bo-src'); if (src) src.hidden = !d;
       if (!d) {
         if (chips) chips.innerHTML = '';
         body.innerHTML = BO.busy ? '<div class="cc-empty">Loading the report…</div>'
-          : BO.err === 'offline' ? emptyHTML('&#x1F4F5;', 'Offline', 'No report is saved on this phone yet — open this once with signal and it works offline after that.', '')
-          : emptyHTML('&#x1F4E6;', 'Couldn’t reach the report hub', 'Check your signal and try again.', '<button class="footlink" data-bo-retry="1">Try again &#x203A;</button>');
+          : BO.err === 'offline' ? emptyHTML(ICON.offline, 'Offline', 'No report is saved on this phone yet — open this once with signal and it works offline after that.', '')
+          : emptyHTML(ICON.box, 'Couldn’t reach the report hub', 'Check your signal and try again.', '<button class="footlink" data-bo-retry="1">Try again &#x203A;</button>');
         return;
       }
       var lists = { bo: boSorted('bo', d.backorders.filter(matches)), ctl: (d.controlled || []).filter(matches), clr: boSorted('clr', (d.cleared || []).filter(matches)) };
-      var tot = lists.bo.length + lists.ctl.length + lists.clr.length;
-      if (chips) chips.innerHTML = '<button class="bochip' + (sec === 'all' ? ' on' : '') + '" data-bo-sec="all">All · ' + tot + '</button>' +
-        [['bo', 'Backorder'], ['ctl', 'Controlled'], ['clr', 'Cleared']].map(function (p) {
-          return '<button class="bochip' + (sec === p[0] ? ' on' : '') + '" data-bo-sec="' + p[0] + '">' + p[1] + ' · ' + lists[p[0]].length + '</button>';
-        }).join('');
+      var tot = lists.bo.length + lists.ctl.length + lists.clr.length, sl = chips ? chips.scrollLeft : 0;
+      if (chips) {
+        chips.innerHTML = '<button class="bochip' + (sec === 'all' ? ' on' : '') + '" data-bo-sec="all" aria-pressed="' + (sec === 'all') + '">All · ' + tot + '</button>' +
+          [['bo', 'Backorder'], ['ctl', 'Controlled'], ['clr', 'Cleared']].map(function (p) {
+            return '<button class="bochip' + (sec === p[0] ? ' on' : '') + '" data-bo-sec="' + p[0] + '" aria-pressed="' + (sec === p[0]) + '">' + p[1] + ' · ' + lists[p[0]].length + '</button>';
+          }).join('');
+        chips.scrollLeft = sl;
+      }
       var html = '', wk = d.weekOf ? ' as of the week of ' + boFmt(d.weekOf) : '';
       function section(kind, label, empty) {
         if (sec !== 'all' && sec !== kind) return;
@@ -360,11 +377,11 @@ var GLOSS = {
     BO.redraw = draw;
     draw();
     var qi = document.getElementById('bo-q');
-    if (qi) qi.addEventListener('input', function () { q = qi.value.trim(); draw(); });
+    if (qi) qi.addEventListener('input', function () { q = qi.value.trim(); BOV = { q: q, sec: sec }; draw(); clearTimeout(urlT); urlT = setTimeout(syncURL, 300); });
     var card = content.querySelector('.bo-card');
     if (card) card.addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('[data-bo-sec]') : null; if (!b) return;
-      sec = b.getAttribute('data-bo-sec'); draw();
+      sec = b.getAttribute('data-bo-sec'); BOV = { q: q, sec: sec }; draw(); syncURL();
     });
     var rb = document.getElementById('bo-refresh'), bodyEl = document.getElementById('bo-body');
     function refresh(cb) {
@@ -685,13 +702,13 @@ var GLOSS = {
     inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryKey(); });
   }
   function usageScreen() {
-    setTitle('Team ', 'Usage'); backBtn.hidden = false;
-    if (!UGH) { render(emptyHTML('&#x1F4CA;', 'Usage isn’t set up', 'This build has no usage hub configured.', '')); return; }
+    setTitle('Team Usage', ''); backBtn.hidden = false;
+    if (!UGH) { render(emptyHTML(ICON.chart, 'Usage isn’t set up', 'This build has no usage hub configured.', '')); return; }
     if (!ugAdmin()) { usageGate(''); return; }
     var gen = ++UGD.gen;
     render('<div class="ug">' +
       '<div class="card ug-live"><div class="ug-lh"><span class="ug-dot" aria-hidden="true"></span><span class="ug-lt">Live</span><span class="ug-upd" id="ug-upd"></span>' +
-      '<button id="ug-rf" class="ct-help ug-rf" type="button" aria-label="Refresh">↻</button></div>' +
+      '<button id="ug-rf" class="ct-help ug-rf" type="button" aria-label="Refresh">' + ICON.refresh + '</button></div>' +
       '<div id="ug-livebody"></div></div>' +
       '<div class="grouphead ug-gh">Latest activity</div><div class="card ug-feed" id="ug-feed"></div>' +
       '<div class="ug-filters" id="ug-filters"></div>' +
@@ -706,7 +723,7 @@ var GLOSS = {
       if (upd) upd.textContent = UGD.busyL && !L ? 'loading…' : UGD.errL && !L ? '' : UGD.liveAt ? 'updated ' + sinceText(UGD.liveAt) + (UGD.errL ? ' · hub unreachable' : '') : '';
       if (!L) {
         body.innerHTML = UGD.busyL ? '<div class="cc-empty">Loading…</div>' :
-          emptyHTML('&#x1F4F5;', UGD.errL === 'offline' ? 'Offline' : 'Couldn’t reach the usage hub', 'Check your signal and tap ↻.', '');
+          emptyHTML(ICON.offline, UGD.errL === 'offline' ? 'Offline' : 'Couldn’t reach the usage hub', 'Check your signal and tap Refresh.', '');
         feed.innerHTML = ''; return;
       }
       body.classList.toggle('ug-stale', !!UGD.busyL);
@@ -788,7 +805,7 @@ var GLOSS = {
       var fv = S.favs || {}, sh = S.shares || {};
       h += list('Favorites & shares', [lrow('<b>Favorites added</b>', ugNum(fv.on || 0), (fv.off ? fv.off + ' removed' : ''), ''),
         lrow('<b>Cards shared</b>', ugNum((sh.img || 0) + (sh.link || 0) + (sh.copy || 0)), (sh.img || 0) + ' image · ' + (sh.link || 0) + ' link · ' + (sh.copy || 0) + ' text', '')]
-        .concat((S.topFavs || []).map(function (c) { var t = ugTitle(c.k); return lrow('★ ' + esc(t || c.k), ugNum(c.n), '<span class="mono">' + esc(c.k) + '</span>', ugHasCard(c.k) ? pnRoute(c.k) : ''); })), '');
+        .concat((S.topFavs || []).map(function (c) { var t = ugTitle(c.k); return lrow(ICON.starOn + ' ' + esc(t || c.k), ugNum(c.n), '<span class="mono">' + esc(c.k) + '</span>', ugHasCard(c.k) ? pnRoute(c.k) : ''); })), '');
       h += list('Phones & app versions', (S.platforms || []).map(function (p) { return lrow('<b>' + esc(p.k) + '</b>', ugNum(p.n), '', ''); })
         .concat((S.versions || []).map(function (v) { return lrow('App v' + esc(v.k) + (v.k === APPVER ? ' <span class="ug-pill ok">current</span>' : ''), ugNum(v.n), '', ''); })), 'No devices yet.');
       h += list('Most active phones', (S.deviceList || []).slice().sort(function (a, b) { return b.n - a.n; }).slice(0, 12).map(function (d) {
@@ -898,16 +915,16 @@ var GLOSS = {
           if (g.indexOf(ft) !== -1) g.forEach(function (o) { if (o !== ft) delete FILT[o]; });
         });
         FILT[ft] = 1;
-        if (CURCOUNT && CURCOUNT() === 0) { FILT = {}; FILT[ft] = 1; }
+        if (CURCOUNT && CURCOUNT() === 0) { var fp0 = FILT.fp; FILT = {}; FILT[ft] = 1; if (fp0) FILT.fp = fp0; }
       }
       if (CURVIEW) CURVIEW();
+      stWrite(); // P5: the chips live in the entry's URL (?t=…) as well as its record
       return;
     }
     var fpc = e.target.closest('[data-fp]');
     if (fpc) {
       FILT.fp = fpc.getAttribute('data-fp');
-      var fpBase = (location.hash || '').split('?')[0];
-      history.replaceState(null, '', fpBase + '?fp=' + encodeURIComponent(FILT.fp));
+      stWrite(); // ?fp=… (keeps the entry's nav id)
       if (CURVIEW) CURVIEW();
       return;
     }
@@ -919,7 +936,7 @@ var GLOSS = {
       try { localStorage.setItem('tbx_favs', JSON.stringify(favs().filter(function (x) { return x.route !== rt; }))); } catch (e2) {}
       try { ugEv('fav', (wasFav && wasFav.it && wasFav.it.sku) || decodeURIComponent(rt.replace(/^#\/pn\//, '')), 'off'); } catch (eUg) {}
       var uw = uf.closest('.rowwrap');
-      if (uw) { uf.innerHTML = '&#9734;'; uf.classList.add('off'); } else uf.hidden = true; // P14: "Remove from Favorites" on the not-found screen
+      if (uw) { uf.innerHTML = ICON.star; uf.classList.add('off'); } else uf.hidden = true; // P14: "Remove from Favorites" on the not-found screen
       setTimeout(function () {
         if (uw) uw.classList.add('bye');
         setTimeout(function () { if (content.classList.contains('homeview')) home(); }, 280);
@@ -927,6 +944,8 @@ var GLOSS = {
       if (wasFav) toastMsg('Removed from Favorites', 3000, { action: { label: 'Undo', fn: function () { toggleFav(wasFav); if (content.classList.contains('homeview')) home(); else if (!uw) uf.hidden = false; } } });
       return;
     }
+    var fa = e.target.closest('[data-favall]');
+    if (fa) { navX().favAll = fa.getAttribute('data-favall') === '1'; home(); return; } // P37: per history entry — Back keeps it open
     var fso = e.target.closest('[data-fsort]');
     if (fso) { try { localStorage.setItem('tbx_fsort', fso.getAttribute('data-fsort')); } catch (e8) {} home(); return; }
     var cr = e.target.closest('[data-clearrec]');
@@ -957,7 +976,7 @@ var GLOSS = {
       var f = JSON.parse(fv.getAttribute('data-fav'));
       toggleFav(f);
       fv.classList.toggle('on', isFav(f.route));
-      fv.textContent = isFav(f.route) ? '★ Favorited' : '☆ Favorite';
+      fv.innerHTML = isFav(f.route) ? ICON.starOn + 'Favorited' : ICON.star + 'Favorite';
       return;
     }
     var lm = e.target.closest('[data-lmenu]');
@@ -1264,15 +1283,30 @@ var GLOSS = {
   }
 
   // ---- shared fragments ----
-  function rowHTML(route, it, subline, hideSz) {
+  // P39: title with the size inline, the status / tag pills under it, then two lines of description. Text only: list rows
+  // never carry product photos (Nate's rule). P38: {stack:true} (Favorites / Recents) puts the part number above the title.
+  function rowHTML(route, it, subline, hideSz, opt) {
     var t = it.t || it.name || '', sz = hideSz ? '' : (it.sz || ''), ld = it.ld || '', uom = it.uom || '';
     var tags = boPillsHTML(it.sku, 2) + (it.tags || []).map(function (tg) { return '<span class="subtag">' + esc(tg) + '</span>'; }).join('');
     var line2 = ld ? '<span class="ld">' + esc(ld) + '</span>' :
                 (subline ? '<span class="ld dim2">' + esc(subline) + '</span>' : '');
+    var head = '<b class="ti">' + esc(t) + (sz ? ' <span class="sz">' + esc(sz) + '</span>' : '') + '</b>' + (tags ? '<span class="rtags">' + tags + '</span>' : '');
+    if (opt && opt.stack)
+      return '<button class="rowitem stack" data-go="' + route + '"><div class="rl"><span class="pnS mono">' + esc(it.sku || '') +
+        (uom ? '<span class="uomS"> · ' + esc(uom) + '</span>' : '') + '</span>' + head + line2 + '</div></button>';
     return '<button class="rowitem" data-go="' + route + '">' +
       '<div class="pnL mono">' + esc(it.sku || '') + (uom ? '<span class="uomL">' + esc(uom) + '</span>' : '') + '</div>' +
-      '<div class="rl"><b class="ti">' + esc(t) + (sz ? ' <span class="sz">' + esc(sz) + '</span>' : '') + '</b>' +
-      line2 + '</div>' + (tags ? '<div class="subtags">' + tags + '</div>' : '') + '</button>';
+      '<div class="rl">' + head + line2 + '</div></button>';
+  }
+  // P38: a saved favorite / recent shows the card's current title (renamed cards), falling back to what was saved;
+  // a retired number shows its new card's title and keeps its own number (tapping it explains the change)
+  function liveIt(sku, saved) {
+    saved = saved || {};
+    if (!sku) return saved;
+    var e = BYPN[nrm(sku)] || BYPNZ[nrm(sku).replace(/^0+/, '')], r = e ? recOf(e) : null;
+    if (r && r.hidden && r.moved && BYPN[nrm(r.moved)]) r = recOf(BYPN[nrm(r.moved)]);
+    if (!r) return saved;
+    return { t: r.t || r.name || saved.t, sz: r.sz || '', ld: r.ld || '', sku: saved.sku || sku, uom: r.uom || '', tags: r.tags || [] };
   }
   var SFILT = null, SSORT = 'rel', SALL = false;
   function askHTML(q, inline) { // P23: only when the payload has somewhere to send feedback (same test TBX_FEEDBACK_INIT uses)
@@ -1287,7 +1321,7 @@ var GLOSS = {
       '</b> \u2014 same product, new part number. <span class="pnm-why">Why &#x203A;</span></button>' : '';
     if (!hits.length) {
       SFILT = null;
-      return mvn + emptyHTML('&#x1F50D;', 'No matches for \u201c' + CURQ + '\u201d', 'Try fewer letters or a part-number fragment \u2014 dashes are optional.', askHTML(CURQ) + '<button class="footlink" data-act="scan">Scan the barcode instead &#x203A;</button>');
+      return mvn + emptyHTML(ICON.search, 'No matches for \u201c' + CURQ + '\u201d', 'Try fewer letters or a part-number fragment \u2014 dashes are optional.', askHTML(CURQ) + '<button class="footlink" data-act="scan">Scan the barcode instead &#x203A;</button>');
     }
     var counts = {};
     hits.forEach(function (h) { (h.buckets || []).forEach(function (b) { counts[b] = (counts[b] || 0) + 1; }); });
@@ -1299,14 +1333,15 @@ var GLOSS = {
     Object.keys(SPECF).forEach(function (k) { if (fks.indexOf(k) === -1) delete SPECF[k]; });
     var fbase = shown, fon = Object.keys(SPECF).length > 0;
     if (fon) shown = shown.filter(function (h) { return specPass(h, fb, null); });
-    var frow = fks.length ? facetRowHTML(fbase, fb, fks, shown.length) : '';
+    var fn = shown.length, frow = fks.length ? facetRowHTML(fbase, fb, fks, shown.length) : '';
     if (SSORT === 'sku') shown = shown.slice().sort(function (a, b) { return a.skun < b.skun ? -1 : a.skun > b.skun ? 1 : 0; });
+    // P21: the match count lives in the bucket chip ("Implants · 28 of 192"); with one bucket it is a plain count, not a chip
     var chips = '<div class="schips">' +
-      (avail.length > 1 ? '<button class="schip' + (!SFILT ? ' on' : '') + '" data-sf="">All &middot; ' + hits.length + '</button>' +
+      (avail.length > 1 ? '<button class="schip' + (!SFILT ? ' on' : '') + '" data-sf="" aria-pressed="' + !SFILT + '">All &middot; ' + hits.length + '</button>' +
         avail.map(function (b) {
-          return '<button class="schip' + (SFILT === b ? ' on' : '') + '" data-sf="' + esc(b) + '">' + esc(b) + ' &middot; ' + counts[b] + '</button>';
-        }).join('') : '<span class="schip on" style="pointer-events:none">' + hits.length + ' result' + (hits.length === 1 ? '' : 's') + '</span>') +
-      '<button class="schip sort' + (SSORT === 'sku' ? ' on' : '') + '" data-ssort="1" aria-pressed="' + (SSORT === 'sku') + '">' + (SSORT === 'sku' ? 'Part # A\u2013Z' : 'Best match') + ' &#x21C5;</button>' +
+          return '<button class="schip' + (SFILT === b ? ' on' : '') + '" data-sf="' + esc(b) + '" aria-pressed="' + (SFILT === b) + '">' + esc(b) + ' &middot; ' + (fon && b === fb ? fn + ' of ' + counts[b] : counts[b]) + '</button>';
+        }).join('') : '<span class="scount">' + (fon ? fn + ' of ' + hits.length : plural(hits.length, 'result')) + '</span>') +
+      '<button class="schip sort' + (SSORT === 'sku' ? ' on' : '') + '" data-ssort="1" aria-pressed="' + (SSORT === 'sku') + '">' + (SSORT === 'sku' ? 'Part # A\u2013Z' : 'Best match') + ICON.sort + '</button>' +
       '</div>';
     var fz = hits.fuzzy ? '<div class="sfuzzy" data-sfuzzy="1" role="status">No exact match \u2014 close spellings' + askHTML(CURQ, true) + '</div>' : ''; // P22
     var CAP = SALL ? shown.length : 60;
@@ -1315,8 +1350,19 @@ var GLOSS = {
       shown.slice(0, CAP).map(function (h) { return rowHTML(h.route, h.it, h.sub); }).join('') + '</div>' +
       (shown.length > CAP ? '<button class="showall" data-sall="1">Show all ' + shown.length + ' &#x203A;</button>' : '');
   }
+  // P21: re-render the results but keep both chip rows where the rep left them (a pill far right must not jump away),
+  // and mirror the state into the URL
+  function resultsRerender() {
+    var a = content.querySelector('.schips'), b = content.querySelector('.sfrow'), la = a ? a.scrollLeft : 0, lb = b ? b.scrollLeft : 0;
+    content.innerHTML = resultsHTML();
+    a = content.querySelector('.schips'); b = content.querySelector('.sfrow');
+    if (a) a.scrollLeft = la; if (b) b.scrollLeft = lb;
+    stWrite();
+  }
+  // P21: every spec filter in one horizontally scrolling row of pills; the pill shows its value, the real <select> covers
+  // the whole pill (a tap anywhere opens the native picker), and "Clear · N" leads the row while any filter is on
   function facetRowHTML(base, b, fks, nShown) {
-    var html = '', any = false;
+    var html = '', any = false, nOn = 0;
     fks.forEach(function (k) {
       var pool = base.filter(function (h) { return specPass(h, b, k); }), vals = {}, order = [];
       pool.forEach(function (h) {
@@ -1332,29 +1378,208 @@ var GLOSS = {
         if (a.n !== undefined && c.n !== undefined && a.n !== c.n) return a.n - c.n;
         return String(a.l).localeCompare(String(c.l));
       });
-      if (act) any = true;
+      if (act) { any = true; nOn++; }
+      var vl = act && vals[act] ? vals[act].l : 'Any';
       html += '<label class="sfsel' + (act ? ' on' : '') + '"><span class="sfk">' + esc(FACETLBL[k]) + '</span>' +
-        '<select data-sfk="' + k + '" aria-label="' + esc(FACETLBL[k]) + '"><option value="">Any</option>' +
+        '<span class="sfv">' + esc(vl) + '</span>' +
+        '<select data-sfk="' + k + '" aria-label="' + esc(FACETLBL[k] + ': ' + vl) + '"><option value="">Any</option>' +
         order.map(function (vk) {
           return '<option value="' + esc(vk) + '"' + (vk === act ? ' selected' : '') + '>' + esc(vals[vk].l) + ' (' + vals[vk].c + ')</option>';
         }).join('') + '</select></label>';
     });
     if (!html) return '';
-    return '<div class="sfrow">' + html + (any ? '<span class="sfcount">' + nShown + ' match' + (nShown === 1 ? '' : 'es') + '</span>' +
-      '<button class="sfclear" data-sfclear="1">Clear filters</button>' : '') + '</div>';
+    return '<div class="sfrow" role="group" aria-label="Filter results">' +
+      (any ? '<button type="button" class="sfx" data-sfclear="1" aria-label="Clear ' + plural(nOn, 'filter') + '">' + ICON.close + '<span>Clear · ' + nOn + '</span></button>' : '') +
+      html + '</div>';
   }
   try { SSORT = localStorage.getItem('tbx_ssort') === 'sku' ? 'sku' : 'rel'; } catch (e0) {}
   // ---- line icons (24 grid, 1.8 stroke, currentColor) for catalog UI; CC/F&A keep their own glyphs ----
+  // P41: one set replaces the emoji and symbol glyphs on catalog screens. fill is an attribute, never style= (CSP).
   var ICON = (function () {
     function s(d) { return '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>'; }
+    var starP = '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>';
     return {
       search: s('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.8-3.8"/>'),
       scan: s('<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10.5 8v8M13.5 8v5M16.5 8v8"/>'),
       share: s('<path d="M12 3.5v11"/><path d="M8.2 7.2L12 3.5l3.8 3.7"/><path d="M8 10.5H6.5a1.5 1.5 0 0 0-1.5 1.5v7a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5H16"/>'),
       more: s('<path d="M5.5 12h.01M12 12h.01M18.5 12h.01" stroke-width="3"/>'),
-      close: s('<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>')
+      close: s('<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>'),
+      box: s('<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>'),
+      offline: s('<path d="M5 12.6a10 10 0 0 1 5.2-2.5M13.7 10.1a10 10 0 0 1 5.3 2.5M1.9 9a15 15 0 0 1 5.3-3.2M11 4.6A15 15 0 0 1 22.1 9M8.5 16a5 5 0 0 1 7 0"/><path d="M12 20h.01" stroke-width="2.6"/><path d="M3 3l18 18"/>'),
+      chart: s('<path d="M3 20.5h18"/><path d="M6 17v-6M11 17V6M16 17v-9"/>'),
+      refresh: s('<path d="M20 11.5A8 8 0 1 1 17.7 6"/><path d="M20 4v5h-5"/>'),
+      star: s(starP),
+      starOn: s(starP.replace('<path ', '<path fill="currentColor" ')),
+      warn: s('<path d="M10.3 4.2L2.6 17.6A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-2.9L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01" stroke-width="2.6"/>'),
+      clock: s('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+      sort: s('<path d="M8 20V4M4.5 7.5L8 4l3.5 3.5M16 4v16M12.5 16.5L16 20l3.5-3.5"/>')
     };
   })();
+  // P41: one drill-down component below Home (category → groups → families): title, "N items", chevron
+  function drillRowHTML(go, title, n) {
+    return '<button class="rowitem drill" data-go="' + go + '"><div class="rl"><b class="ti">' + esc(title) + '</b>' +
+      '<span class="ld dim2">' + plural(n, 'item') + '</span></div><div class="ct">&#x203A;</div></button>';
+  }
+
+  // ---- P35/P5 navigation state: one record per catalog history entry ----
+  // history.state.nav holds the entry's id; its record (scroll + the first row on screen, search text / bucket chip /
+  // spec filters / Show all, family chips, the Backorder Report filter + section, per-screen extras) lives in
+  // sessionStorage 'tbx_nav' for this launch (it survives the update-banner reload, never leaves the phone).
+  // route() saves the entry it leaves and restores the one it lands on once render() has painted it.
+  // Cycle count / F&A entries (routeIsCT) are never tracked: no id, scrollRestoration stays 'auto', scroll-to-top as today.
+  var NAV = { cur: null, pending: null, store: null, seq: 0, x: {}, extra: null, run: null };
+  var NAV_KEY = 'tbx_nav', NAV_MAX = 60;
+  function navLoad() {
+    if (NAV.store) return NAV.store;
+    try { NAV.store = JSON.parse(sessionStorage.getItem(NAV_KEY) || '{}') || {}; } catch (e) { NAV.store = {}; }
+    if (typeof NAV.store !== 'object') NAV.store = {};
+    return NAV.store;
+  }
+  function navPersist() { // capped at NAV_MAX entries (oldest write goes first); memory stays the truth if storage throws
+    var s = navLoad(), ids = Object.keys(s);
+    if (ids.length > NAV_MAX) ids.sort(function (a, b) { return (s[a].t || 0) - (s[b].t || 0); }).slice(0, ids.length - NAV_MAX).forEach(function (k) { delete s[k]; });
+    try { sessionStorage.setItem(NAV_KEY, JSON.stringify(s)); } catch (e) {}
+  }
+  function navClone(o) { var r = {}; if (o && typeof o === 'object') for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) r[k] = o[k]; return r; }
+  function navX() { return NAV.x || (NAV.x = {}); } // per-entry extras: Home "Show all favorites" (favAll); cards may keep open sections here
+  function navDocTop(el) { var y = 0; while (el) { y += el.offsetTop || 0; el = el.offsetParent; } return y; } // layout top: the .vt fade-in transform can't skew it
+  function navHdr() { try { return document.getElementById('bar').getBoundingClientRect().bottom; } catch (e) { return 0; } }
+  function navAnchor() { // the first row / link fully below the header: a target that survives content above it changing height
+    if (!content) return null;
+    var top = navHdr(), els = content.querySelectorAll('[data-go]'), seen = {}, sy = window.scrollY || 0;
+    for (var i = 0; i < els.length; i++) {
+      var go = els[i].getAttribute('data-go'); seen[go] = (seen[go] || 0) + 1;
+      var vt = navDocTop(els[i]) - sy;
+      if (vt > window.innerHeight) break;
+      if (els[i].offsetHeight && vt >= top) return { go: go, n: seen[go] - 1, dy: Math.round(vt) };
+    }
+    return null;
+  }
+  function navFind(a) {
+    var els = content.querySelectorAll('[data-go]'), n = 0;
+    for (var i = 0; i < els.length; i++) if (els[i].getAttribute('data-go') === a.go) { if (n === a.n) return els[i]; n++; }
+    return null;
+  }
+  function navSave(id) { // the entry being left: read before anything in route() changes the page or the globals
+    if (!id) return;
+    var s = navLoad(), r = s[id] || {};
+    r.y = Math.max(0, Math.round(window.scrollY || document.documentElement.scrollTop || 0));
+    r.a = navAnchor(); r.t = Date.now(); r.sx = navRowsX();
+    r.f = { q: CURQ, sf: SFILT, sp: navClone(SPECF), sa: !!SALL, ft: navClone(FILT), x: NAV.x || {} };
+    if (typeof NAV.extra === 'function') { try { r.f.xs = NAV.extra(); } catch (e) {} }
+    s[id] = r; navPersist();
+  }
+  var NAV_ROWS = ['.schips', '.sfrow', '#bo-chips']; // sideways-scrolling chip rows: bucket chips, filter pills, report sections
+  function navRowsX() {
+    if (!content) return null;
+    var x = NAV_ROWS.map(function (sel) { var el = content.querySelector(sel); return el ? Math.round(el.scrollLeft || 0) : 0; });
+    return x.some(function (v) { return v > 0; }) ? x : null;
+  }
+  function navNoteBrowse() { // P6: where the screen under the results was when a search started on this entry
+    if (!NAV.cur) return;
+    var s = navLoad(), r = s[NAV.cur] || (s[NAV.cur] = {});
+    r.by = Math.round(window.scrollY || 0); r.ba = navAnchor(); r.t = Date.now(); navPersist();
+  }
+  function navEnter(track, keepX) { // -> this entry's saved record (Back / Forward / reload) or null (a new entry)
+    if (!track) { NAV.cur = null; NAV.x = {}; return null; }
+    var st = null; try { st = history.state; } catch (e) {}
+    var id = st && typeof st === 'object' ? st.nav : null, rec = id ? (navLoad()[id] || null) : null;
+    if (!id) {
+      id = (Date.now() % 1e9).toString(36) + '-' + (++NAV.seq).toString(36) + Math.random().toString(36).slice(2, 5);
+      try { var ns = navClone(st); ns.nav = id; history.replaceState(ns, '', location.href); } catch (e) {}
+    }
+    NAV.cur = id;
+    if (!keepX) { try { NAV.x = rec && rec.f && rec.f.x ? JSON.parse(JSON.stringify(rec.f.x)) : {}; } catch (e) { NAV.x = {}; } }
+    return rec;
+  }
+  function navCancel() { if (NAV.run) { clearInterval(NAV.run.iv); NAV.run = null; } }
+  function navRestore(r) { // scroll to the saved row (else y), and keep following it while late photos / data grow the page
+    navCancel();
+    if (r && r.sx) NAV_ROWS.forEach(function (sel, i) { var el = r.sx[i] && content.querySelector(sel); if (el) el.scrollLeft = r.sx[i]; }); // the chip rows too
+    if (!r || !(r.y > 0 || r.a)) return;
+    var t0 = Date.now(), last = -1, stable = 0, id = t0 + Math.random();
+    function maxY() { return Math.max(0, (document.documentElement.scrollHeight || 0) - window.innerHeight); }
+    function target() {
+      if (r.a) { var el = navFind(r.a); if (el) return Math.max(0, navDocTop(el) - r.a.dy); }
+      return r.y || 0;
+    }
+    function pending() { // photos at or above the viewport that are still loading
+      var im = content.querySelectorAll('img');
+      for (var i = 0; i < im.length; i++) if (!im[i].complete && navDocTop(im[i]) < (window.scrollY || 0) + window.innerHeight) return true;
+      return false;
+    }
+    function step() {
+      if (!NAV.run || NAV.run.id !== id) return;
+      var y = target(), m = maxY(), el = Date.now() - t0;
+      window.scrollTo(0, Math.min(y, m));
+      stable = (y === last && m >= y && Math.abs((window.scrollY || 0) - y) <= 2) ? stable + 1 : 0; last = y;
+      if ((el >= 1000 && stable >= 3 && !pending()) || el > 3000) navCancel(); // follow for at least 1 s, at most 3 s
+    }
+    NAV.run = { id: id, step: step, iv: setInterval(step, 80) };
+    step();
+  }
+  // a photo landing re-aims at once (load does not bubble: capture on the document)
+  document.addEventListener('load', function (e) { if (NAV.run && e.target && e.target.tagName === 'IMG') NAV.run.step(); }, true);
+  // user intent wins: a touch, wheel, key or click while a restore is still settling ends it (no late jump)
+  ['touchstart', 'wheel', 'keydown', 'mousedown'].forEach(function (evn) {
+    document.addEventListener(evn, function () { if (NAV.run) navCancel(); }, { passive: true, capture: true });
+  });
+
+  // ---- search & filter state in the URL (g1 state model; P5, P21) ----
+  //   #/<screen>?q=omega&c=Implants&dia=2.3mm&strands=2&all=1   search over any screen
+  //   #/fam/<cat>/<fam>?t=Needled,Sliding   #/fam/Disposables/FlowPort?fp=Touch   browse chips
+  //   #/bo?bq=<filter>&bs=bo|ctl|clr   the Backorder Report's own filter + section (q stays the global search)
+  // Fixed parameter order, so the same state always gives the same URL; replaceState only (no extra Back steps), and it
+  // keeps history.state (the entry's nav id). Precedence on arrival: the entry's own record (Back / Forward / reload),
+  // then these URL parameters (shared links, a record pruned or lost), then the defaults.
+  var ST_F = ['dia', 'len', 'mat', 'atype', 'needle', 'strands', 'stype', 'ssize', 'slen'];
+  var BOV = { q: '', sec: 'all' }; // the Backorder Report's filter + section, while #/bo is on screen
+  function stEnc(k, v) {
+    v = String(v);
+    if ((k === 'dia' || k === 'len') && /^mm:/.test(v)) return v.slice(3) + 'mm';
+    if (k === 'slen' && /^in:/.test(v)) return v.slice(3) + 'in';
+    if (k === 'strands' && /^n\d+$/.test(v)) return v.slice(1);
+    return v;
+  }
+  function stDec(k, v) {
+    var m;
+    if ((k === 'dia' || k === 'len') && (m = /^(\d+(?:\.\d+)?)mm$/.exec(v))) return 'mm:' + parseFloat(m[1]);
+    if (k === 'slen' && (m = /^(\d+(?:\.\d+)?)in$/.exec(v))) return 'in:' + parseFloat(m[1]);
+    if (k === 'strands' && /^\d+$/.test(v)) return 'n' + (+v);
+    return v;
+  }
+  function stRead(query) {
+    var o = { q: qparam(query, 'q'), c: qparam(query, 'c') || null, f: {}, all: qparam(query, 'all') === '1', t: [], fp: qparam(query, 'fp') || '',
+      bq: qparam(query, 'bq'), bs: qparam(query, 'bs') };
+    if (o.c && SBUCKETS.indexOf(o.c) === -1) o.c = null;
+    ST_F.forEach(function (k) { var v = qparam(query, k); if (v) o.f[k] = stDec(k, v); });
+    var t = qparam(query, 't'); if (t) o.t = t.split(',').filter(function (x) { return FTOKENS.some(function (tk) { return tk.t === x; }); });
+    if (!/^(bo|ctl|clr)$/.test(o.bs)) o.bs = '';
+    return o;
+  }
+  function stQuery(o) {
+    var p = [];
+    if (o.q) p.push('q=' + encodeURIComponent(o.q));
+    if (o.q && o.c) p.push('c=' + encodeURIComponent(o.c));
+    if (o.q) ST_F.forEach(function (k) { if (o.f && o.f[k]) p.push(k + '=' + encodeURIComponent(stEnc(k, o.f[k]))); });
+    if (o.q && o.all) p.push('all=1');
+    if (!o.q && o.t && o.t.length) p.push('t=' + o.t.map(encodeURIComponent).join(','));
+    if (o.fp) p.push('fp=' + encodeURIComponent(o.fp));
+    if (o.bq) p.push('bq=' + encodeURIComponent(o.bq));
+    if (o.bs && o.bs !== 'all') p.push('bs=' + o.bs);
+    return p.join('&');
+  }
+  function stWrite() { // mirror the live state into this entry's URL
+    try {
+      var base = (location.hash || '#/').split('?')[0];
+      if (routeIsCT(base)) return;
+      var bo = base === '#/bo';
+      var qs = stQuery({ q: CURQ, c: SFILT, f: SPECF, all: SALL, t: Object.keys(FILT).filter(function (k) { return k !== 'fp' && FILT[k]; }), fp: FILT.fp || '',
+        bq: bo ? BOV.q : '', bs: bo ? BOV.sec : '' });
+      var next = base + (qs ? '?' + qs : '');
+      if (next !== (location.hash || '#/')) history.replaceState(history.state, '', next);
+    } catch (eS) {}
+  }
 
   var VT_FROM = null;
   function vtOK() {
@@ -1366,6 +1591,8 @@ var GLOSS = {
       content.classList.remove('homeview');
       if (CURQ) { if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML; title.innerHTML = 'Search'; }
       content.innerHTML = CURQ ? resultsHTML() : browseHTML;
+      // P35: Back / Forward land where the entry was left — once this frame is painted, then following late content
+      if (NAV.pending) { var pr = NAV.pending; NAV.pending = null; (window.requestAnimationFrame || setTimeout)(function () { try { navRestore(pr); } catch (eNr) {} }); }
     };
     var from = VT_FROM; VT_FROM = null;
     if (from && from.isConnected && vtOK()) {
@@ -1410,13 +1637,13 @@ var GLOSS = {
     if (o.fav) {
       var on = isFav(o.fav.route);
       fav = '<button class="favbtn' + (on ? ' on' : '') + '" data-fav=\'' + esc(JSON.stringify(o.fav)) + '\'>' +
-        (on ? '★ Favorited' : '☆ Favorite') + '</button>' +
-        '<button class="favbtn" data-share="1">&#8599; Share</button>';
+        (on ? ICON.starOn + 'Favorited' : ICON.star + 'Favorite') + '</button>' +
+        '<button class="favbtn" data-share="1">' + ICON.share + 'Share</button>';
     }
     return '<div class="card"><h1>' + esc(o.name) + tagb + '</h1><div class="fam">' + esc(o.fam || '') + '</div>' +
       bob +
       (!built ? '<div class="nobuild">Not built yet</div>' : '') +
-      (o.warn ? '<div class="warn">&#9888; ' + esc(o.warn) + '</div>' : '') +
+      (o.warn ? '<div class="warn">' + ICON.warn + esc(o.warn) + '</div>' : '') +
       '<div class="pnblock"><div class="num mono">' + esc(o.sku) + '</div>' +
       '<button class="copy" data-copy="' + esc(o.sku) + '">Copy</button></div>' +
       (o.uom ? '<div class="uomline">Unit: <b>' + esc(o.uom) + '</b></div>' : '') +
@@ -1668,13 +1895,13 @@ var GLOSS = {
     b.id = 'expban';
     b.className = st.k;
     b.dataset.born = String(Date.now());
-    b.innerHTML = '<div class="xb-ico">' + (st.k === 'expired' ? '&#9888;' : '&#9200;') + '</div>' +
+    b.innerHTML = '<div class="xb-ico">' + (st.k === 'expired' ? ICON.warn : ICON.clock) + '</div>' +
       '<div class="xb-t">' + (st.k === 'expired' ? 'Last Scan is EXPIRED!' : 'Last Scan Expires Soon') + '</div>' +
       (st.k === 'soon' ? '<div class="xb-days">' + st.days + ' day' + (st.days === 1 ? '' : 's') + ' left</div>' : '') +
       (lot ? '<div class="xb-sub">Lot ' + esc(lot) + '</div>' : '') +
       (feStr ? '<div class="xb-sub">Exp ' + esc(feStr) + '</div>' : '') +
       (st.k === 'expired' ? '<div class="xb-dn">Do not use</div>' : '') +
-      '<button id="expban-x" aria-label="Dismiss">&#x2715;</button>';
+      '<button id="expban-x" aria-label="Dismiss">' + ICON.close + '</button>';
     document.body.appendChild(b);
   }
   document.addEventListener('click', function (e) {
@@ -1694,7 +1921,7 @@ var GLOSS = {
     b.dataset.route = pnRoute(stub.moved); // the popup belongs to the current card: any other route closes it
     b.setAttribute('role', 'dialog'); b.setAttribute('aria-modal', 'true'); b.setAttribute('aria-labelledby', 'pnm-h');
     b.innerHTML = '<div class="pnm-card">' +
-      '<button class="pnm-x" data-pnm-close="1" aria-label="Dismiss">&#x2715;</button>' +
+      '<button class="pnm-x" data-pnm-close="1" aria-label="Dismiss">' + ICON.close + '</button>' +
       '<div class="pnm-eyebrow" id="pnm-h">Part number changed</div>' +
       '<div class="pnm-map"><div class="pnm-pn"><span>Old</span><b class="mono">' + esc(stub.sku) + '</b></div>' +
       '<div class="pnm-arrow" aria-hidden="true">&#x2192;</div>' +
@@ -2090,14 +2317,14 @@ var GLOSS = {
     return '<div class="a2hs"><span class="ai">' +
       '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.9" stroke-linecap="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M12 9v6M9 12h6"/></svg></span>' +
       '<span class="at"><b>Add to Home Screen</b><span>Full screen, works offline, one tap from your phone</span></span>' +
-      '<button class="ago" data-act="a2hs">How</button><button class="ax" data-act="a2hs-x" aria-label="Dismiss">&#x2715;</button></div>';
+      '<button class="ago" data-act="a2hs">How</button><button class="ax" data-act="a2hs-x" aria-label="Dismiss">' + ICON.close + '</button></div>';
   }
   function a2hsSheet() {
     var sh = document.getElementById('a2hs-sheet');
     if (!sh) {
       sh = document.createElement('div');
       sh.id = 'a2hs-sheet';
-      // P52: iOS 26+ Safari puts Share under the ⋯ menu next to the address bar; pick the steps by Safari's Version/ token
+      // P52: iOS 26+ Safari puts Share under the More (three dots) menu next to the address bar; pick the steps by Safari's Version/ token
       var ua = navigator.userAgent || '';
       var ios = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
       var sv = +((/Version\/(\d+)/.exec(ua) || [])[1] || 0), safari = /Safari\//.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(ua);
@@ -2143,17 +2370,17 @@ var GLOSS = {
     var s = e.target.closest && e.target.closest('[data-act="scan"]');
     if (s) { var sb = document.getElementById('scanbtn'); if (sb) sb.click(); return; }
     var ss = e.target.closest && e.target.closest('[data-ssort]');
-    if (ss) { SSORT = SSORT === 'sku' ? 'rel' : 'sku'; try { localStorage.setItem('tbx_ssort', SSORT); } catch (e7) {} content.innerHTML = resultsHTML(); return; }
+    if (ss) { SSORT = SSORT === 'sku' ? 'rel' : 'sku'; try { localStorage.setItem('tbx_ssort', SSORT); } catch (e7) {} resultsRerender(); return; }
     var sa = e.target.closest && e.target.closest('[data-sall]');
-    if (sa) { SALL = true; content.innerHTML = resultsHTML(); return; }
+    if (sa) { SALL = true; resultsRerender(); return; }
     var sfc = e.target.closest && e.target.closest('[data-sfclear]');
-    if (sfc) { SPECF = {}; content.innerHTML = resultsHTML(); return; }
+    if (sfc) { SPECF = {}; resultsRerender(); return; }
     var sc = e.target.closest && e.target.closest('.schip');
     if (sc) {
       var nf = sc.getAttribute('data-sf') || null;
       if (nf !== SFILT) SPECF = {};
       SFILT = nf;
-      content.innerHTML = resultsHTML();
+      resultsRerender();
       return;
     }
     var wi = e.target.closest && e.target.closest('#wncard .wn-i[data-go]');
@@ -2196,18 +2423,20 @@ var GLOSS = {
       '<span class="ct">&#x203A;</span></button>';
     var fv = favs(), fsort = 'recent';
     try { fsort = localStorage.getItem('tbx_fsort') === 'az' ? 'az' : 'recent'; } catch (e0) {}
-    if (fsort === 'az') fv = fv.slice().sort(function (a, b) { var x = ((a.it && a.it.t) || a.label || ''), y = ((b.it && b.it.t) || b.label || ''); return x.localeCompare(y); });
-    var favHTML = fv.length ? '<div class="eyebrow ebrow"><span>Favorites</span>' + (fv.length > 1 ? '<button class="clearrec" data-fsort="' + (fsort === 'az' ? 'recent' : 'az') + '">' + (fsort === 'az' ? 'A\u2013Z \u00b7 sort by recent' : 'Recent \u00b7 sort A\u2013Z') + '</button>' : '') + '</div><div class="list">' + fv.map(function (f) {
-      var it = f.it || { t: f.label, sku: f.pn };
-      return '<div class="rowwrap">' + rowHTML(f.route, it, '') +
-        '<button class="rwact" data-unfav-route="' + esc(f.route) + '" aria-label="Remove favorite">&#9733;</button></div>';
-    }).join('') + '</div>' : '';
+    // P38: rows show the card's current title (liveIt), part number stacked above it; P37: the first 8 + "Show all"
+    var fvIt = function (f) { var s = f.it || { t: f.label, sku: f.pn }; return liveIt(s.sku || f.pn || '', s); };
+    if (fsort === 'az') fv = fv.slice().sort(function (a, b) { return String(fvIt(a).t || '').localeCompare(String(fvIt(b).t || '')); });
+    var FAV_N = 8, favAll = !!navX().favAll, fvShow = favAll ? fv : fv.slice(0, FAV_N);
+    var favHTML = fv.length ? '<div class="eyebrow ebrow"><span>Favorites</span>' + (fv.length > 1 ? '<button class="clearrec" data-fsort="' + (fsort === 'az' ? 'recent' : 'az') + '">' + (fsort === 'az' ? 'A\u2013Z \u00b7 sort by recent' : 'Recent \u00b7 sort A\u2013Z') + '</button>' : '') + '</div><div class="list">' + fvShow.map(function (f) {
+      return '<div class="rowwrap">' + rowHTML(f.route, fvIt(f), '', false, { stack: true }) +
+        '<button class="rwact" data-unfav-route="' + esc(f.route) + '" aria-label="Remove favorite">' + ICON.starOn + '</button></div>';
+    }).join('') + '</div>' + (fv.length > FAV_N ? '<button class="showall" data-favall="' + (favAll ? '0' : '1') + '" aria-expanded="' + favAll + '">' + (favAll ? 'Show fewer' : 'Show all ' + fv.length + ' favorites &#x203A;') + '</button>' : '') : '';
     var rc = recents();
     var recHTML = rc.length ? '<div class="eyebrow ebrow"><span>Recent</span><button class="clearrec" data-clearrec="1">Clear all</button></div><div class="list">' + rc.slice(0, 6).map(function (r) {
-      return '<div class="rowwrap">' + rowHTML(pnRoute(r.sku), { t: r.label, sku: r.sku }, '') +
-        '<button class="rwact rwx" data-unrec="' + esc(r.sku) + '" aria-label="Remove from recents">&#x2715;</button></div>';
+      return '<div class="rowwrap">' + rowHTML(pnRoute(r.sku), liveIt(r.sku, { t: r.label, sku: r.sku }), '', false, { stack: true }) +
+        '<button class="rwact rwx" data-unrec="' + esc(r.sku) + '" aria-label="Remove from recents">' + ICON.close + '</button></div>';
     }).join('') + '</div>' : '';
-    var hint = (!fv.length && !rc.length) ? '<div class="emp" style="padding:6px 12px 2px"><span>Cards you open show up here as Recents \u2014 tap &#9734; on any card to pin it to Favorites.</span></div>' : '';
+    var hint = (!fv.length && !rc.length) ? '<div class="emp home-hint"><span>Cards you open show up here as Recents \u2014 tap ' + ICON.star + ' Favorite on any card to pin it to Favorites.</span></div>' : '';
     render(hint + favHTML + recHTML + '<div class="eyebrow">Browse</div><div class="tiles">' + tiles + '</div>' +
       a2hsHTML() +
       '<div class="foot">Works offline once loaded &middot; <span class="ugver" data-ugtap="1">v' + APPVER + '</span> &middot; ' + esc(D.built) +
@@ -2227,26 +2456,17 @@ var GLOSS = {
         if (a === 'Other') return 1; if (b === 'Other') return -1;
         return a.localeCompare(b);
       });
-      var tiles = icats.filter(function (c) { return catCount(c); }).map(function (c) {
-        return '<button class="tile" data-go="#/cat/' + encodeURIComponent(c) + '">' +
-          '<span class="tl"><b>' + esc(c) + '</b><span class="n">' + plural(catCount(c), 'item') + '</span></span>' +
-          '<span class="ct">&#x203A;</span></button>';
-      }).join('');
-      render('<div class="tiles">' + tiles + '</div>');
+      render('<div class="list">' + icats.filter(function (c) { return catCount(c); }).map(function (c) { // P41: drill rows, not tiles
+        return drillRowHTML('#/cat/' + encodeURIComponent(c), c, catCount(c));
+      }).join('') + '</div>');
       return;
     }
     setTitle('Arthroscopy', '');
     render('<div class="list">' +
-      '<button class="rowitem" data-go="#/dgrp/' + encodeURIComponent('Arthroscopy capital') + '">' +
-      '<div class="rl"><b class="ti">Arthroscopy Capital</b>' +
-      '<span class="ld dim2">' + plural(capArthro().length, 'item') + '</span></div><div class="ct">&#x203A;</div></button>' +
-      '<button class="rowitem" data-go="#/fam/' + encodeURIComponent('Disposables') + '/' + encodeURIComponent('CrossFlow arthroscopy pump') + '">' +
-      '<div class="rl"><b class="ti">Pump Tubing</b>' +
-      '<span class="ld dim2">' + plural(pumpTubing().length, 'item') + '</span></div><div class="ct">&#x203A;</div></button>' +
-      '<button class="rowitem" data-go="#/probes"><div class="rl"><b class="ti">SERFAS RF Wands</b>' +
-      '<span class="ld dim2">' + plural(D.probes.length, 'item') + '</span></div><div class="ct">&#x203A;</div></button>' +
-      '<button class="rowitem" data-go="#/shavers"><div class="rl"><b class="ti">Shaver Blades &amp; Burs</b>' +
-      '<span class="ld dim2">' + plural(D.shavers.length, 'item') + '</span></div><div class="ct">&#x203A;</div></button>' +
+      drillRowHTML('#/dgrp/' + encodeURIComponent('Arthroscopy capital'), 'Arthroscopy Capital', capArthro().length) +
+      drillRowHTML('#/fam/' + encodeURIComponent('Disposables') + '/' + encodeURIComponent('CrossFlow arthroscopy pump'), 'Pump Tubing', pumpTubing().length) +
+      drillRowHTML('#/probes', 'SERFAS RF Wands', D.probes.length) +
+      drillRowHTML('#/shavers', 'Shaver Blades & Burs', D.shavers.length) +
       '</div>');
   }
   var DISP_GROUPS = {
@@ -2298,7 +2518,7 @@ var GLOSS = {
   function dispGroupsScreen(cat) {
     cat = GROUPED[cat] ? cat : 'Disposables';
     var cfg = GROUPED[cat];
-    setTitle(cfg.title[0], cfg.title[1]); backBtn.hidden = false;
+    setTitle(cfg.title.join(''), ''); backBtn.hidden = false; // P41: plain screen titles
     var famGroup = dispFamGroup(cat), counts = {};
     D.items.forEach(function (it) {
       if (it.hidden || (it.cat !== cat && it.cat2 !== cat)) return;
@@ -2306,11 +2526,7 @@ var GLOSS = {
       counts[g] = (counts[g] || 0) + 1;
     });
     var names = Object.keys(counts).sort();
-    render('<div class="tiles">' + names.map(function (g) {
-      return '<button class="tile" data-go="#/dgrp/' + encodeURIComponent(g) + '">' +
-        '<span class="tl"><b>' + esc(g) + '</b><span class="n">' + plural(counts[g], 'item') + '</span></span>' +
-        '<span class="ct">&#x203A;</span></button>';
-    }).join('') + '</div>');
+    render('<div class="list">' + names.map(function (g) { return drillRowHTML('#/dgrp/' + encodeURIComponent(g), g, counts[g]); }).join('') + '</div>');
   }
   function dispGroupScreen(g) {
     var cat = catOfGroup(g), cfg = GROUPED[cat];
@@ -2327,9 +2543,7 @@ var GLOSS = {
     if (order.length === 1) return famScreen(cat, order[0]);
     order.sort();
     render('<div class="list">' + order.map(function (f) {
-      return '<button class="rowitem" data-go="#/fam/' + encodeURIComponent(cat) + '/' + encodeURIComponent(f) + '">' +
-        '<div class="rl"><b class="ti">' + esc(f) + '</b><span class="ld dim2">' + plural(fams[f], 'item') + '</span></div>' +
-        '<div class="ct">&#x203A;</div></button>';
+      return drillRowHTML('#/fam/' + encodeURIComponent(cat) + '/' + encodeURIComponent(f), f, fams[f]);
     }).join('') + '</div>');
   }
   function catScreen(c) {
@@ -2341,12 +2555,10 @@ var GLOSS = {
       fams[it.fam]++;
     });
     if (order.length === 1) return famScreen(c, order[0]);
-    var parts = c.split(' '); setTitle(parts[0] + ' ', parts.slice(1).join(' ')); backBtn.hidden = false;
+    setTitle(c, ''); backBtn.hidden = false; // P41: plain screen titles ("Corkscrew Anchors", not an amber second word)
     order.sort();
     render('<div class="list">' + order.map(function (f) {
-      return '<button class="rowitem" data-go="#/fam/' + encodeURIComponent(c) + '/' + encodeURIComponent(f) + '">' +
-        '<div class="rl"><b class="ti">' + esc(f) + '</b><span class="ld dim2">' + plural(fams[f], 'item') + '</span></div>' +
-        '<div class="ct">&#x203A;</div></button>';
+      return drillRowHTML('#/fam/' + encodeURIComponent(c) + '/' + encodeURIComponent(f), f, fams[f]);
     }).join('') + '</div>');
   }
   function slOf(it) {
@@ -2423,9 +2635,7 @@ var GLOSS = {
     setTitle(f, '');
     if (order.length) {
       render('<div class="list">' + order.map(function (s) {
-        return '<button class="rowitem" data-go="#/sub/' + encodeURIComponent(c) + '/' + encodeURIComponent(f) + '/' + encodeURIComponent(s) + '">' +
-          '<div class="rl"><b class="ti">' + esc(s) + '</b><span class="ld dim2">' + plural(subs[s], 'item') + '</span></div>' +
-          '<div class="ct">&#x203A;</div></button>';
+        return drillRowHTML('#/sub/' + encodeURIComponent(c) + '/' + encodeURIComponent(f) + '/' + encodeURIComponent(s), s, subs[s]);
       }).join('') + '</div>');
       return;
     }
@@ -2456,7 +2666,7 @@ var GLOSS = {
   }
   function itemCard(it) {
     backBtn.hidden = false;
-    var parts = it.cat.split(' '); setTitle(parts[0] + ' ', parts.slice(1).join(' '));
+    setTitle(it.cat, ''); // P41: plain screen title
     CUR_IT = it;
     var chips = [];
     if (it.sz) chips.push({ t: it.sz });
@@ -2503,14 +2713,14 @@ var GLOSS = {
       fav: { route: pnRoute(it.sku), it: { t: it.t || it.name, sz: it.sz || '', ld: it.ld || '', sku: it.sku } } }));
   }
   function probeCard(p) {
-    setTitle('SERFAS ', 'RF Wands'); backBtn.hidden = false;
+    setTitle('SERFAS RF Wands', ''); backBtn.hidden = false;
     CUR_IT = p;
     render(specCard({ name: p.name, fam: p.fam, sku: p.sku, uom: p.uom, tags: p.tags, specs: p.specs, imgs: p.imgs, imgFull: p.imgFull, note: p.note,
       src: p.src,
       fav: { route: pnRoute(p.sku), it: { t: p.name, sku: p.sku } } }));
   }
   function shaverCard(s) {
-    setTitle('Shaver ', 'Blades'); backBtn.hidden = false;
+    setTitle('Shaver Blades', ''); backBtn.hidden = false;
     CUR_IT = s;
     render(specCard({ name: s.name, fam: (s.fam ? s.fam + ' series' : 'Shaver blades & burs'), sku: s.sku, uom: s.uom, tags: s.tags, specs: s.specs, imgs: s.imgs, imgFull: s.imgFull, warn: s.warn,
       note: s.note, src: s.src,
@@ -2551,7 +2761,7 @@ var GLOSS = {
         '<div class="tip"><b>Search smart.</b> Part numbers work with or without dashes.</div>' +
         '<div class="tip"><b>Scan the label.</b> The barcode button reads any package barcode &mdash; the card opens with lot and expiration shown.</div>' +
         '<div class="tip"><b>Zoom the fine print.</b> Tap any product photo to view it fullscreen; pinch or double-tap to zoom.</div>' +
-        '<div class="tip"><b>Save your go-tos.</b> Tap &#9734; Favorite on any card to pin it to Favorites at the top of home.</div>' +
+        '<div class="tip"><b>Save your go-tos.</b> Tap ' + ICON.star + ' Favorite on any card to pin it to Favorites at the top of home.</div>' +
         '<div class="tip"><b>Take it offline.</b> Once loaded, everything works with zero signal &mdash; photos finish saving in the background (see Offline photos above).</div>' +
         '<div class="tip"><b>Install it.</b> Add the site to your home screen for the full app experience. <button class="footlink" data-act="a2hs" style="padding:0">Show me how &#x203A;</button></div>' +
       '</div>' +
@@ -2608,7 +2818,7 @@ var GLOSS = {
     render(html);
   }
   function probesScreen() {
-    setTitle('SERFAS ', 'RF Wands'); backBtn.hidden = false;
+    setTitle('SERFAS RF Wands', ''); backBtn.hidden = false;
     var html = '', last = null, open = false;
     D.probes.forEach(function (p) {
       if (p.fam !== last) {
@@ -2629,13 +2839,11 @@ var GLOSS = {
   }
   function shSize(s) { var m = String(shDia(s)).match(/([\d.]+)/); return m ? parseFloat(m[1]) : 999; }
   function shaversScreen() {
-    setTitle('Shaver ', 'Blades & Burs'); backBtn.hidden = false;
+    setTitle('Shaver Blades & Burs', ''); backBtn.hidden = false;
     var counts = {};
     D.shavers.forEach(function (s) { var f = s.fam || 'Formula'; counts[f] = (counts[f] || 0) + 1; });
     render('<div class="list">' + SHFAMS.slice().sort().filter(function (fm) { return counts[fm]; }).map(function (fm) {
-      return '<button class="rowitem" data-go="#/shaverfam/' + encodeURIComponent(fm) + '">' +
-        '<div class="rl"><b class="ti">' + esc(fm) + '</b><span class="ld dim2">' + plural(counts[fm], 'item') + '</span></div>' +
-        '<div class="ct">&#x203A;</div></button>';
+      return drillRowHTML('#/shaverfam/' + encodeURIComponent(fm), fm, counts[fm]);
     }).join('') + '</div>');
   }
   function shaverFamScreen(fam) {
@@ -7287,16 +7495,32 @@ var GLOSS = {
   // P6/P24: route({ soft: true }) redraws the current screen in place when the search box is cleared — for real, so the
   // Backorder Report and the usage dashboard (which fill themselves after render()) get their data and listeners back.
   // It is not a new visit: no usage "view", What's New and the family chips stay, and the page returns to where it was
-  // scrolled before the search started (SOFT_Y).
+  // scrolled before the search started (the entry's record, P35; SOFT_Y when there is none).
   var SOFT_Y = 0;
+  // Cycle count, F&A and the territory screens: the navigation-state code never touches these entries (P35/P36 fence).
+  function routeIsCT(h) {
+    h = String(h || '').split('?')[0];
+    return h === '#/cc' || h === '#/cc/fops' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0 || h.indexOf('#/fa2') === 0;
+  }
   function route(ev) {
     var soft = !!(ev && ev.soft === true);
     if (!soft) { try { ugRoute(); } catch (eUg) {} } // anonymous usage: log the screen / card before anything renders
     var raw = location.hash || '#/';
     var qi = raw.indexOf('?');
     var query = qi > -1 ? raw.slice(qi + 1) : '';
-    if (qparam(query, 'q') !== CURQ) { SALL = false; SPECF = {}; }
-    CURQ = qparam(query, 'q');
+    // P35/P5: save the entry being left (its scroll and filters, read before anything below changes them), then pick up
+    // this entry's own record. Cycle count / F&A entries are not tracked and keep scrollRestoration 'auto'.
+    var navCT = routeIsCT(qi > -1 ? raw.slice(0, qi) : raw), rec = null;
+    try { if (!soft && NAV.cur) navSave(NAV.cur); } catch (eN0) {}
+    try { rec = navEnter(!navCT, soft); } catch (eN1) { rec = null; }
+    NAV.pending = null; navCancel(); NAV.extra = null;
+    try { if ('scrollRestoration' in history) history.scrollRestoration = navCT ? 'auto' : 'manual'; } catch (eN2) {}
+    var qNew = qparam(query, 'q'), ST = null, rf = !soft && rec && rec.f ? rec.f : null;
+    if (!navCT && !soft) { try { ST = stRead(query); } catch (eSt) { ST = null; } }
+    if (rf && rf.q === qNew) { SFILT = rf.sf || null; SPECF = navClone(rf.sp); SALL = !!rf.sa; } // Back / Forward / reload: this entry's filters
+    else if (ST && ST.q) { SFILT = ST.c; SPECF = ST.f; SALL = ST.all; }                         // a shared or reloaded search link
+    else if (qNew !== CURQ) { SALL = false; SPECF = {}; }                                       // a new entry with a different query starts clean (as today)
+    CURQ = qNew;
     if (qInput && qInput.value !== CURQ) qInput.value = CURQ;
     try { qUi(); } catch (eQ) {}
     var h = qi > -1 ? raw.slice(0, qi) : raw;
@@ -7323,7 +7547,13 @@ var GLOSS = {
       }
       return null;
     };
-    if (!soft) { SOFT_Y = 0; window.scrollTo(0, 0); }
+    if (soft) { // P6: back to where the screen under the results was when the search started
+      NAV.pending = rec && rec.by != null ? { y: rec.by, a: rec.ba } : (SOFT_Y ? { y: SOFT_Y, a: null } : null);
+    } else {
+      SOFT_Y = 0;
+      if (rec && (rec.y > 0 || rec.a)) NAV.pending = rec; // P35: restored by render() once the screen is drawn
+      else { window.scrollTo(0, 0); if (rec && rec.sx) NAV.pending = rec; } // (at the top, but the chip rows were scrolled)
+    }
     try { closeOverlays(); } catch (eOv) {}
     var xb = document.getElementById('expban');
     if (xb && Date.now() - (+xb.dataset.born || 0) > 1500) xb.remove();
@@ -7333,12 +7563,22 @@ var GLOSS = {
     CURREFRESH = null;
     try { if (PTR_RESET) PTR_RESET(); } catch (ePtr) {} // the pull-to-refresh arrow never follows you to the next screen
     homeBtn.classList.add('away');
-    if (!soft) FILT = {};
+    if (!soft) { // P5: family chips come back with the entry (its record, else ?t= in the URL)
+      FILT = rf && rf.ft ? navClone(rf.ft) : {};
+      if (!rf && ST) ST.t.forEach(function (k) { FILT[k] = 1; });
+      delete FILT.fp;
+    }
     CURVIEW = null;
     var fpFilt = qparam(query, 'fp'); if (fpFilt) FILT.fp = fpFilt;
     var gp0 = document.getElementById('glosspanel'); if (gp0) gp0.hidden = true;
     if (document.body) document.body.classList.remove('gloss-on');
-    var inCT = (h === '#/cc' || h === '#/cc/fops' || h === '#/fa' || h === '#/ct' || h === '#/teams' || h === '#/signup' || h.indexOf('#/team/') === 0 || h.indexOf('#/fa2') === 0);
+    var inCT = navCT;
+    if (!inCT && !soft) { // P46: the Backorder Report's filter + section (record, else ?bq= / ?bs=)
+      var xs = rf && rf.xs ? rf.xs : null;
+      BOV = xs && typeof xs.bq === 'string' ? { q: xs.bq, sec: /^(bo|ctl|clr)$/.test(xs.bs || '') ? xs.bs : 'all' }
+        : { q: ST ? ST.bq : '', sec: ST && ST.bs ? ST.bs : 'all' };
+      if (rf) stWrite(); // the URL follows the restored state (self-heals a URL that fell behind)
+    }
     if (!inCT) ccStop();
     ccBar(inCT); // catalog search + info-card scanner hidden everywhere inside CT screens
     if (h.indexOf('#/fa2') !== 0) fa2Wide(false);
@@ -7388,7 +7628,7 @@ var GLOSS = {
     if (h === '#/scan') {
       home();
       setTimeout(function () {
-        history.replaceState(null, '', '#/');
+        try { history.replaceState(history.state, '', '#/'); } catch (eSc) {} // keeps the entry's nav id (P35)
         var sb = document.getElementById('scanbtn');
         if (sb) sb.click();
       }, 350);
@@ -7404,8 +7644,32 @@ var GLOSS = {
     if ((m = h.match(/^#\/shaver\/(\d+)$/))) return legacyRedirect('shaver', +m[1]);
     return home();
   }
-  backBtn.addEventListener('click', function () { history.length > 1 ? history.back() : (location.hash = '#/'); });
+  function goBack() { history.length > 1 ? history.back() : (location.hash = '#/'); }
+  backBtn.addEventListener('click', goBack);
   homeBtn.addEventListener('click', function () { location.hash = '#/'; });
+  // P36: the same Back within thumb reach in the bottom bar — shown exactly when the header Back is (the header one stays)
+  (function () {
+    var bb = document.getElementById('bb-back'); if (!bb) return;
+    bb.addEventListener('click', function () { try { var a = document.activeElement; if (a && a.blur && a !== document.body) a.blur(); } catch (e) {} goBack(); });
+    var sync = function () { var hid = !!backBtn.hidden; if (bb.hidden !== hid) { bb.hidden = hid; qPh(); } };
+    try { new MutationObserver(sync).observe(backBtn, { attributes: true, attributeFilter: ['hidden'] }); } catch (e) {}
+    bb.hidden = !!backBtn.hidden;
+  })();
+  // P36/P11: the longest placeholder that fits the search box as it is now (Back shown or not, 320–430 pt, landscape)
+  function qPh() {
+    try {
+      var q = document.getElementById('q'); if (!q || !q.clientWidth) return;
+      var cs = getComputedStyle(q), room = q.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - 14; // 14: what engines keep for a search field's own clear area
+      var c = qPh.c || (qPh.c = document.createElement('canvas').getContext('2d'));
+      var opts = ['Search name or part number', 'Search name or part #', 'Search or part #', 'Search'];
+      for (var i = 0; i < opts.length; i++) {
+        var w = c ? (c.font = cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily, c.measureText(opts[i]).width) : opts[i].length * (parseFloat(cs.fontSize) || 17) * 0.5;
+        if (w <= room || i === opts.length - 1) { if (q.placeholder !== opts[i]) q.placeholder = opts[i]; return; }
+      }
+    } catch (e) {}
+  }
+  window.addEventListener('resize', function () { qPh(); });
+  (window.requestAnimationFrame || setTimeout)(qPh);
 
   // ---- bottom search wiring ----
   content = document.getElementById('content');
@@ -7416,33 +7680,28 @@ var GLOSS = {
     var k = sel.getAttribute('data-sfk');
     if (sel.value) SPECF[k] = sel.value; else delete SPECF[k];
     SALL = false;
-    content.innerHTML = resultsHTML();
+    resultsRerender();
   });
-  var qClear = document.getElementById('qclear');
+  var qClear = document.getElementById('qclear'), qRecent = document.getElementById('qrecent');
   qInput.addEventListener('input', function () {
     var was = CURQ;
     CURQ = qInput.value.trim();
     if (!CURQ) { SFILT = null; SPECF = {}; }
-    if (!was && CURQ) SOFT_Y = Math.round(window.scrollY || 0); // P6: where the screen under the results was
-    // only q is rewritten: the screen's own parameters (FlowPort ?fp=…) stay in the URL while typing and after clearing
-    var parts = (location.hash || '#/').split('?'), base = parts[0];
-    var keep = (parts[1] || '').split('&').filter(function (p) { return p && !/^q=/.test(p); });
-    if (CURQ) keep.push('q=' + encodeURIComponent(CURQ));
-    history.replaceState(null, '', base + (keep.length ? '?' + keep.join('&') : ''));
+    if (CURQ !== was) SALL = false; // "Show all" belongs to one query
+    if (!was && CURQ) { SOFT_Y = Math.round(window.scrollY || 0); try { navNoteBrowse(); } catch (eNb) {} } // P6: where the screen under the results was
+    stWrite(); // the query (and its filters) in the URL; the screen's own parameters (fp, t, bq, bs) stay
     if (CURQ) {
       if (title.innerHTML !== 'Search') LAST_TITLE = title.innerHTML;
       title.innerHTML = 'Search';
       content.innerHTML = resultsHTML();
     } else {
       LAST_TITLE = '';
-      var y = SOFT_Y;
       route({ soft: true }); // P6/P24: redraw the screen underneath for real (the saved HTML was an empty shell on #/bo and #/usage)
-      if (y) window.scrollTo(0, y);
     }
     qUi();
   });
   // P24: a clear button that is there whenever the box has text (iOS shows its own only while the box is focused)
-  function qUi() { if (qClear) qClear.hidden = !qInput.value; }
+  function qUi() { if (qClear) qClear.hidden = !qInput.value; qrShow(); if (!qInput.value) qPh(); }
   if (qClear) {
     var keepFocus = function (e) { e.preventDefault(); }; // the tap must not blur the box: the keyboard stays if it was up
     qClear.addEventListener('pointerdown', keepFocus); qClear.addEventListener('mousedown', keepFocus);
@@ -7452,9 +7711,59 @@ var GLOSS = {
       if (had) qInput.focus();
     });
   }
+  // P20: recent searches — the last 5 committed terms, on this phone, shown as chips while the empty box is focused.
+  // Committed = a result opened while the query is on screen, the keyboard's Search key with results showing, or a recent
+  // chip tapped; never on idle, so a half-typed "omeg" is never kept. Chips are .qrc, not .schip (that one sets the bucket).
+  var QR_KEY = 'tbx_qrecent', QR_MAX = 5;
+  function qrList() {
+    try { var a = JSON.parse(localStorage.getItem(QR_KEY) || '[]'); return Array.isArray(a) ? a.filter(function (x) { return typeof x === 'string' && x; }).slice(0, QR_MAX) : []; }
+    catch (e) { return []; }
+  }
+  function qrNote(term) {
+    try {
+      var t = String(term || '').replace(/\s+/g, ' ').trim().slice(0, 60); if (t.length < 2) return;
+      var list = qrList().filter(function (x) { return x.toLowerCase() !== t.toLowerCase(); });
+      list.unshift(t); localStorage.setItem(QR_KEY, JSON.stringify(list.slice(0, QR_MAX)));
+    } catch (e) {}
+  }
+  function qrShow() {
+    if (!qRecent) return;
+    var list = document.activeElement === qInput && !qInput.value && !(document.body && document.body.classList.contains('ct-chrome-off')) ? qrList() : [];
+    if (document.body) document.body.classList.toggle('qr-on', list.length > 0); // the feedback bubble would sit on the strip
+    if (!list.length) { if (!qRecent.hidden) { qRecent.hidden = true; qRecent.innerHTML = ''; } return; }
+    qRecent.innerHTML = '<span class="qrl">Recent</span>' + list.map(function (t) { return '<button type="button" class="qrc" data-qr="' + esc(t) + '">' + esc(t) + '</button>'; }).join('') +
+      '<button type="button" class="qrx" data-qrclear="1">Clear</button>';
+    qRecent.hidden = false;
+  }
+  if (qRecent) {
+    var keepFocus2 = function (e) { e.preventDefault(); }; // a tap on the strip must not blur the box first
+    qRecent.addEventListener('pointerdown', keepFocus2); qRecent.addEventListener('mousedown', keepFocus2);
+    qRecent.addEventListener('click', function (e) {
+      var c = e.target.closest && e.target.closest('.qrc');
+      if (c) { var t = c.getAttribute('data-qr'); qInput.value = t; qInput.dispatchEvent(new Event('input')); qrNote(t); qInput.blur(); qUi(); return; }
+      if (e.target.closest && e.target.closest('[data-qrclear]')) {
+        var had = qrList();
+        try { localStorage.removeItem(QR_KEY); } catch (e1) {}
+        qInput.blur(); qUi();
+        toastMsg('Recent searches cleared', 3000, { action: { label: 'Undo', fn: function () { try { localStorage.setItem(QR_KEY, JSON.stringify(had)); } catch (e2) {} } } });
+      }
+    });
+  }
+  qInput.addEventListener('focus', qUi);
+  qInput.addEventListener('blur', function () { setTimeout(qUi, 150); }); // late enough that a tap on a chip always lands
+  content.addEventListener('click', function (e) { if (CURQ && e.target.closest && e.target.closest('.rowitem[data-go^="#/pn/"]')) qrNote(CURQ); }, true);
+  qInput.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    if (CURQ && content.querySelector('.list .rowitem')) qrNote(CURQ);
+    qInput.blur(); // the Search key drops the keyboard and shows the results
+  });
   function tbxStart() {
     window.addEventListener('hashchange', route); route();
     window.__tbxRouted = true; // boot succeeded: later errors are bugs, not cache corruption (see heal)
+    // P35: the entry on screen is saved when the app is hidden or reloaded (update banner), not only when it is left
+    var navHide = function () { try { if (NAV.cur) navSave(NAV.cur); } catch (e) {} };
+    window.addEventListener('pagehide', navHide);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) navHide(); });
     setTimeout(showTour, 700);
     // P51: pay the first-card costs while Home is on screen (Safari has no requestIdleCallback).
     setTimeout(function () {
@@ -8226,7 +8535,9 @@ window.TBX_FEEDBACK_INIT = function (cfg) {
   var SHOT = null;
 
   var fab = document.createElement('button');
-  fab.id = 'fb-fab'; fab.setAttribute('aria-label', 'Send feedback'); fab.innerHTML = '&#x1F4AC;';
+  fab.id = 'fb-fab'; fab.setAttribute('aria-label', 'Send feedback');
+  // P41: the line chat icon (same 24-grid set as the app's ICON map, which lives inside TBX_BOOT)
+  fab.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 5h15a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 3.5V17h-2A1.5 1.5 0 0 1 3 15.5v-9A1.5 1.5 0 0 1 4.5 5z"/><path d="M8 11h.01M12 11h.01M16 11h.01" stroke-width="2.6"/></svg>';
   document.body.appendChild(fab);
   // P12 (Nate's spec): the bubble fades out while the page is moving and fades back once it has been still for 600 ms.
   // Only a finger, a wheel or the momentum after them counts; programmatic scrolls (route, scrollIntoView) do not.

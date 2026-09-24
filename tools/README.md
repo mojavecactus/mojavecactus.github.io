@@ -99,7 +99,10 @@ from the global install. Suites marked *data.js* need the decrypted catalog (ste
     The SPECIAL expectations must pass; every printed DIFF is a ranking change to review. The JSON is
     derived from the catalog, so `tools/search-test/*.json` is gitignored — never commit it.
   - `node tools/search-test/ui.js` — the search box: "1 item", the clear ✕, clearing re-runs the screen
-    underneath (Backorder Report, family chips), "No exact match — close spellings", "Ask Nate to add …".
+    underneath (Backorder Report, family chips), "No exact match — close spellings", "Ask Nate to add …", the filters
+    in one row of pills with "Clear · N" and the count in the bucket chip (P21), recent searches with Clear + Undo (P20),
+    and the search state in the URL (`#/?q=…&c=Implants&dia=2.3mm`, `?t=` family chips): Back restores it, deep links
+    paint it.
 - `node tools/cards-test/release-a.cjs` (*data.js*) — product cards: navigation closes the photo viewer and
   share sheet, the spec grid, shared/copied text carries the name, REF and link.
 - `tools/platform-test/` (Playwright; serves the repo root through its own Pages-like server):
@@ -136,3 +139,26 @@ from the global install. Suites marked *data.js* need the decrypted catalog (ste
     - a pull on the Backorder Report fetches it once and spins its ↻; offline, the arrow still clears.
   - WebKit (the iPhone engine) needs a Playwright WebKit build: set `PLAYWRIGHT_BROWSERS_PATH` to the folder
     holding it. Never run `playwright install` into system paths for this.
+- `tools/nav-test/` — navigation (Back keeps your place, bottom-bar Back, lists, report) and the cycle-count / F&A fence.
+  No decrypted data needed.
+  - `APP_PW=<catalog pw> [ENGINE=chromium|webkit] [PORT=n] node tools/nav-test/e2e.js [jobRegex]` (Playwright) — search →
+    filter → card → Back restores the query, chip, filters, rows and scroll (P5); long lists two levels deep, Back ×2 and
+    Forward, a card whose photos land late, the Backorder Report's filter/section/scroll (P35, P46); the bottom-bar Back,
+    the 9 pt shorter catalog header, 320 pt and landscape (P36); favorites 8 + Show all kept on Back, current titles (P37,
+    P38); text-only list rows, plain titles, drill rows (P39, P41); 44 pt targets (P40); the report header (P47); filter
+    row and recent searches in a real browser (P20, P21); plus the 4.143 fixes. Run both engines: WebKit is where Back
+    used to land at the top. `MODE=baseline` asserts the old bugs instead (point `ROOT` at an old checkout).
+  - `node tools/nav-test/ccfa-identity.js <live site> <candidate site> [--json out.json]` (jsdom) — drives cycle count and
+    F&A through the same 26 steps on both builds (fake hubs and stored logins, no passwords) and fails on any difference
+    on a CC/F&A step: content, header, bottom bar, body classes, pull-to-refresh, scrolls, `history.state`,
+    `scrollRestoration`, hub traffic. The 3 catalog steps may differ. Live site: `git archive origin/main | tar -x -C <dir>`.
+  - `node tools/nav-test/emoji-scan.js [--check]` — glyph inventory of the bundle and index.html; `--check` fails if a
+    catalog screen uses an emoji / symbol glyph instead of the line-icon set (`ICON`). The keep list (cycle count / F&A,
+    the pull-to-refresh arrow, Android's menu glyph, "Sent ✓") is in the file.
+  - `node tools/nav-test/unit.js [--site <dir>]` (jsdom, fixture catalog, no passwords) — nav ids, the 60-record cap and
+    untracked CC/F&A entries (P35); current titles with saved fallback and retired numbers (P38); 8 favorites + Show
+    all kept on Back (P37); `#/bo?bq=` filtering, words in any order, `?bs=` and Back to the report (P46, P47). 23 checks.
+  - Catalog history entries carry `history.state.nav`; their scroll, filters and screen extras live in sessionStorage
+    `tbx_nav` for the launch. Cycle count / F&A entries (`routeIsCT`) are never tracked and keep `scrollRestoration`
+    'auto'. Any `history.replaceState` must pass `history.state` (or call `stWrite()`), or the entry loses its place (the
+    variant-chip swap drops it on purpose: the new card starts at the top).

@@ -108,7 +108,8 @@ async function boot(opts) {
     check('bo: zero-tolerant match links 279401100 to the 0279401100 card', zero && zero.getAttribute('data-go') === '#/pn/0279401100' && /90-S Max/.test(zero.textContent), zero && zero.getAttribute('data-go'));
     const clr = t.$$('#bo-body .list')[2].querySelectorAll('.bo-row');
     check('bo: cleared entries say week of Sep 7; 234020235 links to the leading-zero card', clr.length === 11 && Array.from(clr).every(r => /week of Sep 7/.test(r.textContent)) && Array.from(clr).find(r => /234020235/.test(r.textContent)).getAttribute('data-go') === '#/pn/0234020235');
-    check('bo: Highspot link at the top of the report card', (() => { const a = t.$('#bo-src a.bo-hs'); return a && a.getAttribute('target') === '_blank' && /highspot\.com/.test(a.href) && /Updated automatically/.test(t.txt('#bo-src')) && !t.$('#bo-body .foot'); })());
+    // P47: the Highspot link sits in the status line at the top of the card; "Updated automatically…" is the footer under the lists
+    check('bo: Highspot link at the top of the report card', (() => { const a = t.$('#bo-sub a.bo-hs'); return a && a.getAttribute('target') === '_blank' && /highspot\.com/.test(a.href) && /Updated automatically/.test(t.txt('#bo-src')) && !t.$('#bo-src a') && !t.$('#bo-body .foot'); })());
     // chips
     t.$('[data-bo-sec="ctl"]').click(); await sleep(20);
     check('bo: chip narrows to one section', t.$$('.bo-gh').length === 1 && /Inventory controlled/.test(t.txt('.bo-gh')) && t.$('[data-bo-sec="ctl"]').classList.contains('on'));
@@ -141,7 +142,7 @@ async function boot(opts) {
     await t.go('#/pn/CAT00776');
     check('card: Backorder pill in the banner, none in the title', t.$('.bobanner .bopill.bo') && !t.$('.card h1 .bopill') && !t.$('.bobanner .bopill.ctl'));
     const ban = t.$('.bobanner');
-    check('card: banner with date, report stamp, note, link to the report', ban && /(Est\. full clear|Clear date passed \(was) Sep 15/.test(ban.textContent) && /per 9\/9 report/.test(ban.textContent) && /September 14/.test(ban.textContent) && ban.querySelector('[data-go="#/bo"]'), ban && ban.textContent.replace(/\s+/g, ' '));
+    check('card: banner with date, report stamp, note, link to the report', ban && /(Est\. full clear|Clear date passed \(was) Sep 15/.test(ban.textContent) && /per 9\/9 report/.test(ban.textContent) && /September 14/.test(ban.textContent) && ban.querySelector('[data-go="#/bo?bq=CAT00776"]'), ban && ban.textContent.replace(/\s+/g, ' ')); // P46: filtered to the part
     check('card: banner sits above the part-number block', (() => { const c = t.$('.card'); const kids = Array.from(c.children).map(e => e.className); return kids.indexOf('bobanner') < kids.indexOf('pnblock') && kids.indexOf('bobanner') > kids.indexOf('fam'); })());
     await t.go('#/pn/CAT02438');
     check('card: CAT02438 — Controlled + Cleared pills and both banner lines', t.$$('.bobanner .bopill').length === 2 && t.$('.bobanner .bopill.ctl') && t.$('.bobanner .bopill.clr') && /24–36 hr/.test(t.txt('.bobanner')) && /Cleared backorder · week of Sep 7/.test(t.txt('.bobanner')) && /restock again next week/.test(t.txt('.bobanner')));
@@ -155,7 +156,7 @@ async function boot(opts) {
     t.$('#q').value = 'flowport'; t.$('#q').dispatchEvent(new t.w.Event('input')); await sleep(30);
     const rows = t.$$('.rowitem');
     const r776 = rows.find(r => /CAT00776/.test(r.textContent)), r2438 = rows.find(r => /CAT02438/.test(r.textContent));
-    check('rows: search results carry pills (CAT00776 Backorder; CAT02438 Controlled+Cleared)', r776 && r776.querySelector('.subtags .bopill.bo') && r2438 && r2438.querySelectorAll('.subtags .bopill').length === 2, rows.length);
+    check('rows: search results carry pills (CAT00776 Backorder; CAT02438 Controlled+Cleared)', r776 && r776.querySelector('.rtags .bopill.bo') && r2438 && r2438.querySelectorAll('.rtags .bopill').length === 2, rows.length); // P39: pills under the title
     check('rows: rows without status have no pill', rows.filter(r => !r.querySelector('.bopill')).length > 0);
     t.$('#q').value = ''; t.$('#q').dispatchEvent(new t.w.Event('input')); await sleep(30);
     await t.go('#/fam/' + encodeURIComponent('Disposables') + '/' + encodeURIComponent('FlowPort'));

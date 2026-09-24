@@ -243,6 +243,12 @@
   --sal:calc(env(safe-area-inset-left, 0px) / var(--z));
   --sar:calc(env(safe-area-inset-right, 0px) / var(--z));
 }
+/* P36 catalog header: a 44 pt row with the title where it is today (pad 10 -> 16, row 56 -> 44, rule gap 8 -> 5: 9 pt
+   shorter), so the iOS 27 top blur still clears it. Catalog screens only: cycle count / F&A (body.ct-chrome-off) keep
+   56 + 10 and 52 pt buttons. Set on body, not :root, so the landscape rule further down still wins in landscape. */
+body:not(.ct-chrome-off){--hdr-row:calc(44px / var(--z)); --hdr-pad:calc(16px / var(--z));}
+body:not(.ct-chrome-off) #bar::after{margin-top:5px;}
+body:not(.ct-chrome-off) .navbtn{width:44px; height:44px; border-radius:12px;}
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
 html,body{margin:0; background:var(--ink); color:var(--bone);
   font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;}
@@ -309,20 +315,26 @@ main{padding:16px 14px calc(var(--sab) + 28px); max-width:640px; margin:0 auto;}
 .bobanner .bo-msg{color:#C9C5BE; font-size:13px; line-height:1.45; margin:6px 0 4px;}
 .bo-asof{color:var(--muted); font-weight:500; white-space:nowrap;}
 .bobanner .bo-more{display:block; margin-top:8px; border:0; background:none; color:var(--amber); font-weight:700; font-size:12.5px; padding:0; cursor:pointer; font-family:inherit;}
-.bo-card{position:relative; padding:16px; margin-bottom:12px;}
+.bo-card{position:relative; padding:14px 16px 12px; margin-bottom:12px;}
 .bo-head{display:flex; align-items:flex-start; gap:10px; padding-right:40px;}
 .bo-title{font-size:var(--fs-md); font-weight:700; color:var(--bone);}
 .bo-sub{margin:3px 0 0;}
 .bo-rf{top:14px; right:14px; transition:opacity .15s;}
 .bo-rf.spin{animation:bo-spin .8s linear infinite; opacity:.85;}
 @keyframes bo-spin{to{transform:rotate(360deg);}}
-.bo-chips{display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0; padding:2px 0 0;}
+.bo-chips{display:flex; flex-wrap:nowrap; gap:8px; margin:10px -16px 0; padding:2px 16px 2px; overflow-x:auto; overscroll-behavior-x:contain;
+  -webkit-overflow-scrolling:touch; scrollbar-width:none;} /* P47: one row that scrolls; the next chip peeks at the edge */
+.bo-chips::-webkit-scrollbar{display:none;}
 .bo-chips[hidden]{display:none;}
 .bochip{flex:none; border:1.5px solid #5a564e; background:var(--panel); color:var(--bone); font:inherit; font-weight:700; font-size:12.5px; border-radius:999px; padding:7px 12px; cursor:pointer; white-space:nowrap; transition:transform .08s ease;}
 .bochip:active{transform:scale(.94);}
-.bochip.on{border-color:#9CC9FF; color:#0F1F33; background:#9CC9FF;}
+.bochip.on{border-color:var(--amber); color:#1E1E1E; background:var(--amber);} /* P47: amber like every other active chip */
 .bo-card .cc-in{margin:12px 0 0;}
-.bo-src{margin-top:10px; font-size:12.5px; line-height:1.45; color:var(--muted);}
+.bo-src{margin:22px 4px 4px; font-size:12.5px; line-height:1.45; color:var(--muted); text-align:center;} /* P47: footer under the lists */
+.bo-late{color:var(--danger); font-weight:700;} /* P47: "Clear date passed" */
+.bo-sub .bo-dot{color:var(--muted);}
+.bo-sub .bo-hs{position:relative; display:inline; margin:0; padding:0; font-size:inherit;} /* P47: Highspot in the status line */
+.bo-sub .bo-hs::after{content:""; position:absolute; left:-6px; right:-6px; top:-13px; bottom:-11px;} /* P40 */
 .bo-hs{display:inline-block; margin-top:6px; padding:4px 0; color:var(--amber); font-weight:700; font-size:13.5px; text-decoration:underline; text-underline-offset:3px;}
 .bo-hs:active{opacity:.7;}
 .bo-gh{margin-top:18px;}
@@ -347,7 +359,7 @@ button.tile, .rowitem{cursor:pointer; width:100%;}
   border:1px solid var(--line); border-radius:var(--radius); padding:13px 14px;
   color:var(--bone); text-align:left; font:inherit; min-height:56px;
   box-shadow:0 1px 2px rgba(0,0,0,.14);}
-.pnL{flex:none; width:104px; color:var(--amber); font-size:12.5px; line-height:1.3; word-break:break-all;}
+.pnL{flex:none; width:88px; color:var(--amber); font-size:12.5px; line-height:1.3; word-break:break-all; align-self:flex-start; padding-top:2px;}
 .rl .ti{color:var(--bone);}
 .rl .sz{color:#7CCFE8; font-weight:700; font-size:13.5px;}
 .rl .ld{display:block; color:#B9B5AE; font-size:var(--fs-sm); margin-top:2px; line-height:1.35;}
@@ -397,6 +409,14 @@ button.tile, .rowitem{cursor:pointer; width:100%;}
 .rowitem .rl b{display:block; font-size:15px; font-weight:600; line-height:1.3;}
 .rowitem .rl > .ld{display:block; color:var(--muted); font-size:12.5px; margin-top:2px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* P39: two description lines in catalog list rows (report rows keep their own layout); pills in a row under the title */
+.rowitem:not(.bo-row) .rl > .ld{display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; white-space:normal; overflow-wrap:anywhere;}
+.rl .rtags{display:flex; flex-wrap:wrap; gap:4px; margin:4px 0 1px;}
+.rowitem .rl b .sz{margin-left:2px;}
+/* P38: Favorites / Recents rows: part number above the title, the title gets the full width */
+.rowitem.stack{padding:11px 14px;}
+.rowitem.stack .pnS{display:block; color:var(--amber); font-size:12.5px; line-height:1.3; margin-bottom:2px; letter-spacing:.2px;}
+.rowitem.stack .uomS{color:var(--muted); font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size:11.5px;}
 .rowitem .pn{color:var(--amber); font-size:13px; flex:none;}
 .rowitem .ct{color:var(--muted); flex:none; font-size:18px;}
 .rowitem:active{background:var(--panel2);}
@@ -469,20 +489,30 @@ body:not(.ct-chrome-off) #updbanner{left:max(14px, var(--sal, 0px)); right:max(1
 .schip:active{transform:scale(.94);}
 .schip.sort{margin-left:auto; border-style:dashed;}
 .schip.sort.on{border-style:solid;}
+.schip.sort .ico{width:15px; height:15px; margin-left:5px; vertical-align:-3px;}
 .showall{display:block; width:100%; margin:8px 0 14px; min-height:44px; border:1px solid var(--line); background:var(--panel); color:var(--amber); font-weight:700; font-size:14px; border-radius:12px; cursor:pointer;}
 .schip.on{border-color:var(--amber); color:#1E1E1E; background:var(--amber);}
-.sfrow{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:4px 2px 2px;}
-.sfsel{position:relative; display:inline-flex; align-items:center; gap:6px; border:1.5px solid #5a564e; background:var(--panel);
-  color:var(--bone); border-radius:999px; padding:0 26px 0 12px; min-height:36px; font-size:12.5px; cursor:pointer;}
+/* P21: every spec filter in one horizontally scrolling row, bleeding to the screen edges; the fade says "more" */
+.sfrow{display:flex; flex-wrap:nowrap; gap:8px; align-items:center; overflow-x:auto; overscroll-behavior-x:contain;
+  -webkit-overflow-scrolling:touch; scrollbar-width:none; margin:2px -14px 0; padding:2px 40px 8px 14px;
+  -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent); mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent);}
+.sfrow::-webkit-scrollbar{display:none;}
+.sfx{flex:none; display:inline-flex; align-items:center; gap:5px; min-height:44px; border:1.5px solid var(--amber); background:rgba(253,181,21,.12); color:var(--amber);
+  border-radius:999px; padding:0 14px 0 11px; font:inherit; font-weight:700; font-size:12.5px; white-space:nowrap; cursor:pointer;}
+.sfx .ico{width:15px; height:15px; vertical-align:0;}
+.sfx:active{transform:scale(.96);}
+.scount{flex:none; align-self:center; color:var(--muted); font-size:12.5px; font-weight:700; padding:0 4px; white-space:nowrap;}
+.sfsel{position:relative; flex:none; display:inline-flex; align-items:center; gap:6px; border:1.5px solid #5a564e; background:var(--panel);
+  color:var(--bone); border-radius:999px; padding:0 26px 0 12px; min-height:44px; font-size:12.5px; cursor:pointer; white-space:nowrap;}
+.sfsel .sfv{font-weight:700; max-width:9em; overflow:hidden; text-overflow:ellipsis;}
 .sfsel .sfk{color:var(--muted); font-weight:600; white-space:nowrap;}
-.sfsel select{appearance:none; -webkit-appearance:none; background:transparent; border:0; color:inherit; font:inherit; font-weight:700;
-  padding:8px 0; max-width:10.5em; text-overflow:ellipsis; cursor:pointer; outline-offset:2px;}
+/* the real <select> covers the whole pill, invisible: a tap anywhere on the pill opens the native picker; 16px never zooms */
+.sfsel select{position:absolute; inset:0; width:100%; height:100%; opacity:0; appearance:none; -webkit-appearance:none; border:0; font-size:16px; cursor:pointer;}
+.sfsel:focus-within{outline:2px solid var(--amber); outline-offset:2px;}
 .sfsel select option{color:#1E1E1E; background:#FFFFFF;}
 .sfsel::after{content:'\25BE'; position:absolute; right:11px; top:50%; transform:translateY(-50%); pointer-events:none; font-size:11px; color:var(--muted);}
 .sfsel.on{border-color:var(--amber);}
 .sfsel.on .sfk, .sfsel.on::after{color:var(--amber);}
-.sfcount{font-size:12px; color:var(--muted);}
-.sfclear{border:0; background:none; color:var(--amber); font-weight:700; font-size:12.5px; text-decoration:underline; padding:8px 4px; cursor:pointer;}
 .fchip{border:1.5px solid #A8A29A; background:#3E3E3E; color:#FFFFFF;
   font-weight:700; font-size:12.5px; border-radius:999px; padding:8px 13px;}
 .fchip.on{border-color:var(--amber); color:#1E1E1E; background:var(--amber);}
@@ -505,6 +535,7 @@ body:not(.ct-chrome-off) #updbanner{left:max(14px, var(--sal, 0px)); right:max(1
   width:46px; height:46px; border-radius:50%; border:1px solid #56524A; background:rgba(42,42,42,.94);
   color:var(--amber); font-size:20px; line-height:1; box-shadow:0 4px 14px rgba(0,0,0,.5);}
 #fb-fab:active{background:#333;}
+#fb-fab{display:flex; align-items:center; justify-content:center;} /* P41: line chat icon */
 /* P12: fades out while the page moves (.15s), back in after 600 ms still (.25s); taps pass through while it is away */
 #fb-fab{transition:opacity .25s ease-in-out;}
 #fb-fab.fb-away{opacity:0; pointer-events:none; transition:opacity .15s ease-out;}
@@ -606,8 +637,8 @@ html:not(.authed) #fb-fab, html:not(.authed) #updbanner { display: none !importa
 
 /* home fills the screen: tiles grow to share the free space */
 #content.homeview{display:flex; flex-direction:column;
-  min-height:calc(100dvh - 107px - var(--sat) - var(--sab) - var(--hdr-pad) - var(--hdr-row));}
-@supports not (height:100dvh){ #content.homeview{min-height:calc(100vh - 107px - var(--sat) - var(--sab) - var(--hdr-pad) - var(--hdr-row));} }
+  min-height:calc(100dvh - 104px - var(--sat) - var(--sab) - var(--hdr-pad) - var(--hdr-row));}
+@supports not (height:100dvh){ #content.homeview{min-height:calc(100vh - 104px - var(--sat) - var(--sab) - var(--hdr-pad) - var(--hdr-row));} }
 #content.homeview .tiles{flex:1; gap:8px;}
 #content.homeview .tile{flex:1; min-height:52px; max-height:88px; padding:10px 14px;}
 #content.homeview .tile b{font-size:var(--fs-base);}
@@ -1029,17 +1060,33 @@ body:not(.ct-chrome-off) #fb-fab{right:max(14px, var(--sar, 0px));}
 @media (orientation:landscape) and (max-height:500px){
   body:not(.ct-chrome-off){--hdr-row:calc(44px / var(--z)); --hdr-pad:calc(6px / var(--z));}
   #bottombar{padding-top:6px; padding-bottom:calc(var(--sab) + 6px);}
-  #bottombar .search input{height:44px;} #bottombar #scanbtn{height:44px;}
+  #bottombar .search input{height:44px;} #bottombar #scanbtn, #bottombar #bb-back{height:44px;}
   body:not(.ct-chrome-off) main{padding-bottom:calc(var(--sab) + 72px);}
   body:not(.ct-chrome-off) #fb-fab{bottom:calc(62px + var(--sab));}
   body:not(.ct-chrome-off) #updbanner{bottom:calc(var(--sab) + 62px);}
 }
-/* P11 / P24: the search pill and its input may shrink, so the scan button stays on a 320 pt screen with the clear ✕ in */
+/* P11 / P24: the search pill and its input may shrink, so the scan button stays on a 320 pt screen with the clear button in */
 #bottombar .search{flex:1 1 auto; min-width:0; margin:0;}
 .search input{min-width:0; width:100%;}
-@media (max-width:359px){ #bottombar{gap:6px; padding-left:12px; padding-right:12px;} #bottombar #scanbtn{width:48px;}
+@media (max-width:359px){ #bottombar{gap:6px; padding-left:12px; padding-right:12px;} #bottombar #scanbtn{width:48px;} #bottombar #bb-back{width:44px;}
   #bottombar .search{padding:0 10px; gap:8px;} }
-/* P24: always-visible clear; the native iOS clear (focus-only) is hidden so there is only ever one ✕ */
+/* P36: Back within thumb reach, shown exactly when the header Back is */
+#bb-back{flex:none; width:48px; height:52px; border-radius:var(--radius); border:1px solid var(--line); background:var(--panel);
+  color:var(--bone); display:flex; align-items:center; justify-content:center; padding:0; cursor:pointer;}
+#bb-back[hidden]{display:none;}
+#bb-back:active{background:var(--panel2);}
+/* P20: recent searches, one scrolling row sitting on top of the bar (it rides above the keyboard with the bar, never pushes it) */
+.qrs{position:absolute; left:0; right:0; bottom:100%; display:flex; gap:8px; align-items:center; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  padding:8px max(14px, var(--sar, 0px)) 8px max(14px, var(--sal, 0px)); background:rgba(30,30,30,.94); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); border-top:1px solid var(--line);}
+.qrs[hidden]{display:none;}
+.qrs::-webkit-scrollbar{display:none;}
+.qrl{flex:none; font-size:var(--fs-xs); font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--muted);}
+.qrc{flex:none; max-width:14em; overflow:hidden; text-overflow:ellipsis; min-height:44px; border:1.5px solid #5a564e; background:var(--panel); color:var(--bone);
+  border-radius:999px; padding:0 14px; font:inherit; font-weight:700; font-size:13px; white-space:nowrap; cursor:pointer;}
+.qrc:active{transform:scale(.96);}
+.qrx{flex:none; min-height:44px; border:0; background:none; color:var(--amber); font:inherit; font-weight:700; font-size:12.5px; padding:0 8px; cursor:pointer;}
+body.qr-on #fb-fab{visibility:hidden;}
+/* P24: always-visible clear; the native iOS clear (focus-only) is hidden so there is only ever one clear button */
 #q::-webkit-search-cancel-button{-webkit-appearance:none; appearance:none; display:none;}
 #qclear{flex:none; width:44px; height:44px; margin-right:-10px; border:0; border-radius:50%; background:none; color:var(--muted);
   display:flex; align-items:center; justify-content:center; cursor:pointer;}
@@ -1281,6 +1328,31 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 #booterr .be-btn2{width:100%; min-height:48px; margin-top:10px; border:1px solid #555; border-radius:12px; background:none; color:var(--bone, #F4F2EE); font-weight:600; font-size:15px;}
 #booterr .be-btn2:disabled{opacity:.7;}
 #booterr .be-code{margin-top:18px; color:var(--muted, #9A958C); font:12px/1.5 ui-monospace, Menlo, monospace; word-break:break-word; -webkit-user-select:text; user-select:text;}
+/* P40: 44 pt targets on catalog-only classes — an ::after hit area where the visual size should stay; real size inside
+   scroll rows (a pseudo hit area would be clipped there). .ct-help alone (#/teams) and plain .chip (Field Ops) are CC: untouched. */
+.ebrow{margin-bottom:12px;}
+.clearrec{position:relative;} .clearrec::after{content:""; position:absolute; left:-8px; right:-8px; top:-16px; bottom:-12px;}
+.bobanner .bo-more{position:relative;} .bobanner .bo-more::after{content:""; position:absolute; left:-8px; right:-8px; top:-16px; bottom:-14px;}
+.footlink{min-height:44px; display:inline-flex; align-items:center; padding:0 10px;}
+.chip.link{position:relative; display:inline-flex; align-items:center; min-height:36px;} .chip.link::after{content:""; position:absolute; inset:-5px -4px;}
+.ct-help.bo-rf, .ct-help.ug-rf{width:40px; height:40px;} .bo-rf::after, .ug-rf::after{content:""; position:absolute; inset:-4px;}
+.ct-help.bo-rf .ico, .ct-help.ug-rf .ico{display:block; margin:0 auto;}
+.schip, .bochip{min-height:44px;}
+.rwact{width:44px; height:44px;}
+.a2hs .ax{min-width:44px; min-height:44px; margin:-10px -8px -10px 0; display:flex; align-items:center; justify-content:center;}
+.fchip{min-height:40px; position:relative;} .fchip::after{content:""; position:absolute; inset:-2px 0;}
+/* P41: line icons in catalog UI */
+.favbtn .ico, .warn .ico{margin-right:6px; vertical-align:-4px;}
+.favbtn .ico{width:18px; height:18px;}
+#expban .xb-ico .ico{width:30px; height:30px;}
+#expban #expban-x .ico, #pnmove .pnm-x .ico{width:18px; height:18px; display:block;}
+.a2hs .ax .ico{width:18px; height:18px;}
+.rwact .ico{width:20px; height:20px;}
+.rwact.rwx .ico{width:17px; height:17px;}
+.home-hint .ico, .tip .ico{width:16px; height:16px; vertical-align:-3px; color:var(--amber);}
+.ug-lm .ico{width:15px; height:15px; vertical-align:-2px; color:var(--amber); margin-right:2px;}
+.emp.home-hint{padding:6px 12px 2px;}
+#lb-close svg, #scan-close svg{display:block; margin:auto; pointer-events:none;}
 </style>
 </head>
 <body>
@@ -1307,10 +1379,10 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
   </div>
 </header>
 <main id="view"><div id="content"></div></main>
-<div id="bottombar"><div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#F4F2EE" stroke-width="2"/><path d="M20 20l-3.8-3.8" stroke="#F4F2EE" stroke-width="2" stroke-linecap="round"/></svg><input id="q" type="search" enterkeyhint="search" placeholder="Search name or part #" aria-label="Search name or part number" autocomplete="off" autocorrect="off" autocapitalize="off"><button type="button" id="qclear" aria-label="Clear search" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><button id="scanbtn" aria-label="Scan a package barcode"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10.5 8v8M13.5 8v5M13.5 16v0M16.5 8v8"/></svg></button></div>
+<div id="bottombar"><div id="qrecent" class="qrs" role="group" aria-label="Recent searches" hidden></div><button id="bb-back" type="button" aria-label="Back" hidden><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#F4F2EE" stroke-width="2"/><path d="M20 20l-3.8-3.8" stroke="#F4F2EE" stroke-width="2" stroke-linecap="round"/></svg><input id="q" type="search" enterkeyhint="search" placeholder="Search name or part #" aria-label="Search name or part number" autocomplete="off" autocorrect="off" autocapitalize="off"><button type="button" id="qclear" aria-label="Clear search" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><button id="scanbtn" aria-label="Scan a package barcode"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FDB515" stroke-width="1.8" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10.5 8v8M13.5 8v5M13.5 16v0M16.5 8v8"/></svg></button></div>
 <div id="scan-ov" hidden>
   <video id="scan-video" autoplay muted playsinline></video>
-  <div id="scan-top"><b>Scan a package barcode</b><span class="scan-actions"><button id="scan-torch" hidden aria-label="Flashlight"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H13z"/></svg></button><button id="scan-close" aria-label="Close scanner">&#x2715;</button></span></div>
+  <div id="scan-top"><b>Scan a package barcode</b><span class="scan-actions"><button id="scan-torch" hidden aria-label="Flashlight"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H13z"/></svg></button><button id="scan-close" aria-label="Close scanner"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></span></div>
   <div id="scan-frame"></div>
   <div id="scan-status">Fill the box with the barcode</div>
   <div id="scan-teach" hidden>
@@ -1322,7 +1394,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 </div>
 <div id="lb" hidden>
   <img id="lb-img" alt="">
-  <button id="lb-close" aria-label="Close">&#x2715;</button>
+  <button id="lb-close" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
   <div id="lb-hint">Pinch or double-tap to zoom</div>
 </div>
 <button id="updbanner" hidden>Update ready &mdash; tap to refresh</button>
@@ -1498,7 +1570,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.145.js"></script>
+<script src="app-4.146.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>
