@@ -40,7 +40,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.141';
+  var APPVER = '4.142';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -376,6 +376,479 @@ var GLOSS = {
     if (!BO.data || Date.now() - BO.at > BO_STALE_MS) refresh();
   }
 
+  // ---- Usage (anonymous): what gets opened, searched and scanned → the syksmtoolbox usage hub ----
+  // No names and nothing typed into forms: a random device id (tbx_uid), a session id that rolls over after 30 idle
+  // minutes, the screen / card / search term / scan outcome. Events wait in memory (saved when the app is hidden,
+  // restored on the next launch) and go out in batches with a batch id the hub de-duplicates — never on the render
+  // path, never blocking anything. Config = TOOLBOX.usage {url, key} in the encrypted payload; no config or
+  // usage.off = completely inert. The dashboard (#/usage) needs the admin key, which is NOT in the payload.
+  var UGH = null; try { if (D.usage && D.usage.url && D.usage.key && !D.usage.off) UGH = D.usage; } catch (eUg0) {}
+  var UG = { q: [], fly: null, busy: false, timer: null, at: 0, back: 0, last: 0, lastAny: 0, started: false,
+    view: '', viewT: 0, sq: null, sqT: null, qSeen: {}, errs: 0, errSeen: {}, mem: '' };
+  var UG_SESS_MS = 30 * 60000, UG_MAXQ = 400, UG_BATCH = 100;
+  function ugOn() { return !!UGH; }
+  function ugRnd(n) {
+    var a = 'abcdefghijklmnopqrstuvwxyz0123456789', s = '', r = null;
+    try { r = window.crypto.getRandomValues(new Uint8Array(n)); } catch (e) {}
+    for (var i = 0; i < n; i++) s += a.charAt((r ? r[i] : Math.floor(Math.random() * 256)) % 36);
+    return s;
+  }
+  function ugId() {
+    try { var id = localStorage.getItem('tbx_uid'); if (!/^[a-z0-9]{10}$/.test(id || '')) { id = ugRnd(10); localStorage.setItem('tbx_uid', id); } return id; }
+    catch (e) { return UG.mem || (UG.mem = ugRnd(10)); }
+  }
+  function ugAdmin() { try { return localStorage.getItem('tbx_uadm') || ''; } catch (e) { return ''; } }
+  function ugSess(now) {
+    var s = null; try { s = JSON.parse(localStorage.getItem('tbx_usess') || 'null'); } catch (e) {}
+    if (!s || !s.id || now - (+s.at || 0) > UG_SESS_MS) s = { id: ugRnd(8), at: now }; else s.at = now;
+    try { localStorage.setItem('tbx_usess', JSON.stringify(s)); } catch (e2) {}
+    return s.id;
+  }
+  function ugPlat() {
+    var ua = navigator.userAgent || '', sa = false;
+    var p = /iPhone/.test(ua) ? 'iPhone' : (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) ? 'iPad' :
+      /Android/.test(ua) ? 'Android' : /Macintosh|Mac OS X/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Other';
+    try { sa = navigator.standalone === true || !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches); } catch (e) {}
+    return p + '|' + (sa ? 'app' : 'web') + '|' + APPVER;
+  }
+  function ugEv(type, key, extra) {
+    if (!ugOn()) return;
+    try {
+      var now = Date.now();
+      UG.q.push([now, type, String(key == null ? '' : key).slice(0, 80), String(extra == null ? '' : extra).slice(0, 80), ugSess(now)]);
+      if (UG.q.length > UG_MAXQ) UG.q.splice(0, UG.q.length - UG_MAXQ);
+      UG.lastAny = now; if (type !== 'ping') UG.last = now;
+      ugSoon(UG.q.length === 1 && !UG.fly ? 2500 : 15000); // the first event of a burst goes out quickly (live view)
+    } catch (e) {}
+  }
+  function ugSoon(ms) {
+    if (!ugOn() || !UG.started) return;
+    var at = Date.now() + ms;
+    if (UG.timer && UG.at <= at) return;
+    if (UG.timer) clearTimeout(UG.timer);
+    UG.at = at; UG.timer = setTimeout(function () { UG.timer = null; ugFlush(false); }, ms);
+  }
+  function ugSave() { try { localStorage.setItem('tbx_uq', JSON.stringify({ q: UG.q.slice(-UG_MAXQ), fly: UG.fly })); } catch (e) {} }
+  function ugLoad() {
+    try {
+      var j = JSON.parse(localStorage.getItem('tbx_uq') || 'null'); localStorage.removeItem('tbx_uq');
+      if (j && j.fly && j.fly.b && j.fly.e && j.fly.e.length) UG.fly = j.fly;
+      if (j && j.q && j.q.length) UG.q = j.q.concat(UG.q).slice(-UG_MAXQ);
+    } catch (e) {}
+  }
+  function ugFlush(bye) {
+    if (!ugOn() || !UG.started || UG.busy) return;
+    if (!UG.fly) { if (!UG.q.length) return; UG.fly = { b: ugRnd(12), e: UG.q.splice(0, UG_BATCH) }; }
+    if (navigator.onLine === false) { ugSoon(60000); return; }
+    var body = JSON.stringify({ action: 'u_ev', key: UGH.key, d: ugId(), a: ugAdmin() ? 1 : 0, b: UG.fly.b, e: UG.fly.e });
+    if (bye) { // app going to the background / closing: send without waiting; the batch stays saved until the hub confirms
+      ugSave();
+      try {
+        var fb = UG.fly.b;
+        fetch(UGH.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: body, keepalive: true })
+          .then(function (r) { return r.json(); })
+          .then(function (j) { if (j && j.ok && UG.fly && UG.fly.b === fb) { UG.fly = null; if (document.hidden) ugSave(); } })
+          .catch(function () {});
+      } catch (e) {}
+      return;
+    }
+    UG.busy = true;
+    var ac = null; try { if (typeof AbortController !== 'undefined') ac = new AbortController(); } catch (e0) {}
+    var to = ac ? setTimeout(function () { try { ac.abort(); } catch (e1) {} }, 15000) : null;
+    var fin = function (ok) {
+      UG.busy = false; if (to) clearTimeout(to);
+      if (ok) { UG.fly = null; UG.back = 0; if (UG.q.length) ugSoon(1500); }
+      else { UG.back = Math.min(300000, UG.back ? UG.back * 2 : 20000); ugSoon(UG.back); }
+    };
+    try {
+      fetch(UGH.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: body, signal: ac ? ac.signal : undefined })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { fin(!!(j && j.ok)); })
+        .catch(function () { fin(false); });
+    } catch (e2) { fin(false); }
+  }
+  function ugStart() {
+    if (!ugOn() || UG.started) return;
+    UG.started = true;
+    ugLoad();
+    ugEv('open', 'boot', ugPlat());
+    try { if (qInput) qInput.addEventListener('input', ugSearchInput); } catch (e) {}
+    document.addEventListener('visibilitychange', function () {
+      try {
+        if (document.hidden) { ugSearchCommit(); ugSave(); if (!UG.busy) ugFlush(true); return; }
+        try { localStorage.removeItem('tbx_uq'); } catch (e1) {} // back in front: memory is the truth again
+        if (Date.now() - UG.last > UG_SESS_MS) ugEv('open', 'resume', ugPlat());
+        ugSoon(2000);
+      } catch (e2) {}
+    });
+    window.addEventListener('pagehide', function () { try { ugSearchCommit(); ugSave(); if (!UG.busy) ugFlush(true); } catch (e) {} });
+    window.addEventListener('online', function () { ugSoon(1500); });
+    setInterval(function () { try { if (!document.hidden && Date.now() - UG.lastAny > 4 * 60000 - 5000) ugEv('ping'); } catch (e) {} }, 60000);
+  }
+  // route() calls this first thing on every navigation (hash links, Back, and the in-place variant chips alike).
+  function ugRoute() {
+    if (!ugOn()) return;
+    try {
+      if (!UG.started) ugStart();
+      ugSearchCommit();
+      var h = (location.hash || '#/').split('?')[0], m, ty = 'view', key = '', x = '';
+      var dec = function (s) { try { return decodeURIComponent(s); } catch (e) { return s; } };
+      if ((m = h.match(/^#\/pn\/(.+)$/))) {
+        var sku = dec(m[1]);
+        if (movedOf(sku)) return; // a retired number: the redirect logs the current card
+        var e = BYPN[nrm(sku)] || BYPNZ[nrm(sku).replace(/^0+/, '')];
+        ty = 'card'; key = e ? (skuOf(e) || sku) : sku; x = e ? '' : 'missing';
+      } else key = ugViewKey(h, dec);
+      if (!key || key === 'usage') return;
+      var now = Date.now();
+      if (ty + ':' + key === UG.view && now - UG.viewT < 1500) return; // a re-render, not a new visit
+      UG.view = ty + ':' + key; UG.viewT = now;
+      ugEv(ty, key, x);
+    } catch (e2) {}
+  }
+  function ugViewKey(h, dec) {
+    if (h === '#/' || h === '#' || h === '') return 'home';
+    var parts = h.replace(/^#\/?/, '').split('/');
+    // Cycle count / F&A / territories: screen names only (territory codes are fine; nothing typed is recorded)
+    if (/^(cc|ct|fa|fa2|teams|signup|team)$/.test(parts[0])) return parts.slice(0, 3).join('/').slice(0, 60);
+    return parts.map(dec).join('/').slice(0, 80);
+  }
+  function ugSearchInput() {
+    try {
+      var v = (qInput.value || '').trim();
+      if (UG.sqT) { clearTimeout(UG.sqT); UG.sqT = null; }
+      UG.sq = v || null;
+      if (v) UG.sqT = setTimeout(ugSearchCommit, 2000); // the term people settle on, not every keystroke
+    } catch (e) {}
+  }
+  function ugSearchCommit() {
+    if (UG.sqT) { clearTimeout(UG.sqT); UG.sqT = null; }
+    var v = UG.sq; UG.sq = null;
+    if (!v || !ugOn()) return;
+    var k = v.toLowerCase().replace(/\s+/g, ' ').slice(0, 60), now = Date.now();
+    if (k.length < 2 || now - (UG.qSeen[k] || 0) < 60000) return; // the same term again within a minute is one search
+    for (var qk in UG.qSeen) if (now - UG.qSeen[qk] > 60000) delete UG.qSeen[qk];
+    UG.qSeen[k] = now;
+    var n = 0; try { n = searchAll(v).length; } catch (e) {}
+    ugEv('search', k, String(n));
+  }
+  function ugScan(r, txt) { // catalog scanner outcome (the cycle-count scanner is not tracked)
+    if (!ugOn() || !r) return;
+    try {
+      if (r.sku) {
+        var e = BYPN[nrm(r.sku)] || BYPNZ[nrm(r.sku).replace(/^0+/, '')];
+        if (!e) { ugEv('scan', r.sku, 'nocard'); return; }
+        var it = recOf(e);
+        ugEv('scan', (it && it.sku) || r.sku, it && it.hidden && it.moved ? 'moved' : 'card');
+        return;
+      }
+      if ((r.p && r.p.gtin) || nrm(txt).length >= 4) ugEv('scan', (r.p && r.p.gtin) || nrm(txt).slice(0, 40), 'unknown');
+    } catch (e2) {}
+  }
+  function ugErr(msg, file, line) {
+    if (!ugOn() || UG.errs >= 5) return;
+    var k = String(msg || 'error').slice(0, 120);
+    if (UG.errSeen[k]) return;
+    UG.errSeen[k] = 1; UG.errs++;
+    ugEv('error', k, String(file || '').split('/').pop().split('?')[0].slice(0, 40) + ':' + (line || 0));
+  }
+  try {
+    window.addEventListener('error', function (ev) { try { ugErr(ev && ev.message, ev && ev.filename, ev && ev.lineno); } catch (e) {} });
+    window.addEventListener('unhandledrejection', function (ev) { try { var r = ev && ev.reason; ugErr('Unhandled: ' + ((r && r.message) || r), '', 0); } catch (e) {} });
+    // five quick taps on the version number at the foot of Home open the dashboard (owner only — it asks for the key)
+    var ugTaps = [];
+    document.addEventListener('click', function (ev) {
+      var t = ev.target && ev.target.closest ? ev.target.closest('[data-ugtap]') : null;
+      if (!t) return;
+      var now = Date.now(); ugTaps.push(now); ugTaps = ugTaps.filter(function (x) { return now - x < 2500; });
+      if (ugTaps.length >= 5) { ugTaps = []; location.hash = '#/usage'; }
+    });
+  } catch (eUg1) {}
+
+  // ---- Usage dashboard (#/usage) ----
+  var UGD = { live: null, liveAt: 0, stats: {}, statsAt: {}, days: 7, incl: false, busyL: false, busyS: false, errL: '', errS: '', gen: 0, more: {} };
+  function ugApi(action, extra, cb, keyOverride) {
+    var ak = keyOverride || ugAdmin();
+    if (!UGH || !ak) { cb(null, 'key'); return; }
+    var body = { action: action, key: ak }; for (var k in extra) if (extra.hasOwnProperty(k)) body[k] = extra[k];
+    var ac = null; try { if (typeof AbortController !== 'undefined') ac = new AbortController(); } catch (e0) {}
+    var to = ac ? setTimeout(function () { try { ac.abort(); } catch (e1) {} }, 30000) : null;
+    var done = false, fin = function (j, err) { if (done) return; done = true; if (to) clearTimeout(to); cb(j, err); };
+    try {
+      fetch(UGH.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body), signal: ac ? ac.signal : undefined })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (!j || !j.ok) fin(null, (j && j.err) || 'bad'); else fin(j, ''); })
+        .catch(function () { fin(null, navigator.onLine === false ? 'offline' : 'net'); });
+    } catch (e2) { fin(null, 'net'); }
+  }
+  function ugNum(n) { n = +n || 0; return n >= 10000 ? (Math.round(n / 100) / 10) + 'K' : n.toLocaleString('en-US'); }
+  function ugTitle(sku) { var e = BYPN[nrm(sku)] || BYPNZ[nrm(sku).replace(/^0+/, '')], r = e ? recOf(e) : null; return r ? (r.t || r.name || '') : ''; }
+  function ugHasCard(sku) { return !!(BYPN[nrm(sku)] || BYPNZ[nrm(sku).replace(/^0+/, '')]); }
+  function ugDev(d, info) {
+    if (d === ugId()) return 'This device';
+    var p = String(info || '').split('|');
+    return (p[0] || 'Device') + (p[0] && p[1] !== 'app' ? ' browser' : '') + ' · ' + String(d).slice(-4);
+  }
+  var UG_SCREENS = { home: 'Home', bo: 'Backorder Report', about: 'About', scan: 'Scanner', probes: 'Probes', shavers: 'Shavers',
+    'top/implants': 'Implants', 'top/arthroscopy': 'Arthroscopy', teams: 'Territory Cycle Counts', 'teams/help': 'Cycle count help',
+    'teams/help/view': 'Cycle count guide', signup: 'Territory sign-up', cc: 'Cycle count (CT)', 'cc/fops': 'Field Ops count sheets',
+    ct: 'CT team', fa2: 'F&A inventory', 'fa2/add': 'F&A — add', 'fa2/add2': 'F&A — add items', 'fa2/use': 'F&A — use',
+    'fa2/return': 'F&A — return', 'fa2/send': 'F&A — send', 'fa2/trans': 'F&A — transactions', 'fa2/admin': 'F&A — admin',
+    'fa2/onhand': 'F&A — on hand', 'fa2/history': 'F&A — history' };
+  function ugScreen(k) {
+    if (UG_SCREENS[k]) return UG_SCREENS[k];
+    var p = String(k).split('/'), m;
+    if (p[0] === 'cat' || p[0] === 'dgrp' || p[0] === 'shaverfam') return p.slice(1).join('/');
+    if (p[0] === 'fam') return p.slice(2).join('/') || p[1];
+    if (p[0] === 'sub') return p.slice(2).join(' › ');
+    if (p[0] === 'instr') return 'Instrumentation · ' + p[1];
+    if (p[0] === 'parts') return 'Parts · ' + p[1];
+    if ((m = /^team\/([a-z0-9]+)(\/cc)?/.exec(k))) return (m[2] ? 'Cycle count' : 'Territory') + ' · ' + m[1].toUpperCase();
+    return k;
+  }
+  function ugAgo(t) { var s = sinceText(t); return s === 'just now' ? 'now' : s.replace(' ago', ''); }
+  function ugHourLbl(h) { return h === 0 ? '12a' : h < 12 ? h + 'a' : h === 12 ? '12p' : (h - 12) + 'p'; }
+  function ugHourLong(h) { return (h % 12 || 12) + (h < 12 ? ' AM' : ' PM'); }
+  function ugDayLbl(k, long) {
+    var d = new Date(Date.parse(k + 'T12:00:00Z')), mo = BO_MON[d.getUTCMonth()];
+    return long ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()] + ', ' + mo + ' ' + d.getUTCDate() : (d.getUTCMonth() + 1) + '/' + d.getUTCDate();
+  }
+  function ugNice(v) { // an even top, so the midline tick is a whole number of people
+    if (v <= 4) return 4;
+    var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), st = [1, 2, 4, 6, 8, 10];
+    for (var i = 0; i < st.length; i++) if (st[i] * p >= v && (st[i] * p) % 2 === 0) return st[i] * p;
+    return 10 * p;
+  }
+  // Columns: one series (people), 4px rounded tops on a shared baseline, 2px gaps, hairline grid, value on the peak,
+  // tap/hover/focus shows the exact number; the <details> table under it carries every value too.
+  function ugColumns(vals, labels, tips, opts) {
+    opts = opts || {};
+    var n = vals.length, mx = 0, peak = -1, i;
+    for (i = 0; i < n; i++) if (vals[i] != null && vals[i] > mx) { mx = vals[i]; peak = i; }
+    var top = ugNice(Math.max(mx, 1)), cols = '';
+    for (i = 0; i < n; i++) {
+      var v = vals[i], h = v ? Math.max(2, Math.round(v / top * 1000) / 10) : 0;
+      cols += '<button type="button" class="ug-col' + (v == null ? ' none' : '') + (i === opts.hi ? ' hi' : '') + '" data-tip="' + esc(tips[i]) + '" aria-label="' + esc(tips[i]) + '">' +
+        (v ? '<i style="height:' + h + '%"></i>' : '') + (i === peak && v ? '<span class="ug-pk" style="bottom:' + h + '%">' + v + '</span>' : '') + '</button>';
+    }
+    var xl = labels.map(function (l) { return '<span>' + esc(l) + '</span>'; }).join('');
+    return '<div class="ug-chart"><div class="ug-ya"><span>' + top + '</span><span>' + (top / 2) + '</span><span>0</span></div>' +
+      '<div class="ug-pw"><div class="ug-plot"><div class="ug-g g1"></div><div class="ug-g g2"></div><div class="ug-g g3"></div>' + cols + '</div>' +
+      '<div class="ug-xa">' + xl + '</div></div><div class="ug-tip" hidden></div></div>';
+  }
+  function ugTable(head, rows) {
+    return '<details class="ug-tbl"><summary>Show the numbers</summary><table><thead><tr>' + head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + rows.map(function (r) { return '<tr>' + r.map(function (c) { return '<td>' + esc(String(c)) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></details>';
+  }
+  function ugTiles(list) {
+    return '<div class="ug-tiles">' + list.map(function (t) { return '<div class="ug-tile"><span>' + esc(t[0]) + '</span><b>' + ugNum(t[1]) + '</b></div>'; }).join('') + '</div>';
+  }
+  function ugFeedText(ty, k, x) { // returns [html, route]
+    var t = ugTitle(k), card = t ? '<b>' + esc(t) + '</b> <span class="mono ug-sku">' + esc(k) + '</span>' : '<span class="mono ug-sku">' + esc(k) + '</span>';
+    var go = ugHasCard(k) ? pnRoute(k) : '';
+    if (ty === 'open') return [k === 'resume' ? 'came back to the app' : 'opened the app', ''];
+    if (ty === 'view') return ['browsed <b>' + esc(ugScreen(k)) + '</b>', ''];
+    if (ty === 'card') return ['opened ' + card + (x === 'missing' ? ' <span class="ug-pill warn">no card</span>' : ''), go];
+    if (ty === 'search') return ['searched <b>“' + esc(k) + '”</b> ' + (x === '0' ? '<span class="ug-pill warn">no results</span>' : '<span class="ug-dim">→ ' + esc(x) + ' result' + (x === '1' ? '' : 's') + '</span>'), ''];
+    if (ty === 'scan') {
+      if (x === 'card' || x === 'moved') return ['scanned ' + card, go];
+      if (x === 'nocard') return ['scanned <span class="mono ug-sku">' + esc(k) + '</span> <span class="ug-pill warn">no card</span>', ''];
+      return ['scanned an unknown barcode <span class="mono ug-sku">' + esc(k) + '</span>', ''];
+    }
+    if (ty === 'fav') return [(x === 'off' ? 'unfavorited ' : 'favorited ') + card, go];
+    if (ty === 'share') return ['shared ' + card + ' <span class="ug-dim">' + (x === 'img' ? 'as an image' : x === 'link' ? 'as a link' : 'as text') + '</span>', go];
+    if (ty === 'error') return ['hit an error <span class="ug-dim">' + esc(k) + (x ? ' · ' + esc(x) : '') + '</span>', ''];
+    return [esc(ty) + ' ' + esc(k), ''];
+  }
+  function usageGate(msg) {
+    render('<div class="card ug-gate"><div class="ug-gt">Team usage</div>' +
+      '<div class="cc-sub">Live numbers on how the team uses ToolBox. Enter the admin key once on this device — it isn’t part of the app, so nobody else can open this.</div>' +
+      '<input id="ug-key" class="cc-in" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Admin key">' +
+      '<button id="ug-go" class="cc-btn">Unlock</button><div id="ug-gmsg" class="ug-gmsg">' + esc(msg || '') + '</div></div>');
+    var inp = document.getElementById('ug-key'), go = document.getElementById('ug-go'), m = document.getElementById('ug-gmsg');
+    function tryKey() {
+      var k = (inp.value || '').trim(); if (!k) { inp.focus(); return; }
+      go.disabled = true; go.textContent = 'Checking…'; m.textContent = '';
+      ugApi('u_live', {}, function (j, err) {
+        go.disabled = false; go.textContent = 'Unlock';
+        if (j) { try { localStorage.setItem('tbx_uadm', k); } catch (e) {} UGD.live = j; UGD.liveAt = Date.now(); UGD.errL = ''; if ((location.hash || '').split('?')[0] === '#/usage') usageScreen(); return; }
+        m.textContent = err === 'key' ? 'That key didn’t work.' : err === 'offline' ? 'You’re offline — try again with signal.' : 'Couldn’t reach the usage hub — try again.';
+      }, k);
+    }
+    go.addEventListener('click', tryKey);
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryKey(); });
+  }
+  function usageScreen() {
+    setTitle('Team ', 'Usage'); backBtn.hidden = false;
+    if (!UGH) { render(emptyHTML('&#x1F4CA;', 'Usage isn’t set up', 'This build has no usage hub configured.', '')); return; }
+    if (!ugAdmin()) { usageGate(''); return; }
+    var gen = ++UGD.gen;
+    render('<div class="ug">' +
+      '<div class="card ug-live"><div class="ug-lh"><span class="ug-dot" aria-hidden="true"></span><span class="ug-lt">Live</span><span class="ug-upd" id="ug-upd"></span>' +
+      '<button id="ug-rf" class="ct-help ug-rf" type="button" aria-label="Refresh">↻</button></div>' +
+      '<div id="ug-livebody"></div></div>' +
+      '<div class="grouphead ug-gh">Latest activity</div><div class="card ug-feed" id="ug-feed"></div>' +
+      '<div class="ug-filters" id="ug-filters"></div>' +
+      '<div id="ug-period"></div>' +
+      '<div class="ug-foot">Anonymous: each phone is a random id — no names, nothing typed into forms.<br>' +
+      '<button class="footlink" id="ug-forget">Forget the key on this device</button></div></div>');
+    var alive = function () { return gen === UGD.gen && (location.hash || '').split('?')[0] === '#/usage' && document.getElementById('ug-livebody'); };
+    function drawLive() {
+      if (!alive()) return;
+      var L = UGD.live, body = document.getElementById('ug-livebody'), feed = document.getElementById('ug-feed');
+      var upd = document.getElementById('ug-upd');
+      if (upd) upd.textContent = UGD.busyL && !L ? 'loading…' : UGD.errL && !L ? '' : UGD.liveAt ? 'updated ' + sinceText(UGD.liveAt) + (UGD.errL ? ' · hub unreachable' : '') : '';
+      if (!L) {
+        body.innerHTML = UGD.busyL ? '<div class="cc-empty">Loading…</div>' :
+          emptyHTML('&#x1F4F5;', UGD.errL === 'offline' ? 'Offline' : 'Couldn’t reach the usage hub', 'Check your signal and tap ↻.', '');
+        feed.innerHTML = ''; return;
+      }
+      body.classList.toggle('ug-stale', !!UGD.busyL);
+      var hrs = [], lbl = [], tips = [];
+      for (var h = 0; h < 24; h++) {
+        var v = h <= L.hourNow ? L.hours[h] : null;
+        hrs.push(v); lbl.push(h % 6 === 0 ? ugHourLbl(h) : '');
+        tips.push(ugHourLong(h) + ' · ' + (v == null ? 'still ahead' : v + (v === 1 ? ' person' : ' people')));
+      }
+      body.innerHTML =
+        '<div class="ug-hero"><b>' + L.now.n5 + '</b><span>' + (L.now.n5 === 1 ? 'person' : 'people') + ' using it right now' +
+          (L.now.n15 > L.now.n5 ? '<br><em>' + L.now.n15 + ' in the last 15 minutes</em>' : '') + '</span></div>' +
+        '<div class="ug-sub">Today so far</div>' +
+        ugTiles([['People', L.today.devices], ['Sessions', L.today.sessions], ['Cards opened', L.today.cards], ['Searches', L.today.searches], ['Scans', L.today.scans], ['App opens', L.today.opens]]) +
+        (L.today.zero ? '<div class="ug-note">' + L.today.zero + ' search' + (L.today.zero === 1 ? '' : 'es') + ' today found nothing — see the list below.</div>' : '') +
+        '<div class="ug-sub">People by hour, today (Eastern)</div>' + ugColumns(hrs, lbl, tips, { hi: L.hourNow }) +
+        ugTable(['Hour', 'People'], hrs.map(function (v, i) { return [ugHourLong(i), v == null ? '—' : v]; }).slice(0, L.hourNow + 1));
+      var R = L.recent || [];
+      var FEED = UGD.more.feed ? 40 : 12;
+      feed.innerHTML = R.length ? '<div class="ug-rows">' + R.slice(0, FEED).map(function (r) {
+        var ft = ugFeedText(r[2], r[3], r[4]);
+        return '<' + (ft[1] ? 'button type="button" data-go="' + esc(ft[1]) + '"' : 'div') + ' class="ug-ev">' +
+          '<span class="ug-when">' + esc(ugAgo(r[0])) + '</span><span class="ug-what"><span class="ug-who">' + esc(ugDev(r[1], L.info[r[1]])) + '</span>' + ft[0] + '</span>' +
+          (ft[1] ? '<span class="ct">&#x203A;</span>' : '') + '</' + (ft[1] ? 'button' : 'div') + '>';
+      }).join('') + '</div>' + (R.length > FEED ? '<button type="button" class="ug-more" data-ug-more="feed">Show more &#x203A;</button>' : '') : '<div class="cc-empty">No activity yet.</div>';
+    }
+    function drawFilters() {
+      var f = document.getElementById('ug-filters'); if (!f) return;
+      f.innerHTML = [[1, 'Today'], [7, '7 days'], [30, '30 days']].map(function (p) {
+        return '<button type="button" class="bochip ug-chip' + (UGD.days === p[0] ? ' on' : '') + '" data-ug-days="' + p[0] + '">' + p[1] + '</button>';
+      }).join('') + '<label class="ug-incl"><input type="checkbox" id="ug-incl"' + (UGD.incl ? ' checked' : '') + '> Include my devices</label>';
+    }
+    function list(title, rows, empty) { // ten rows, the rest behind "Show all"
+      var all = UGD.more[title] || rows.length <= 10;
+      return '<div class="grouphead ug-gh">' + title + '</div><div class="card ug-list">' + (rows.length ? (all ? rows : rows.slice(0, 10)).join('') +
+        (all ? '' : '<button type="button" class="ug-more" data-ug-more="' + esc(title) + '">Show all ' + rows.length + ' &#x203A;</button>') : '<div class="cc-empty">' + empty + '</div>') + '</div>';
+    }
+    function lrow(main, count, sub, go) {
+      return '<' + (go ? 'button type="button" data-go="' + esc(go) + '"' : 'div') + ' class="ug-lr"><span class="ug-lm">' + main + (sub ? '<span class="ug-ls">' + sub + '</span>' : '') + '</span>' +
+        '<span class="ug-lc">' + count + '</span>' + (go ? '<span class="ct">&#x203A;</span>' : '') + '</' + (go ? 'button' : 'div') + '>';
+    }
+    function ppl(n) { return n + (n === 1 ? ' person' : ' people'); }
+    function drawPeriod() {
+      if (!alive()) return;
+      var el = document.getElementById('ug-period'), key = UGD.days + ':' + (UGD.incl ? 1 : 0), S = UGD.stats[key];
+      if (!S) {
+        el.innerHTML = UGD.busyS ? '<div class="cc-empty">Loading the ' + (UGD.days === 1 ? 'day' : UGD.days + '-day report') + '…</div>' :
+          '<div class="cc-empty">Couldn’t load this report. <button class="footlink" data-ug-retry="1">Try again &#x203A;</button></div>';
+        return;
+      }
+      var lbl = UGD.days === 1 ? 'Today' : 'Last ' + UGD.days + ' days', h = '';
+      h += '<div class="card ug-pcard' + (UGD.busyS ? ' ug-stale' : '') + '"><div class="ug-sub">' + lbl + ' · as of ' + esc(sinceText(S.asOf)) + '</div>' +
+        ugTiles([['People', S.devices], ['Sessions', S.sessions], ['Cards opened', S.counts.card], ['Searches', S.counts.search], ['Scans', S.counts.scan], ['Favorited', S.favs.on]]);
+      if (S.days > 1) {
+        var pd = S.perDay || [], today = pd.length - 1;
+        h += '<div class="ug-sub">People per day</div>' +
+          ugColumns(pd.map(function (x) { return x.devices; }), pd.map(function (x, i) { return (S.days <= 7 || i % 7 === today % 7) ? ugDayLbl(x.d) : ''; }),
+            pd.map(function (x) { return ugDayLbl(x.d, true) + ' · ' + ppl(x.devices) + ' · ' + x.sessions + ' session' + (x.sessions === 1 ? '' : 's'); }), { hi: today }) +
+          ugTable(['Day', 'People', 'Sessions', 'Cards', 'Searches', 'Scans'], pd.slice().reverse().map(function (x) { return [ugDayLbl(x.d, true), x.devices, x.sessions, x.cards, x.searches, x.scans]; }));
+      }
+      h += '</div>';
+      h += list('Most opened cards', (S.topCards || []).map(function (c, i) {
+        var t = ugTitle(c.k);
+        return lrow('<b>' + (i + 1) + '. ' + esc(t || c.k) + '</b>', ugNum(c.n), '<span class="mono">' + esc(c.k) + '</span> · ' + ppl(c.dev), ugHasCard(c.k) ? pnRoute(c.k) : '');
+      }), 'No cards opened yet.');
+      h += list('Top searches', (S.topSearches || []).map(function (s) {
+        return lrow('<b>“' + esc(s.k) + '”</b>' + (s.res === '0' ? ' <span class="ug-pill warn">no results</span>' : ''), ugNum(s.n), ppl(s.dev) + (s.res && s.res !== '0' ? ' · ' + esc(s.res) + ' results' : ''), '');
+      }), 'No searches yet.');
+      h += list('Searches that found nothing', (S.zeroSearches || []).map(function (s) {
+        return lrow('<b>“' + esc(s.k) + '”</b>', ugNum(s.n), ppl(s.dev), '');
+      }), 'Every search found something.');
+      var sc = S.scans || {}, st = (sc.card || 0) + (sc.moved || 0) + (sc.nocard || 0) + (sc.unknown || 0);
+      h += list('Scans', [lrow('<b>Opened a card</b>', ugNum((sc.card || 0) + (sc.moved || 0)), '', ''),
+        lrow('<b>Part number with no card</b>', ugNum(sc.nocard || 0), '', ''),
+        lrow('<b>Barcode not recognized</b>', ugNum(sc.unknown || 0), '', '')].concat((S.noCard || []).map(function (x) {
+          return lrow('<span class="mono">' + esc(x.k) + '</span> ' + (x.kind === 'nocard' ? '<span class="ug-pill warn">no card</span>' : '<span class="ug-pill">unknown barcode</span>'), ugNum(x.n), ppl(x.dev), '');
+        })), 'No scans yet.').replace('<div class="card ug-list">', '<div class="card ug-list"><div class="ug-sub">' + ugNum(st) + ' scan' + (st === 1 ? '' : 's') + '</div>');
+      h += list('Most visited screens', (S.screens || []).map(function (s) { return lrow('<b>' + esc(ugScreen(s.k)) + '</b>', ugNum(s.n), ppl(s.dev), ''); }), 'Nothing yet.');
+      var fv = S.favs || {}, sh = S.shares || {};
+      h += list('Favorites & shares', [lrow('<b>Favorites added</b>', ugNum(fv.on || 0), (fv.off ? fv.off + ' removed' : ''), ''),
+        lrow('<b>Cards shared</b>', ugNum((sh.img || 0) + (sh.link || 0) + (sh.copy || 0)), (sh.img || 0) + ' image · ' + (sh.link || 0) + ' link · ' + (sh.copy || 0) + ' text', '')]
+        .concat((S.topFavs || []).map(function (c) { var t = ugTitle(c.k); return lrow('★ ' + esc(t || c.k), ugNum(c.n), '<span class="mono">' + esc(c.k) + '</span>', ugHasCard(c.k) ? pnRoute(c.k) : ''); })), '');
+      h += list('Phones & app versions', (S.platforms || []).map(function (p) { return lrow('<b>' + esc(p.k) + '</b>', ugNum(p.n), '', ''); })
+        .concat((S.versions || []).map(function (v) { return lrow('App v' + esc(v.k) + (v.k === APPVER ? ' <span class="ug-pill ok">current</span>' : ''), ugNum(v.n), '', ''); })), 'No devices yet.');
+      h += list('Most active phones', (S.deviceList || []).slice().sort(function (a, b) { return b.n - a.n; }).slice(0, 12).map(function (d) {
+        return lrow('<b>' + esc(ugDev(d.d, d.i)) + '</b>', ugNum(d.n), d.sess + ' session' + (d.sess === 1 ? '' : 's') + ' · ' + d.cards + ' cards · ' + d.searches + ' searches · last seen ' + esc(sinceText(d.last)), '');
+      }), 'No devices yet.');
+      if ((S.errors || []).length) h += list('Errors on phones', S.errors.map(function (e) { return lrow('<span class="ug-err">' + esc(e.k) + '</span>', ugNum(e.n), esc(e.at || '') + ' · ' + ppl(e.dev) + ' · last ' + esc(sinceText(e.last)), ''); }), '');
+      el.innerHTML = h;
+    }
+    function loadLive() {
+      if (UGD.busyL) return; UGD.busyL = true; drawLive();
+      ugApi('u_live', { incl: UGD.incl ? 1 : 0 }, function (j, err) {
+        UGD.busyL = false;
+        if (err === 'key') { try { localStorage.removeItem('tbx_uadm'); } catch (e) {} if (alive()) usageGate('The saved key stopped working — enter it again.'); return; }
+        if (j) { UGD.live = j; UGD.liveAt = Date.now(); UGD.errL = ''; } else UGD.errL = err;
+        drawLive();
+      });
+    }
+    function loadStats(fresh) {
+      var key = UGD.days + ':' + (UGD.incl ? 1 : 0);
+      if (UGD.busyS) return; UGD.busyS = true; drawPeriod();
+      ugApi('u_stats', { days: UGD.days, incl: UGD.incl ? 1 : 0, fresh: fresh ? 1 : 0 }, function (j, err) {
+        UGD.busyS = false;
+        if (j) { UGD.stats[key] = j; UGD.statsAt[key] = Date.now(); UGD.errS = ''; } else UGD.errS = err;
+        drawPeriod();
+        if (key !== UGD.days + ':' + (UGD.incl ? 1 : 0)) loadStats(false); // the period changed while this was loading
+      });
+    }
+    function statsStale() { var k = UGD.days + ':' + (UGD.incl ? 1 : 0); return !UGD.stats[k] || Date.now() - (UGD.statsAt[k] || 0) > (UGD.days === 1 ? 60000 : 300000); }
+    drawLive(); drawFilters(); drawPeriod();
+    if (!UGD.live || Date.now() - UGD.liveAt > 10000) loadLive();
+    if (statsStale()) loadStats(false);
+    var tick = setInterval(function () {
+      if (!alive()) { clearInterval(tick); return; }
+      if (document.hidden) return;
+      if (Date.now() - UGD.liveAt >= 20000) loadLive(); else drawLive(); // live every 20 s; relabel "updated …" between
+      if (statsStale()) loadStats(false);
+    }, 5000);
+    var root = content.querySelector('.ug');
+    root.addEventListener('click', function (e) {
+      var t = e.target;
+      var d = t.closest && t.closest('[data-ug-days]');
+      if (d) { UGD.days = +d.getAttribute('data-ug-days'); drawFilters(); drawPeriod(); if (statsStale()) loadStats(false); return; }
+      if (t.closest && t.closest('#ug-rf')) { var rf = document.getElementById('ug-rf'); rf.classList.add('spin'); setTimeout(function () { rf.classList.remove('spin'); }, 800); UGD.liveAt = 0; loadLive(); loadStats(true); return; }
+      if (t.closest && t.closest('[data-ug-retry]')) { loadStats(false); return; }
+      var mo = t.closest && t.closest('[data-ug-more]');
+      if (mo) { var mk = mo.getAttribute('data-ug-more'); UGD.more[mk] = true; if (mk === 'feed') drawLive(); else drawPeriod(); return; }
+      if (t.closest && t.closest('#ug-forget')) { try { localStorage.removeItem('tbx_uadm'); } catch (e2) {} UGD.live = null; UGD.stats = {}; usageGate('Key removed from this device.'); return; }
+      var col = t.closest && t.closest('.ug-col');
+      if (col) { ugTipShow(col); return; }
+    });
+    root.addEventListener('change', function (e) {
+      if (e.target && e.target.id === 'ug-incl') { UGD.incl = !!e.target.checked; UGD.liveAt = 0; loadLive(); drawPeriod(); if (statsStale()) loadStats(false); }
+    });
+    root.addEventListener('mouseover', function (e) { var col = e.target.closest && e.target.closest('.ug-col'); if (col) ugTipShow(col); });
+    root.addEventListener('focusin', function (e) { var col = e.target.closest && e.target.closest('.ug-col'); if (col) ugTipShow(col); });
+    root.addEventListener('mouseleave', function () { var ts = root.querySelectorAll('.ug-tip'); for (var i = 0; i < ts.length; i++) ts[i].hidden = true; });
+  }
+  function ugTipShow(col) {
+    var ch = col.closest('.ug-chart'), tip = ch && ch.querySelector('.ug-tip'); if (!tip) return;
+    var cols = ch.querySelectorAll('.ug-col'); for (var i = 0; i < cols.length; i++) cols[i].classList.toggle('on', cols[i] === col);
+    tip.textContent = col.getAttribute('data-tip') || '';
+    tip.hidden = false;
+    var cr = ch.getBoundingClientRect(), br = col.getBoundingClientRect(), w = tip.offsetWidth || 120;
+    tip.style.left = Math.max(0, Math.min(cr.width - w, br.left - cr.left + br.width / 2 - w / 2)) + 'px';
+  }
+
   // ---- favorites (per device) with permalink migration ----
   function favs() { try { return JSON.parse(localStorage.getItem('tbx_favs') || '[]'); } catch (e) { return []; } }
   (function migrateFavs() {
@@ -393,6 +866,7 @@ var GLOSS = {
       list = list.filter(function (x) { return x.route !== f.route; });
     } else { list.unshift(f); }
     try { localStorage.setItem('tbx_favs', JSON.stringify(list.slice(0, 40))); } catch (e) {}
+    try { ugEv('fav', (f.it && f.it.sku) || f.pn || decodeURIComponent(String(f.route || '').replace(/^#\/pn\//, '')), isFav(f.route) ? 'on' : 'off'); } catch (eUg) {}
   }
 
   // ---- copy ----
@@ -448,6 +922,7 @@ var GLOSS = {
       var rt = uf.getAttribute('data-unfav-route');
       var wasFav = favs().filter(function (x) { return x.route === rt; })[0];
       try { localStorage.setItem('tbx_favs', JSON.stringify(favs().filter(function (x) { return x.route !== rt; }))); } catch (e2) {}
+      try { ugEv('fav', (wasFav && wasFav.it && wasFav.it.sku) || decodeURIComponent(rt.replace(/^#\/pn\//, '')), 'off'); } catch (eUg) {}
       uf.innerHTML = '&#9734;'; uf.classList.add('off');
       var uw = uf.closest('.rowwrap');
       setTimeout(function () {
@@ -1331,6 +1806,7 @@ var GLOSS = {
         if (!opt) return;
         sh.hidden = true;
         var act = opt.getAttribute('data-sh');
+        try { ugEv('share', CUR_IT && CUR_IT.sku, act); } catch (eUg) {}
         if (act === 'img') shareAsImage(CUR_IT);
         else if (act === 'link') shareLinkOf(CUR_IT);
         else if (act === 'copy') copyToClip(cardText(CUR_IT)).then(function () { toastMsg('Details copied — paste anywhere', 2400); });
@@ -1569,10 +2045,11 @@ var GLOSS = {
     var hint = (!fv.length && !rc.length) ? '<div class="emp" style="padding:6px 12px 2px"><span>Cards you open show up here as Recents \u2014 tap &#9734; on any card to pin it to Favorites.</span></div>' : '';
     render(hint + favHTML + recHTML + '<div class="eyebrow">Browse</div><div class="tiles">' + tiles + '</div>' +
       a2hsHTML() +
-      '<div class="foot">Works offline once loaded &middot; v' + APPVER + ' &middot; ' + esc(D.built) +
+      '<div class="foot">Works offline once loaded &middot; <span class="ugver" data-ugtap="1">v' + APPVER + '</span> &middot; ' + esc(D.built) +
       '<br><button class="footlink" data-go="#/about">About &amp; tips &#x203A;</button>' +
       '<span class="footsep">&middot;</span>' +
-      '<button class="footlink" data-act="checkupd">Check for updates</button></div>');
+      '<button class="footlink" data-act="checkupd">Check for updates</button>' +
+      (ugOn() && ugAdmin() ? '<span class="footsep">&middot;</span><button class="footlink" data-go="#/usage">Usage</button>' : '') + '</div>');
     content.classList.add('homeview');
     homeBtn.classList.remove('away');
     showWN();
@@ -6614,6 +7091,7 @@ var GLOSS = {
   }
 
   function route() {
+    try { ugRoute(); } catch (eUg) {} // anonymous usage: log the screen / card before anything renders
     var raw = location.hash || '#/';
     var qi = raw.indexOf('?');
     var query = qi > -1 ? raw.slice(qi + 1) : '';
@@ -6711,6 +7189,7 @@ var GLOSS = {
       }, 350);
       return;
     }
+    if (h === '#/usage') return usageScreen();
     if (h === '#/about') return aboutScreen();
     if (h === '#/bo') { if (!boOn()) { location.replace('#/'); return; } return boScreen(); }
     if (h === '#/probes') return probesScreen();
@@ -6990,6 +7469,7 @@ var GLOSS = {
     function onCode(txt) {
       try { if (navigator.vibrate) navigator.vibrate(60); } catch (ev) {}
       var r = resolveCode(txt);
+      try { ugScan(r, txt); } catch (eUg) {}
       if (r.sku) {
         var entry = BYPN[nrm(r.sku)] || BYPNZ[nrm(r.sku).replace(/^0+/, '')];
         if (!entry) {
@@ -7023,6 +7503,7 @@ var GLOSS = {
         return;
       }
     }
+    UG.scanDev = onCode; // test hook (tools/usage/app-test.js)
     var frameEl = document.getElementById('scan-frame'), tickN = 0;
     function grabRegion() {
       // Map the on-screen targeting box back through object-fit:cover to source pixels,
@@ -7273,6 +7754,7 @@ var GLOSS = {
   try { window.TBX_FEEDBACK_INIT(D.fb); } catch (eFb) {}
   // dev/test hooks (harmless in production)
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
+    usage: { UG: UG, UGD: UGD, on: ugOn, id: ugId, ev: ugEv, flush: ugFlush, route: ugRoute, start: ugStart, scanRecord: ugScan, scan: function (t) { if (UG.scanDev) UG.scanDev(t); } },
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
     cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, TORDER: TORDER, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, head: fopsHead, remove: fopsRemove, progress: fopsProgress, preview: fopsPreview, xlsx: fopsXlsxBytes, xlsxRows: fopsXlsxRows, deliver: fopsDeliver, download: fopsDownload, FO: FO } } };

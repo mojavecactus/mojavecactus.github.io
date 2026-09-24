@@ -79,7 +79,7 @@ async function boot(opts) {
   w.ZXingWASM = { readBarcodes: () => Promise.resolve([]), prepareZXingModule() {} }; w.scrollTo = () => {};
   w.eval(PAYLOAD);
   if (opts.bo) w.TOOLBOX.bo = { url: BOURL, key: 'bo-key' }; else delete w.TOOLBOX.bo; // backorder hub only where a test asks for it
-  if (!opts.noUsage) w.TOOLBOX.usage = { url: HUB, key: 'write-key' };
+  if (opts.noUsage) delete w.TOOLBOX.usage; else w.TOOLBOX.usage = { url: HUB, key: 'write-key' }; // the live payload carries the real hub
   if (!w.TextEncoder) { w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder; }
   w.eval(fs.readFileSync(R + '/lib/inflate.js', 'utf8'));
   w.document.documentElement.classList.add('authed');
