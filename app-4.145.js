@@ -39,7 +39,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.144';
+  var APPVER = '4.145';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -367,17 +367,18 @@ var GLOSS = {
       sec = b.getAttribute('data-bo-sec'); draw();
     });
     var rb = document.getElementById('bo-refresh'), bodyEl = document.getElementById('bo-body');
-    function refresh() {
+    function refresh(cb) {
       if (rb) { rb.disabled = true; rb.classList.add('spin'); }
       draw();
       var t0 = Date.now();
       boFetch(function () {
         // keep the spin visible for at least half a turn so a fast (cached) answer still reads as a refresh
-        setTimeout(function () { if (rb) { rb.disabled = false; rb.classList.remove('spin'); } draw(); }, Math.max(0, 600 - (Date.now() - t0)));
+        setTimeout(function () { if (rb) { rb.disabled = false; rb.classList.remove('spin'); } draw(); if (cb) cb(); }, Math.max(0, 600 - (Date.now() - t0)));
       });
     }
-    if (rb) rb.addEventListener('click', refresh);
+    if (rb) rb.addEventListener('click', function () { refresh(); });
     if (bodyEl) bodyEl.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('[data-bo-retry]')) refresh(); });
+    CURREFRESH = function () { return new Promise(function (res) { refresh(res); }); }; // P48: pull down to refresh (the ↻ spins too)
     if (!BO.data || Date.now() - BO.at > BO_STALE_MS) refresh();
   }
 
@@ -4881,11 +4882,21 @@ var GLOSS = {
   }
 
   // ---- pull-to-refresh: screens register CURREFRESH (a function returning a promise) ----
-  var CURREFRESH = null;
+  // P48: the arrow never outlives its gesture. The system taking the touch (touchcancel), the app going to the
+  // background and leaving the screen (route() calls PTR_RESET) put it away; a refresh already running finishes
+  // silently. A 20-s watchdog on `busy` keeps a refresh that never settles from switching pull-to-refresh off.
+  // A full pull is unchanged: same 80-px threshold, one CURREFRESH call, the same 250-ms settle.
+  var CURREFRESH = null, PTR_RESET = null;
   (function () {
     var ind = document.createElement('div'); ind.id = 'ptr'; ind.innerHTML = '&#x21bb;'; document.body.appendChild(ind);
-    var y0 = null, pulling = false, busy = false;
+    var y0 = null, pulling = false, busy = false, wd = null;
     function top() { return (window.scrollY || document.documentElement.scrollTop || 0) <= 0; }
+    function hide() { ind.classList.remove('spin'); ind.style.opacity = '0'; ind.style.transform = 'translate(-50%,-40px)'; }
+    function shown() { return ind.classList.contains('spin') || (ind.style.opacity !== '' && ind.style.opacity !== '0'); }
+    function cancel() { y0 = null; pulling = false; if (!busy && shown()) hide(); } // a running refresh keeps its spin
+    PTR_RESET = function () { y0 = null; pulling = false; if (shown()) hide(); }; // no-op unless the arrow is showing
+    document.addEventListener('touchcancel', cancel, { passive: true });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) cancel(); });
     document.addEventListener('touchstart', function (e) {
       if (!CURREFRESH || busy || !top() || document.body.classList.contains('cc-fixed')) { y0 = null; return; }
       var t = e.target; if (t.closest && t.closest('#cc-sheet, #ask-sheet, .k-scroll, .fa2-modal, input, textarea')) { y0 = null; return; }
@@ -4901,10 +4912,12 @@ var GLOSS = {
       if (y0 === null) return;
       var dy = (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : y0) - y0;
       y0 = null;
-      if (!pulling || dy < 80 || !CURREFRESH) { ind.style.opacity = '0'; return; }
+      if (!pulling || dy < 80 || !CURREFRESH) { pulling = false; ind.style.opacity = '0'; return; }
+      pulling = false;
       busy = true; ind.style.opacity = '1'; ind.style.transform = 'translate(-50%,0)'; ind.classList.add('spin');
       try { navigator.vibrate && navigator.vibrate(12); } catch (ev) {}
-      var done = function () { busy = false; ind.classList.remove('spin'); ind.style.opacity = '0'; ind.style.transform = 'translate(-50%,-40px)'; };
+      var fin = false, done = function () { if (fin) return; fin = true; clearTimeout(wd); busy = false; hide(); };
+      wd = setTimeout(done, 20000);
       Promise.resolve().then(function () { return CURREFRESH(); }).then(function () { setTimeout(done, 250); }, function () { setTimeout(done, 250); });
     }, { passive: true });
   })();
@@ -7318,6 +7331,7 @@ var GLOSS = {
     if (pmv && dec(h) !== dec(pmv.dataset.route || '')) pnMoveClose(false); // Back / any navigation away dismisses it
     if (!soft) hideWN(false);
     CURREFRESH = null;
+    try { if (PTR_RESET) PTR_RESET(); } catch (ePtr) {} // the pull-to-refresh arrow never follows you to the next screen
     homeBtn.classList.add('away');
     if (!soft) FILT = {};
     CURVIEW = null;

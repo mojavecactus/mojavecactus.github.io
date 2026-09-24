@@ -126,5 +126,13 @@ from the global install. Suites marked *data.js* need the decrypted catalog (ste
     - `emergency`: `tools/emergency/sw-emergency.js` served as sw.js takes over without a tap and keeps every cache.
   - All three start `tools/platform-test/tserver.js` (Pages-like: gzip, max-age=600, throttling, and `/__ctl` switches
     for offline, failing photo requests and an alternate sw.js).
+  - `APP_PW=<catalog pw> node tools/platform-test/ptr-test.js [--engine webkit]` — pull to refresh (P48), with fake
+    cycle-count and F&A logins and fake hubs (nothing reaches a real hub); 10 checks, about a minute. Chromium gets
+    real CDP touches, WebKit gets TouchEvents at the same point; `--mode baseline --site <old build>` expects the old
+    bugs instead. It checks that:
+    - a full pull on the cycle-count home and on F&A refreshes once and clears, exactly as before;
+    - a touchcancel, leaving the screen or the app going to the background mid-pull leaves no ↻ behind;
+    - a refresh that never settles lets go of the ↻ after 20 s, and the next pull works;
+    - a pull on the Backorder Report fetches it once and spins its ↻; offline, the arrow still clears.
   - WebKit (the iPhone engine) needs a Playwright WebKit build: set `PLAYWRIGHT_BROWSERS_PATH` to the folder
     holding it. Never run `playwright install` into system paths for this.
