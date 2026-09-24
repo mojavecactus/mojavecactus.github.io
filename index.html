@@ -17,7 +17,7 @@
      can't fake it, and behind a hospital captive portal the TLS handshake fails → false. navigator.onLine alone lies there.
    TBX_FAIL(phase, err): keep the saved login, reset __tbxBooted, show the "ToolBox didn't open" card.
    The 4-second watchdog below never wipes while offline, never unregisters the service worker, and only ever deletes
-   the app-shell cache (tbx-vNNN-…) — never the photo cache (tbx-photos-*) or queued feedback (tbx-fbq). */
+   the app-shell cache (tbx-vNNN-…) — never the photo cache (tbx-img) or queued feedback (tbx-fbq). */
 (function () {
   var SHELL = /^tbx-v\d+-/;
   window.TBX_PROBE = function (ms) {
@@ -623,6 +623,16 @@ html:not(.authed) #fb-fab, html:not(.authed) #updbanner { display: none !importa
 .about-card .about-logo{width:58px; height:58px; margin:0 auto 6px;}
 .about-card .tip{padding:8px 0; font-size:13.5px; line-height:1.48;}
 .ab-gh{margin:12px 2px 6px;}
+/* P2: the "Offline photos" line on About. P34: a card photo that really failed to load (cardPhotos in the bundle) */
+.ab-photos{margin-top:3px; color:var(--muted); font-size:12.5px; line-height:1.4;}
+.ab-ph-go{border:0; background:none; color:var(--amber); font:inherit; font-weight:700; padding:7px 8px; cursor:pointer;}
+img.ph-failed{display:none;}
+.ph-miss{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; width:100%; min-height:140px;
+  margin:14px auto 4px; padding:14px 12px; border:1px dashed var(--line); border-radius:12px; background:var(--panel2);
+  color:var(--muted); font:inherit; font-size:13px; text-align:center; cursor:pointer;}
+.ph-miss b{color:#CFCBC4; font-weight:700;}
+.ph-miss em{font-style:normal; color:var(--amber); font-size:12.5px; font-weight:700;}
+.ph-miss:active{background:var(--panel);}
 /* cycle count */
 .cc-card{max-width:420px; margin:14px auto; text-align:center; padding:20px 16px;}
 .cc-h{margin:0 0 6px; font-size:var(--fs-xl);}
@@ -1488,7 +1498,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
 </script>
 <script src="lib/inflate.js"></script>
 <script src="lib/zxing-reader.js"></script>
-<script src="app-4.143.js"></script>
+<script src="app-4.144.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>

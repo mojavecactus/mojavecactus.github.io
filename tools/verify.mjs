@@ -4,6 +4,7 @@
 // Exit 0 = safe to ship. Any FAIL exits 1. WARNs print but do not block.
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
+import { check as manifestCheck, swList } from './img-manifest.mjs';
 
 const R = process.cwd();
 // The app bundle is versioned by filename (app-<ver>.js); index.html's script tag is the source of truth.
@@ -81,24 +82,48 @@ D.items.forEach(i => {
   });
 }
 
-// ---- 6 images three-way (data refs / ASSETS / disk) ----
+// ---- 6 images three-way (data refs / img-manifest.json / disk) + the service worker's shell lists ----
+// Photos and guide pages live in the long-lived 'tbx-img' cache keyed by img-manifest.json (tools/img-manifest.mjs);
+// sw.js lists only the app shell. After editing img/ or guide/pages/: node tools/img-manifest.mjs, then this script.
+// tools/emergency/sw-emergency.js shipped as sw.js carries none of the lists: those checks then only warn.
+const EMERGENCY_SW = /TBX-EMERGENCY-SW/.test(sw);
+if (EMERGENCY_SW) WARN('sw.js is the EMERGENCY service worker (tools/emergency) — ship a normal fixed sw.js within a day');
+const MANIFEST = (() => {
+  const r = manifestCheck(R);
+  r.fails.forEach(f => (EMERGENCY_SW && /sw\.js/.test(f) ? WARN : FAIL)('img-manifest: ' + f));
+  return (r.onDisk && r.onDisk.files) || {};
+})();
 {
-  const assets = [...sw.matchAll(/'\.\/(img\/[^']+)'/g)].map(m => m[1]);
-  const adup = {};
-  assets.forEach(a => { adup[a] = (adup[a] || 0) + 1; });
-  Object.entries(adup).filter(([, v]) => v > 1).forEach(([k]) => FAIL('duplicate ASSETS entry: ' + k));
   const disk = readdirSync(R + '/img').map(f => 'img/' + f);
   const refs = new Set();
   all.forEach(i => (i.imgs || []).forEach(x => refs.add(x)));
   refs.forEach(r => {
     if (!existsSync(R + '/' + r)) FAIL('card image missing on disk: ' + r);
-    if (!assets.includes(r)) FAIL('card image not precached: ' + r);
+    if (!MANIFEST[r]) FAIL('card image not in img-manifest.json (never saved offline): ' + r);
   });
-  assets.forEach(a => { if (!existsSync(R + '/' + a)) FAIL('ASSETS entry missing on disk: ' + a); });
   disk.forEach(f => { if (!refs.has(f)) FAIL('orphan image on disk (unreferenced by any card): ' + f); });
-  ['./index.html', './' + APP, './payload.enc.json'].forEach(core => {
-    if (!sw.includes("'" + core + "'")) FAIL('core asset missing from precache: ' + core);
+}
+if (!EMERGENCY_SW) {
+  const assets = swList(sw, 'ASSETS'), core = swList(sw, 'CORE');
+  if (!assets) FAIL('sw.js ASSETS list missing or unreadable');
+  if (!core) FAIL('sw.js CORE list missing or unreadable');
+  const A = assets || [], C = core || [];
+  const adup = {};
+  A.forEach(a => { adup[a] = (adup[a] || 0) + 1; });
+  Object.entries(adup).filter(([, v]) => v > 1).forEach(([k]) => FAIL('duplicate ASSETS entry: ' + k));
+  A.forEach(a => { if (a !== './' && !existsSync(R + '/' + a)) FAIL('ASSETS entry missing on disk: ' + a); });
+  C.forEach(c => { if (c !== './' && !A.includes(c)) FAIL('CORE entry not in ASSETS (never precached): ' + c); });
+  ['./index.html', './' + APP, './payload.enc.json', './img-manifest.json'].forEach(c => {
+    if (!C.includes(c)) FAIL('core asset missing from precache (sw.js CORE): ' + c);
   });
+  // cycle count + F&A must work offline from the first launch: their files are core, never best-effort
+  ['./ccscan.js', './lib/inflate.js', './lib/zxing-reader.js', './lib/zxing_reader.wasm'].concat(
+    readdirSync(R).filter(f => /^(cc|fa2)(-[a-z0-9]+)?\.enc\.json$/.test(f)).map(f => './' + f)).forEach(c => {
+    if (!C.includes(c)) FAIL('cycle-count / F&A file missing from sw.js CORE: ' + c);
+  });
+  // old caches may only be deleted through isShell() = /^tbx-v\d+-/ — never the photo cache
+  if (!/function isShell\(k\) \{ return \/\^tbx-v\\d\+-\/\.test\(k\); \}/.test(sw)) FAIL('sw.js isShell() must be exactly /^tbx-v\\d+-/ (it guards the photo cache)');
+  sw.split('\n').forEach((l, i) => { if (/caches\.delete\(/.test(l) && !/isShell\(/.test(l)) FAIL('sw.js:' + (i + 1) + ' deletes a cache without the isShell() filter'); });
 }
 
 // ---- 7 grouped-cat registration (the GraftJacket bug class) ----
@@ -167,7 +192,7 @@ all.forEach(i => (i.specs || []).forEach(([k, v]) => {
     const appPages = loop ? +loop[1] : -1;
     if (pdfPages !== webps) FAIL('guide: PDF has ' + pdfPages + ' pages but guide/pages has ' + webps + ' webps');
     if (appPages !== webps) FAIL('guide: app renders ' + appPages + ' pages but guide/pages has ' + webps);
-    for (let i = 1; i <= webps; i++) if (!sw.includes("'./guide/pages/p" + i + ".webp'")) FAIL('guide page not precached: p' + i + '.webp');
+    for (let i = 1; i <= webps; i++) if (!MANIFEST['guide/pages/p' + i + '.webp']) FAIL('guide page not in img-manifest.json (never saved offline): p' + i + '.webp');
   } catch (e) { WARN('guide check skipped: ' + e.message); }
 }
 

@@ -39,7 +39,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.143';
+  var APPVER = '4.144';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2540,6 +2540,7 @@ var GLOSS = {
         '<img class="about-logo" src="favicon.svg" alt="SportsMed Toolbox logo">' +
         '<h1 style="margin:0">Sports<span style="color:var(--amber)">Med</span> Toolbox</h1>' +
         '<div style="color:var(--muted); font-size:13px; margin-top:5px">v' + APPVER + ' &middot; data updated ' + esc(D.built) + '</div>' +
+        '<div class="ab-photos" id="ab-photos" hidden></div>' +
         '<div style="margin-top:6px"><button class="footlink" data-act="checkupd">Check for updates</button>' +
         '<span class="footsep">&middot;</span><button class="footlink" data-act="cyclecount">CT Team</button>' +
         '</div>' +
@@ -2550,7 +2551,7 @@ var GLOSS = {
         '<div class="tip"><b>Scan the label.</b> The barcode button reads any package barcode &mdash; the card opens with lot and expiration shown.</div>' +
         '<div class="tip"><b>Zoom the fine print.</b> Tap any product photo to view it fullscreen; pinch or double-tap to zoom.</div>' +
         '<div class="tip"><b>Save your go-tos.</b> Tap &#9734; Favorite on any card to pin it to Favorites at the top of home.</div>' +
-        '<div class="tip"><b>Take it offline.</b> Once loaded, everything works with zero signal &mdash; no blackouts in hospital dead zones.</div>' +
+        '<div class="tip"><b>Take it offline.</b> Once loaded, everything works with zero signal &mdash; photos finish saving in the background (see Offline photos above).</div>' +
         '<div class="tip"><b>Install it.</b> Add the site to your home screen for the full app experience. <button class="footlink" data-act="a2hs" style="padding:0">Show me how &#x203A;</button></div>' +
       '</div>' +
       '<div class="grouphead ab-gh">Credits</div>' +
@@ -2560,6 +2561,7 @@ var GLOSS = {
       '</div>' +
       '<div class="about-quote">\u201cIf your tools don\u2019t work, make them work. If you can\u2019t make them work, make some that do work.\u201d<span class="aq-by">\u2014 Homer Stryker</span></div>' +
       '<div style="text-align:center; margin:18px 0 6px"><button class="footlink" data-act="lockdev">Lock this device</button></div>');
+    setTimeout(function () { try { phAbout(); } catch (ePh) {} }, 0);   // P2: the "Offline photos" line, once painted
   }
   function notFoundScreen(sku) { // P14: an old favorite / shared link / typo — say so, offer Search and Scan
     setTitle('Not in ToolBox', ''); backBtn.hidden = false; CUR_IT = null;
@@ -7885,12 +7887,186 @@ var GLOSS = {
     });
   })();
 
+  // ---- P2: offline photos — the service worker keeps every photo and guide page in its long-lived 'tbx-img' cache ----
+  // 3 s after the first screen paints, the page asks the SW for each file this phone hasn't saved yet, 4 at a time
+  // (?fill=1: the SW downloads it, checks its hash against img-manifest.json, saves it and answers 204 + x-tbx-stored,
+  // so no photo body reaches the page). Order: guide pages (cycle-count help), photos on the rep's favorites and recents,
+  // then the rest. Any connection, cellular too (iOS can't tell them apart). Pauses while the app is hidden, stops at
+  // the first "offline" answer and resumes on 'online', on foreground, when the SW first takes control and on the next
+  // launch — the missing set is recomputed from the cache every time, so nothing downloads twice. Never on the boot
+  // path, and a photo failure never blocks anything else. Applying an update stops it for good (phHalt).
+  // window.TBX_PHOTOS = { status(), fill(force), scan(), saved(path), on(fn) → off }; the event 'tbx-photo'
+  // {detail:{path}} fires for every file saved (cardPhotos swaps the SW's placeholder for the real photo).
+  var PH = { have: 0, total: 0, state: 'idle', busy: false, halt: false, bad: {}, got: null, fns: [], t: 0 };
+  var PH_OK = false, PH_BASE = '';
+  try { PH_OK = 'serviceWorker' in navigator && !!window.caches && !!window.fetch; PH_BASE = new URL('./', location.href).href; } catch (ePh0) { PH_OK = false; }
+  function phStatus() { return { have: PH.have, total: PH.total, state: PH.state, busy: PH.busy }; }
+  function phEmit() { var st = phStatus(); PH.fns.slice().forEach(function (f) { try { f(st); } catch (e) {} }); }
+  function phPath(src) {                       // 'img/x.jpg' for img/x.jpg?t=1, ./img/x.jpg, https://…/img/x.jpg#r
+    var u = String(src || '').split('#')[0].split('?')[0];
+    if (PH_BASE && u.indexOf(PH_BASE) === 0) u = u.slice(PH_BASE.length);
+    return u.replace(/^\.\//, '');
+  }
+  function phSaved(p) { return PH.got ? !!PH.got[phPath(p)] : null; }   // null = not scanned yet
+  function phScan() {
+    if (!PH_OK) return Promise.resolve([]);
+    return fetch('img-manifest.json').then(function (r) { if (!r.ok) throw new Error('img-manifest ' + r.status); return r.json(); }).then(function (m) {
+      return caches.open('tbx-img').then(function (c) { return c.keys(); }).then(function (ks) {
+        var have = {}, got = {}, miss = [], n = 0, tot = 0;
+        ks.forEach(function (q) { have[q.url] = 1; });
+        Object.keys(m.files || {}).forEach(function (p) {
+          var img = p.indexOf('img/') === 0; if (img) tot++;
+          if (have[PH_BASE + p + '?h=' + m.files[p][0]]) { got[p] = 1; if (img) n++; } else miss.push(p);
+        });
+        PH.got = got; PH.have = n; PH.total = tot;
+        if (!PH.busy && n >= tot) PH.state = 'done';
+        phEmit();
+        return miss;
+      });
+    });
+  }
+  function phOrder(miss) {                     // guide pages, then the photos on favorites and recents, then the rest
+    var pri = {};
+    try {
+      favs().map(function (f) { return f && f.it && f.it.sku; }).concat(recents().map(function (r) { return r && r.sku; })).forEach(function (s) {
+        var rec = s ? recOf(BYPN[nrm(s)] || BYPNZ[nrm(s).replace(/^0+/, '')]) : null;
+        ((rec && rec.imgs) || []).forEach(function (im) { pri[im] = 1; });
+      });
+    } catch (e) {}
+    return miss.map(function (p, i) { return { p: p, k: (p.indexOf('guide/') === 0 ? 0 : pri[p] ? 1 : 2) * 1e6 + i }; })
+      .sort(function (a, b) { return a.k - b.k; }).map(function (x) { return x.p; });
+  }
+  function phFill(force) {
+    if (!PH_OK || PH.busy || PH.halt || !navigator.serviceWorker.controller) return Promise.resolve(phStatus());
+    if (!force && document.hidden) return Promise.resolve(phStatus());
+    PH.busy = true; PH.state = 'filling'; phEmit();
+    return phScan().then(function (miss) {
+      miss = phOrder(miss.filter(function (p) { return (PH.bad[p] || 0) < 2; }));
+      var i = 0, stop = '';
+      function one() {
+        if (stop || i >= miss.length) return Promise.resolve();
+        if (PH.halt) { stop = 'paused'; return Promise.resolve(); }
+        if (document.hidden && !force) { stop = 'paused'; return Promise.resolve(); }
+        var p = miss[i++];
+        return fetch(p + '?fill=1', { cache: 'no-store' }).then(function (r) {
+          var st = r.headers.get('x-tbx-stored');
+          if (st === null) { stop = 'partial'; return; }         // an older service worker is in control: leave it alone
+          if (st === '1') {
+            if (!PH.got[p]) { PH.got[p] = 1; if (p.indexOf('img/') === 0) PH.have++; }
+            try { window.dispatchEvent(new CustomEvent('tbx-photo', { detail: { path: p } })); } catch (e3) {}
+            if (PH.have % 10 === 0) phEmit();
+            return;
+          }
+          var why = r.headers.get('x-tbx-why') || '';
+          if (why === 'offline' || why === 'timeout' || why === 'error') stop = 'offline';
+          else if (why === 'quota') stop = 'quota';
+          else if (why === 'nomanifest') stop = 'partial';
+          else if (why === 'hash') PH.bad[p] = (PH.bad[p] || 0) + 1;  // a stale CDN copy right after a deploy: one more try later
+          else PH.bad[p] = 2;                                        // httpNNN, unlisted, crypto: skip it this session
+        }, function () { stop = 'offline'; }).then(one);
+      }
+      var w = []; for (var k = 0; k < 4; k++) w.push(one());
+      return Promise.all(w).then(function () {
+        PH.busy = false;
+        PH.state = PH.have >= PH.total ? 'done' : (stop || 'partial');
+        phEmit(); return phStatus();
+      });
+    }).catch(function () { PH.busy = false; PH.state = 'partial'; phEmit(); return phStatus(); });
+  }
+  // Applying an update stops the fill for good (this page is about to reload): a waiting worker only takes over once
+  // the current one has no request in flight, and a running fill always has some.
+  function phHalt() { if (PH) { PH.halt = true; clearTimeout(PH.t); } }
+  function phSoon(ms) { if (!PH_OK || PH.halt) return; clearTimeout(PH.t); PH.t = setTimeout(function () { phFill(false); }, ms); }
+  window.TBX_PHOTOS = { status: phStatus, fill: phFill, scan: phScan, saved: phSaved,
+    on: function (f) { PH.fns.push(f); return function () { PH.fns = PH.fns.filter(function (g) { return g !== f; }); }; } };
+  // About, under the version line: "Offline photos: 523 of 665 saved — downloading…" (hidden without a service worker)
+  function phLine(st) {
+    if (!st.total) return '';
+    if (st.have >= st.total) return 'Offline photos: all ' + st.total + ' saved ✓';
+    var s = 'Offline photos: ' + st.have + ' of ' + st.total + ' saved — ';
+    if (st.state === 'quota') return s + 'phone storage is full';
+    if (st.state === 'offline' || navigator.onLine === false) return s + 'continues when you’re online';
+    if (st.state === 'filling') return s + 'downloading…';
+    return s + 'tap to continue';
+  }
+  function phAbout() {
+    var el = document.getElementById('ab-photos');
+    if (!el || !PH_OK || !navigator.serviceWorker.controller) return;
+    var off = window.TBX_PHOTOS.on(draw);
+    function draw(st) {
+      if (!el.isConnected) { off(); return; }
+      var t = phLine(st);
+      el.hidden = !t;
+      el.innerHTML = /tap to continue$/.test(t) ? '<button type="button" class="ab-ph-go" data-act="phfill">' + esc(t) + '</button>' : esc(t);
+    }
+    draw(phStatus());
+    phScan().then(function () { if (PH.have < PH.total && !PH.busy && PH.state !== 'quota' && navigator.onLine !== false) phFill(false); }, function () {});
+  }
+  document.addEventListener('click', function (e) {
+    if (!(e.target.closest && e.target.closest('[data-act="phfill"]'))) return;
+    toastMsg('Downloading photos…', 1800);
+    PH.bad = {}; phFill(true);
+  });
+  try {
+    if (PH_OK) {
+      phSoon(3000);                                   // TBX_BOOT has just routed: the first screen paints first
+      window.addEventListener('online', function () { phSoon(1500); });
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) phSoon(2000); });
+      navigator.serviceWorker.addEventListener('controllerchange', function () { phSoon(2000); });   // first install
+    }
+  } catch (ePh1) {}
+
+  // ---- P34 (in-card side): a card photo that really failed to load ----
+  // A photo the phone hasn't saved comes from the service worker as its own "Photo downloads when online" picture — a
+  // normal load — so the error below only fires on a real failure (a missing file, or no service worker and no signal).
+  // ONE helper, attached once to the element that holds the card photos (today #content); re-attach it to any new card
+  // markup. For every <img> under root whose src is a card photo (img/…; the cycle-count guide pages are left alone):
+  //   error      → the photo is hidden and "Photo not saved offline yet · Tap to try again" takes its place; a tap retries
+  //   'online'   → failed photos, and photos not known to be saved (they may show the SW's picture), load again
+  //   'tbx-photo' {detail:{path}} (the background fill saved it) → that photo loads again
+  // A retry is src = path + '?t=' + time: a fresh load for the browser, the same file for the SW (it ignores the query).
+  var PH_ICO = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.3l1.4-2h5.6l1.4 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.5" r="3.3"/></svg>';
+  function cardPhotos(root) {
+    if (!root || root.__tbxPhotos) return;
+    root.__tbxPhotos = 1;
+    function isPhoto(im) { return !!(im && im.tagName === 'IMG' && /^img\//.test(phPath(im.getAttribute('src')))); }
+    function reload(im) {
+      var nx = im.nextElementSibling;
+      if (nx && nx.classList && nx.classList.contains('ph-miss')) nx.parentNode.removeChild(nx);
+      im.classList.remove('ph-failed');
+      im.src = phPath(im.getAttribute('src')) + '?t=' + Date.now();
+    }
+    function again(only) {
+      [].forEach.call(root.querySelectorAll('img'), function (im) {
+        if (!isPhoto(im)) return;
+        var p = phPath(im.getAttribute('src'));
+        if (only ? p === only : (im.classList.contains('ph-failed') || phSaved(p) !== true)) reload(im);
+      });
+    }
+    root.addEventListener('error', function (e) {        // capture: <img> errors don't bubble (and never reach heal)
+      var im = e.target;
+      if (!isPhoto(im) || im.classList.contains('ph-failed')) return;
+      im.classList.add('ph-failed');
+      im.insertAdjacentHTML('afterend', '<button type="button" class="ph-miss" aria-label="Photo not saved offline yet · Tap to try again">' +
+        PH_ICO + '<b>Photo not saved offline yet</b><em>Tap to try again</em></button>');
+    }, true);
+    root.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('.ph-miss'), im = b && b.previousElementSibling;
+      if (im && isPhoto(im)) reload(im);
+    });
+    window.addEventListener('online', function () { try { again(''); } catch (e1) {} });
+    window.addEventListener('tbx-photo', function (ev) { try { if (ev.detail && ev.detail.path) again(ev.detail.path); } catch (e2) {} });
+  }
+  try { cardPhotos(content); } catch (ePh2) {}
+
   // ---- service worker + update banner + manual check ----
   var TBX_REG = null, TBX_WANT = false, TBX_RELOADED = false;
   // P8: reload because THIS page asked for the update (banner, Check for updates) — decided when the new worker takes
   // over, not from a flag frozen at boot. A takeover nobody here asked for never reloads an active user.
   function tbxApplyUpdate() {
     TBX_WANT = true;
+    try { phHalt(); } catch (eH) {}          // P2: the photo fill's requests drain, so the new worker can take over
     var w = TBX_REG && TBX_REG.waiting;
     if (w) w.postMessage('SKIP_WAITING');
     setTimeout(function () {                   // the takeover can be missed (raced a newer worker, or another window took it)

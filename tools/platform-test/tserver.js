@@ -1,13 +1,17 @@
 // Throttled static server that behaves like GitHub Pages for the platform tests (gzip for text, shared bandwidth
-// cap, per-request latency, max-age=600) plus test switches. Started by boot-failsafe.js / lockdev.js; not run on its own.
+// cap, per-request latency, max-age=600) plus test switches. Started by boot-failsafe.js / lockdev.js / sw-upgrade.js;
+// not run on its own.
 //   ROOT_OLD / ROOT_NEW   the two builds; GET /__ctl?root=old|new switches which one is served
 //   BUMP_NEW=1            serve the NEW root's sw.js with "-bump" appended to CACHE (re-release an identical build)
-// Control: GET /__ctl?rate=<bytes/s|0>&rtt=<ms>&offline=<0|1>&root=<old|new>&reset=1 → JSON {S, stats}
+//   SW_ALT=<file>         with /__ctl?swalt=1, /sw.js is this file instead (e.g. tools/emergency/sw-emergency.js)
+// Control: GET /__ctl?rate=<bytes/s|0>&rtt=<ms>&offline=<0|1>&root=<old|new>&failimg=<0|1|NNN>&swalt=<0|1>&reset=1
+//   → JSON {S, stats}. failimg=1 drops every img/ and guide/pages/ request (a network failure), failimg=NNN answers them
+//   with HTTP NNN; everything else is served normally.
 // stats.byClass splits wire bytes into img (img/, guide/pages/), payload, sw, other; stats.imgReqs counts image requests.
 const http = require('http'), fs = require('fs'), path = require('path'), zlib = require('zlib');
 const PORT = +process.env.PORT;
 const ROOTS = { old: process.env.ROOT_OLD, new: process.env.ROOT_NEW || process.env.ROOT_OLD };
-let S = { rate: 0, rtt: 0, offline: 0, root: 'old' };
+let S = { rate: 0, rtt: 0, offline: 0, root: 'old', failimg: 0, swalt: 0 };
 const stats = { bytes: 0, reqs: 0, byClass: {}, imgReqs: 0, log: [] };
 const gz = new Map();
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.mjs': 'application/javascript; charset=utf-8',
@@ -29,7 +33,7 @@ const cls = p => /^\/(img|guide\/pages)\//.test(p) ? 'img' : p === '/payload.enc
 const srv = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   if (u.pathname === '/__ctl') {
-    for (const k of ['rate', 'rtt', 'offline']) if (u.searchParams.has(k)) S[k] = +u.searchParams.get(k);
+    for (const k of ['rate', 'rtt', 'offline', 'failimg', 'swalt']) if (u.searchParams.has(k)) S[k] = +u.searchParams.get(k);
     if (u.searchParams.has('root')) S.root = u.searchParams.get('root');
     if (u.searchParams.has('reset')) { stats.bytes = 0; stats.reqs = 0; stats.byClass = {}; stats.imgReqs = 0; stats.log = []; }
     res.setHeader('content-type', 'application/json'); res.setHeader('cache-control', 'no-store');
@@ -38,8 +42,12 @@ const srv = http.createServer(async (req, res) => {
   if (S.offline) { req.socket.destroy(); return; }
   let p = decodeURIComponent(u.pathname); if (p.endsWith('/')) p += 'index.html';
   const root = ROOTS[S.root];
-  const file = path.join(root, p);
+  const file = p === '/sw.js' && S.swalt && process.env.SW_ALT ? path.resolve(process.env.SW_ALT) : path.join(root, p);
   if (S.rtt) await new Promise(r => setTimeout(r, S.rtt));
+  if (S.failimg && cls(p) === 'img') {
+    if (S.failimg === 1) { req.socket.destroy(); return; }
+    res.statusCode = S.failimg; res.setHeader('content-type', 'text/html'); res.setHeader('cache-control', 'no-store'); return res.end('failimg');
+  }
   fs.readFile(file, async (err, buf) => {
     if (err) { res.statusCode = 404; res.setHeader('content-type', 'text/html'); return res.end('<!doctype html><title>404</title>not found'); }
     if (p === '/sw.js' && S.root === 'new' && process.env.BUMP_NEW) buf = Buffer.from(String(buf).replace(/var CACHE = '([^']+)';/, "var CACHE = '$1-bump';"));
