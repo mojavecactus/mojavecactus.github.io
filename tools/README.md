@@ -6,12 +6,22 @@ The product data (`data.js`), barcode map (`gtin.js`), and what's-new feed (`wha
 The site decrypts it in the browser after the password is entered — the password never leaves
 the device and the readable data never touches the server.
 
+**Payload format (P49/P50).** The payload holds the data, not code: the four globals the three files define
+(`TOOLBOX`, `TBX_GTIN`, `TBX_GTIN14`, `TBX_WN`) as one JSON object, compressed with raw deflate before it is
+encrypted — the envelope says `"z":"deflate-raw","f":"json"`, and the file is about 0.15 MB instead of 1.6 MB. The
+page inflates it (DecompressionStream; `lib/inflate.js` on iOS < 16.4) and JSON-parses it, no eval. It still opens
+the old format (no `z`/`f`: the three files as JS text); an unknown `z`/`f` shows the "ToolBox didn't open" card and
+keeps the saved login. `tools/payload-lib.cjs` is the Node-side reader for both formats, shared by the tools and the
+jsdom suites. verify.mjs fails on an uncompressed payload (no `z`, or 400 KB and over).
+
 ## Editing the data
 
 1. `node tools/decrypt-data.mjs <team-password>` — writes data.js / gtin.js / whatsnew.js
    locally. These files are **gitignored**; they must never be committed.
-2. Edit them as before.
-3. `node tools/encrypt-data.mjs <team-password> [extra-password ...]` — regenerates `payload.enc.json`.
+2. Edit them as before (they stay JS files: `window.X = …;`; the values must be plain JSON data).
+3. `node tools/encrypt-data.mjs <team-password> [extra-password ...]` — regenerates `payload.enc.json`: it
+   compresses and encrypts, opens the result again with every password and compares it with the three files, and
+   writes nothing if that fails or the data isn't plain JSON (a function, `undefined`, `NaN`).
 4. Bump the CACHE version on line 1 of `sw.js`.
 5. Commit `payload.enc.json` (+ sw.js) and push.
 
@@ -19,7 +29,8 @@ the device and the readable data never touches the server.
 
 Re-run `tools/encrypt-data.mjs` with the new password (after decrypting with the old one).
 Everyone's saved "Remember me" sessions stop working automatically — the old stored key can no
-longer decrypt the new payload, so the login screen reappears.
+longer decrypt the new payload, so the login screen reappears. (Every run draws a new salt, so this also happens,
+once, after any data release: Remember-me phones see "Your saved login has expired — enter the team password.")
 
 ## Recovery
 
@@ -39,8 +50,10 @@ a new password.
    (add, replace, re-encode, delete): `node tools/img-manifest.mjs` — it rewrites `img-manifest.json` and stamps
    `IMG_MANIFEST` in sw.js (verify.mjs fails until you do). `--diff <old manifest>` shows what phones will download.
 4. `node tools/encrypt-data.mjs <team-password>`.
-5. Round-trip check: decrypt the fresh payload in a temp dir and sha256-compare
-   data.js / gtin.js / whatsnew.js against the working copies.
+5. Round-trip check (encrypt-data.mjs already compares the payload with the files before writing it): decrypt the
+   fresh payload in a temp dir and sha256-compare data.js / gtin.js against the working copies — they come back
+   byte-identical. whatsnew.js comes back in its canonical layout (`window.TBX_WN = <JSON, 2-space indent>;`): identical
+   when the working copy came from decrypt-data.mjs, otherwise compare it semantically.
 6. **Version-at-push rule:** after a final `git fetch`, read `origin/main:sw.js` line 1 and set
    the new CACHE to that number **+1** (`tbx-vNNN-YYYYMMDD`). Never reuse or guess a number —
    this is what prevents two sessions colliding on the same version.
@@ -71,9 +84,21 @@ a new password.
 
 - **Serialization:** `data.js` is written as `'window.TOOLBOX='+JSON.stringify(D).replace(/-/g,'\\u002d')+';\n'`
   — one line, trailing newline, every `-` escaped as `\u002d` (this is what the live payload uses).
-  `gtin.js` is exactly two lines. Semantic JSON comparison — not byte diff — is the correct
+  `gtin.js` is exactly two lines. `whatsnew.js` is `'window.TBX_WN = '+JSON.stringify(WN, null, 2)+';\n'`
+  (decrypt-data.mjs writes all three this way). Semantic JSON comparison — not byte diff — is the correct
   round-trip test.
-- **Spec style:** metric values are written tight (`4mm`, not `4 mm`). verify.mjs enforces this.
+- **Spec style** (verify.mjs sections 8, 8g, 8h enforce it; the search filters read these fields):
+  - metric values are tight: `4mm`, `8cm`, `488N` — never `4 mm`, `8 cm`, `488 N`;
+  - inches are ″ (double prime): `36″`, heights `4′6″` — never `"` or `in`/`inch`;
+  - suture sizes carry the #: `#2-0`, `#4-0`, like `#2` and `#0` — never a bare `2-0`;
+  - force is lbf (pullout strength, suture sliding force, retention strand strength: `31.66 lbf`), weight is lb
+    (`12.2 lb`) — never `lbs`, and never lb on a force row;
+  - `×` between two sizes in spec rows and sublines (`8mm × 20mm`); titles and size chips keep their `x` (verify only
+    warns about an `x` in a spec row);
+  - sized rows (Diameter, Length, Anchor size, …) carry their unit, or the filters skip them (`2.7mm`, not `2.7`: warns);
+  - spec labels: one spelling per field, from `tools/spec-labels.json` (`allowed`). A retired spelling (`renamed`,
+    e.g. "Needles" → "Needle", "Cutting diameter" → "Cutting-head diameter") fails; a label that isn't listed only
+    warns — reuse an existing one, and add a new label to `allowed` only when none fits.
 - **CACHE** bumps on every deploy. **APPVER** bumps whenever app logic changes (bundle rename).
   **What's New** entries are added only with wording provided by the owner; releases are
   otherwise silent. Append new items at the **end** of `whatsnew.js` (oldest → newest); the app
@@ -85,7 +110,8 @@ a new password.
 
 Passwords come from the environment only — never write them into a file. jsdom is borrowed from
 `tools/cc-test/node_modules` or `tools/bo/node_modules` (`npm i jsdom@24` in either, once); Playwright
-from the global install. Suites marked *data.js* need the decrypted catalog (step 2 of the runbook).
+from the global install. Suites marked *data.js* need the decrypted catalog (step 2 of the runbook); the ones that
+take `APP_PW` open `payload.enc.json` themselves through `tools/payload-lib.cjs` (either payload format).
 
 - `node tools/verify.mjs` — data checks; must print VERIFY PASSED.
 - `cd tools/cc-test && TZ=UTC APP_PW=<catalog pw> node run.js` — cycle-count sync engine (see its README).
@@ -123,6 +149,13 @@ from the global install. Suites marked *data.js* need the decrypted catalog (ste
     "ToolBox didn't open" card (13 checks).
   - `APP_PW=<catalog pw> node tools/platform-test/lockdev.js [--engine webkit]` — "Lock this device" signs out
     every login but keeps unsent scans and the rep's own data (4 checks).
+  - `APP_PW=<catalog pw> node tools/platform-test/payload-format.js [--engine webkit] [--only fallback,prefetch,old,unknown]`
+    — the payload formats the gate opens (P49/P50; 21 checks; the site must hold a compressed JSON payload, the
+    variants are built in the OS temp folder): the lib/inflate.js fallback when DecompressionStream is missing, rejects
+    `deflate-raw` or fails mid-way (password unlock, Remember-me reload, offline launch), and when the deferred
+    inflate.js arrives late or fails once; the head prefetch (one payload request per launch, fetched again at unlock
+    after it failed); an old-format payload (no `z`/`f`) still opens; an unknown `z` or `f` shows the "didn't open"
+    card, never "Incorrect password", and keeps the saved login. Run it whenever the payload format or the gate changes.
   - `APP_PW=<catalog pw> node tools/platform-test/sw-upgrade.js --scenario <name> --old <live build> [--new <dir>]
     [--engine webkit] [--port N]` — the service worker across an update (P2/P34). `--old` is a plain copy of the
     build that is live on phones (`git worktree add` or `git archive <sha> | tar -x -C <dir>`), `--new` defaults to

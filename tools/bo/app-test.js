@@ -3,20 +3,15 @@
 // pills on rows/cards (incl. zero-tolerant SKU matching and multi-status), banner text, the fetch policy
 // (never before first paint, 30-min throttle, offline/cached fallback), and that CT screens still boot.
 //   cd tools/bo && (npm i jsdom@24 once) && APP_PW=<catalog pw> node app-test.js
-const { JSDOM } = require('jsdom'); const fs = require('fs'); const path = require('path'); const crypto = require('crypto');
+const { JSDOM } = require('jsdom'); const fs = require('fs'); const path = require('path');
 const R = path.resolve(__dirname, '../..');
 const C = require('./bo-core.js');
 const FX = path.join(__dirname, 'fixtures');
 const results = []; const check = (n, ok, d) => { results.push({ n, ok: !!ok }); console.log((ok ? 'PASS ' : 'FAIL ') + n + (d !== undefined ? '  — ' + (typeof d === 'string' ? d : JSON.stringify(d)).slice(0, 240) : '')); };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function decryptPayload(pw) {
-  const P = JSON.parse(fs.readFileSync(R + '/payload.enc.json', 'utf8'));
-  const key = crypto.pbkdf2Sync(pw, Buffer.from(P.salt, 'base64'), P.it, 32, 'sha256');
-  const ct = Buffer.from(P.ct, 'base64'); const d = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(P.iv, 'base64'));
-  d.setAuthTag(ct.slice(-16));
-  return Buffer.concat([d.update(ct.slice(0, -16)), d.final()]).toString();
-}
+// the catalog payload as a script for w.eval — either envelope format (tools/payload-lib.cjs)
+const { payloadScript } = require(R + '/tools/payload-lib.cjs');
 // The API the hub would serve after seed + the 9-7-26 email.
 const seed = JSON.parse(fs.readFileSync(path.join(FX, 'seed-2026-09-09.json'), 'utf8'));
 const parsed = C.parseReportHtml(fs.readFileSync(path.join(FX, 'report-2026-09-07.html'), 'utf8'));
@@ -45,7 +40,7 @@ async function boot(opts) {
   };
   if (opts.offline) Object.defineProperty(w.navigator, 'onLine', { get: () => false });
   w.ZXingWASM = { readBarcodes: () => Promise.resolve([]), prepareZXingModule() {} }; w.scrollTo = () => {};
-  w.eval(decryptPayload(process.env.APP_PW));
+  w.eval(payloadScript(R, process.env.APP_PW));
   if (opts.noHub) delete w.TOOLBOX.bo; else if (opts.off) w.TOOLBOX.bo = { url: HUB, key: 'test-key', off: true }; else w.TOOLBOX.bo = { url: HUB, key: 'test-key' }; // the live payload carries the real hub (+ off flag); tests always swap it
   if (!w.TextEncoder) { w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder; }
   w.eval(fs.readFileSync(R + '/lib/inflate.js', 'utf8'));

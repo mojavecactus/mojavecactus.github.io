@@ -6,7 +6,7 @@
 //   cd tools/bo && npm i jsdom@24 (once; this suite borrows it) && APP_PW=<catalog pw> node ../usage/app-test.js
 const path = require('path');
 const { JSDOM, VirtualConsole } = require(require.resolve('jsdom', { paths: [path.join(__dirname, '../bo/node_modules'), path.join(__dirname, '../cc-test/node_modules'), __dirname] }));
-const fs = require('fs'); const crypto = require('crypto');
+const fs = require('fs');
 const U = require('./usage-core.js');
 const R = path.resolve(__dirname, '../..');
 // the bundle version under test (app-<ver>.js in index.html), so a version bump doesn't need test edits
@@ -20,14 +20,8 @@ const BOAPI = { ok: true, ver: 1, asOf: '2026-09-21', reportId: '2026-09-21', we
   backorders: [{ sku: '3910500580', desc: 'DC GUIDE 1.4', seg: 'Shoulder Surgical Implants', line: 'ICONIX Instruments', since: '2026-09-21', clearDate: '2026-10-01', clearText: '', note: '' }],
   cleared: [] };
 
-function decryptPayload(pw) {
-  const P = JSON.parse(fs.readFileSync(R + '/payload.enc.json', 'utf8'));
-  const key = crypto.pbkdf2Sync(pw, Buffer.from(P.salt, 'base64'), P.it, 32, 'sha256');
-  const ct = Buffer.from(P.ct, 'base64'); const d = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(P.iv, 'base64'));
-  d.setAuthTag(ct.slice(-16));
-  return Buffer.concat([d.update(ct.slice(0, -16)), d.final()]).toString();
-}
-const PAYLOAD = decryptPayload(process.env.APP_PW || '');
+// the catalog payload as a script for w.eval — either envelope format (tools/payload-lib.cjs)
+const PAYLOAD = require(R + '/tools/payload-lib.cjs').payloadScript(R, process.env.APP_PW || '');
 
 // A believable hub: stores every u_ev row through the real core, answers u_live / u_stats with the real core.
 // v2 (N9) also answers u_queue / u_mark like Usage.gs does (review statuses merged per request). The default is the

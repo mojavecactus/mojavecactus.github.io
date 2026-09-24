@@ -224,6 +224,49 @@ all.forEach(i => (i.specs || []).forEach(([k, v]) => {
   });
 }
 
+// ---- 8g spec labels (P25): one spelling per field, so the search filters catch every card ----
+{
+  let SL = null;
+  try { SL = JSON.parse(readFileSync(R + '/tools/spec-labels.json', 'utf8')); } catch (e) { WARN('tools/spec-labels.json missing or unreadable — spec-label check skipped'); }
+  if (SL) {
+    const allowed = new Set(SL.allowed || []), renamed = SL.renamed || {}, pats = (SL.tablePatterns || []).map(p => new RegExp(p));
+    const unknown = {};
+    all.forEach(i => {
+      const seen = {};
+      (i.specs || []).forEach(([k]) => {
+        if (!k) return;                                                  // '' = section header row
+        if (k !== k.trim() || /\s{2}|:$/.test(k)) FAIL('spec label formatting: ' + i.sku + ' "' + k + '"');
+        if (seen[k]) FAIL('duplicate spec label on ' + i.sku + ': ' + k); seen[k] = 1;
+        if (renamed[k]) FAIL('spec label "' + k + '" was merged into "' + renamed[k] + '" — use that: ' + i.sku);
+        else if (!i.hidden && !allowed.has(k) && !pats.some(re => re.test(k))) (unknown[k] = unknown[k] || []).push(i.sku);
+      });
+    });
+    Object.entries(unknown).forEach(([k, v]) => WARN('new spec label "' + k + '" on ' + v.length + ' card(s) (' + v.slice(0, 3).join(', ') + ') — reuse an existing label, or add it to tools/spec-labels.json'));
+  }
+}
+// ---- 8h unit notation (P26) and filter-readable values (P27) ----
+{
+  const FORCE = /^(Suture sliding force|Pullout strength|Retention strand strength)$/;
+  const SIZED = /^(Diameter|Anchor size|Anchor diameter|Length|Total length|Anchor length|Drill diameter|Cutting-head diameter)$/;
+  all.forEach(i => {
+    const F = [['name', i.name], ['t', i.t], ['sz', i.sz], ['ld', i.ld], ['note', i.note], ['bp', i.bp]]
+      .concat((i.specs || []).map(([k, v]) => ['label', k]), (i.specs || []).map(([k, v]) => [k || '(header)', v]));
+    F.forEach(([k, v]) => {
+      v = String(v == null ? '' : v); if (!v) return;
+      if (/(^|[^#\d.\/–-])\d-0(?!\d)/.test(v)) FAIL('suture size needs its # (#2-0): ' + i.sku + ' ' + k + ' = ' + v.slice(0, 60));
+      if (/\d'?\d*\s?"|\d\s?(in|inch|inches)\b(?!-)/.test(v)) FAIL('inches are written ″ (24″): ' + i.sku + ' ' + k + ' = ' + v.slice(0, 60));
+      if (/\d cm\b|\d N\b/.test(v)) FAIL('metric values are tight (8cm, 488N): ' + i.sku + ' ' + k + ' = ' + v.slice(0, 60));
+      if (/\d\s?lbs\b/.test(v)) FAIL('write lb (weight) or lbf (force), never lbs: ' + i.sku + ' ' + k);
+    });
+    (i.specs || []).forEach(([k, v]) => {
+      v = String(v == null ? '' : v);
+      if (FORCE.test(k) && /\d\s?lb\b/.test(v)) FAIL('force is written lbf: ' + i.sku + ' ' + k + ' = ' + v.slice(0, 40));
+      if (!i.hidden && SIZED.test(k) && /^\s*\d+(\.\d+)?\s*$/.test(v)) WARN('size without a unit — the search filters skip it: ' + i.sku + ' ' + k + ' = ' + v);
+      if (/\d(?:\s?(?:mm|cm|″))?\s?x\s?\d/.test(v)) WARN('use × between sizes in spec rows: ' + i.sku + ' ' + k + ' = ' + v.slice(0, 40));
+    });
+  });
+}
+
 // ---- 9 gtin ----
 {
   const BY = {};
@@ -240,6 +283,16 @@ all.forEach(i => (i.specs || []).forEach(([k, v]) => {
   const m = /var CACHE = 'tbx-v(\d+)-(\d{8})';/.exec(sw);
   if (!m) FAIL('sw.js CACHE line malformed');
   else console.log('cache version: tbx-v' + m[1] + '-' + m[2]);
+}
+
+// ---- 10b payload envelope (P49/P50): compressed before encryption, so the phones' download stays small ----
+{
+  try {
+    const raw = readFileSync(R + '/payload.enc.json', 'utf8'), P = JSON.parse(raw);
+    ['kdf', 'it', 'salt', 'iv', 'ct'].forEach(k => { if (!P[k]) FAIL('payload.enc.json: envelope has no "' + k + '"'); });
+    if (P.z !== 'deflate-raw') FAIL('payload.enc.json is not compressed (z: ' + JSON.stringify(P.z) + ') — encrypt with tools/encrypt-data.mjs');
+    if (raw.length >= 400 * 1024) FAIL('payload.enc.json is ' + Math.round(raw.length / 1024) + ' KB (limit 400 KB) — was it compressed? encrypt with tools/encrypt-data.mjs');
+  } catch (e) { FAIL('payload.enc.json unreadable: ' + e.message); }
 }
 
 // ---- 11 soft content telemetry ----

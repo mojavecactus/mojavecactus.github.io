@@ -29,7 +29,9 @@
     } catch (e) {}
     return true;
   }
-  window.addEventListener('error', function () { if (healOK()) heal(); });
+  // P50: lib/inflate.js and lib/zxing-reader.js are deferred, so they now run after this listener exists. An error in one
+  // of them (the scanner / .xlsx libraries) never started a repair before, and doesn't now.
+  window.addEventListener('error', function (e) { try { if (e && /\/lib\/[^\/]+\.js/.test(String(e.filename || ''))) return; } catch (x) {} if (healOK()) heal(); });
   window.__tbxHeal = function () { if (healOK()) heal(); };
 })();
 window.TBX_BOOT = function () {
@@ -39,7 +41,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.148';
+  var APPVER = '4.149';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -1255,17 +1257,17 @@ var GLOSS = {
     var extra = (it.specs || []).map(function (s) { return s[1]; }).join(' ') + ' ' + (it.alt || []).join(' ') +
       (sl === 'Sliding' ? ' sliding' : '') + (/^Non-sliding/.test(sl) ? ' nonsliding locked' : '');
     var raw = (it.name || '') + ' ' + it.sku + ' ' + it.fam + ' ' + (it.sub || '') + ' ' + it.cat + ' ' + extra;
-    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(it.sku), buckets: bucketsOf(it), raw: raw,
+    INDEX.push({ hay: nrm(raw), skun: nrm(it.sku), buckets: bucketsOf(it), raw: raw,
       it: it, rec: it, sub: it.cat + ' · ' + it.fam, route: pnRoute(it.sku) });
   });
   D.probes.forEach(function (p) {
     var raw = p.name + ' ' + p.sku + ' probe wand serfas arthro ' + p.fam;
-    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(p.sku), buckets: ['Arthroscopy'], raw: raw,
+    INDEX.push({ hay: nrm(raw), skun: nrm(p.sku), buckets: ['Arthroscopy'], raw: raw,
       it: { t: p.name, sku: p.sku, uom: p.uom, tags: p.tags }, rec: p, sub: 'SERFAS RF Wands · ' + p.fam, route: pnRoute(p.sku) });
   });
   D.shavers.forEach(function (s) {
     var raw = s.name + ' ' + s.sku + ' shaver blade bur';
-    INDEX.push({ hay: nrm(raw), words: wordsOf(raw), skun: nrm(s.sku), buckets: ['Arthroscopy'], raw: raw,
+    INDEX.push({ hay: nrm(raw), skun: nrm(s.sku), buckets: ['Arthroscopy'], raw: raw,
       it: { t: s.name, sku: s.sku, uom: s.uom, tags: s.tags }, rec: s, sub: 'Shaver blades', route: pnRoute(s.sku) });
   });
   INDEX.forEach(function (e) { e.skuz = e.skun.replace(/^0+/, ''); });
@@ -1291,6 +1293,12 @@ var GLOSS = {
     return m ? { k: 'in:' + parseFloat(m[1]), l: parseFloat(m[1]) + '″', n: parseFloat(m[1]) } : null;
   }
   function one(v) { return v ? [v] : []; }
+  // P25: first label whose value parses (the 6 Gravity anchors say "Diameter: 2.7" and must fall through to sz "2.7mm");
+  // the retired spellings stay readable until the label merge ships in the payload, then they are simply never found.
+  function mmFirst(r, ks) { for (var i = 0; i < ks.length; i++) { var m = mmVal(spv(r, ks[i])); if (m) return m; } return null; }
+  function inFirst(r, ks) { for (var i = 0; i < ks.length; i++) { var m = inVal(spv(r, ks[i])); if (m) return m; } return null; }
+  function sutOf(r) { return spv(r, 'Suture') || spv(r, 'Working suture'); }
+  function needleOf(r) { return spv(r, 'Needle') || spv(r, 'Needles'); }
   function sizeOrder(sz) { // suture sizes: 4-0 < 2-0 < #0 < #2 < #5 < 1.2mm tape …
     var m;
     if ((m = /^(\d+(?:\.\d+)?)mm$/.exec(sz))) return 1000 + parseFloat(m[1]);
@@ -1301,14 +1309,12 @@ var GLOSS = {
   var FACETFN = {
     dia: function (r, b) {
       if (b === 'Implants') {
-        var v = spv(r, 'Anchor size') || spv(r, 'Diameter') || spv(r, 'Anchor diameter') || (/^\d+(\.\d+)?mm$/.test(r.sz || '') ? r.sz : '');
-        return one(mmVal(v));
+        return one(mmFirst(r, ['Anchor size', 'Diameter', 'Anchor diameter']) || mmVal(/^\d+(\.\d+)?mm$/.test(r.sz || '') ? r.sz : ''));
       }
-      var w = spv(r, 'Diameter') || spv(r, 'Drill diameter') || spv(r, 'Drill bit diameter') || spv(r, 'Cutting-head diameter') ||
-        (b === 'Arthroscopy' ? spv(r, 'Outer diameter') : '') || (/^\d+(\.\d+)?mm$/.test(r.sz || '') ? r.sz : '');
-      return one(mmVal(w));
+      return one(mmFirst(r, ['Diameter', 'Drill diameter', 'Drill bit diameter', 'Cutting-head diameter', 'Cutting diameter'].concat(b === 'Arthroscopy' ? ['Outer diameter'] : [])) ||
+        mmVal(/^\d+(\.\d+)?mm$/.test(r.sz || '') ? r.sz : ''));
     },
-    len: function (r) { return one(mmVal(spv(r, 'Length') || spv(r, 'Total length') || spv(r, 'Anchor length'))); },
+    len: function (r) { return one(mmFirst(r, ['Length', 'Total length', 'Anchor length'])); },
     mat: function (r) {
       var m = spv(r, 'Material'); if (!m) return [];
       var l = /β-TCP|biocomposite/i.test(m) ? 'Biocomposite' : /HA \(25%\)\/PLLA|HA\/PLLA/i.test(m) ? 'HA/PLLA' : /PLA \+ poly/i.test(m) ? 'Bioabsorbable PLA/PCL' :
@@ -1322,35 +1328,36 @@ var GLOSS = {
       return [{ k: l, l: l }];
     },
     needle: function (r, b) {
-      var n = spv(r, 'Needle');
-      if (b === 'Suture' || n) {
+      var n = needleOf(r);
+      if (b !== 'Suture' && n) return /^Non-needled/i.test(n) ? [{ k: 'No needles', l: 'No needles' }] : [{ k: 'With needles', l: 'With needles' }];
+      if (b === 'Suture') {
         if (!n) return [];
         if (/^Non-needled/i.test(n)) return [{ k: 'Non-needled', l: 'Non-needled' }];
         var code = (/^(DA\s+)?([A-Z]{1,4}-?\d{0,3}(?:\s+Blunt)?)/.exec(n) || [])[2] || 'Needled';
         if (/both ends|double-armed|^DA\s/i.test(n)) code += ' double-armed';
         return [{ k: code, l: code }];
       }
-      var t = (r.name || '') + ' ' + (r.ld || '') + ' ' + (r.sub || '') + ' ' + (spv(r, 'Suture') || '');
+      var t = (r.name || '') + ' ' + (r.ld || '') + ' ' + (r.sub || '') + ' ' + (sutOf(r) || '');
       return /needle/i.test(t) && !/non-needled/i.test(t) ? [{ k: 'With needles', l: 'With needles' }] : [{ k: 'No needles', l: 'No needles' }];
     },
     strands: function (r) {
-      var t = (r.ld || '') + ' ' + (spv(r, 'Suture') || ''), n = 0, m, re = /(\d)\s*(?:strands?\b|×)/g;
+      var t = (r.ld || '') + ' ' + (sutOf(r) || ''), n = 0, m, re = /(\d)\s*(?:strands?\b|×)/g;
       while ((m = re.exec(r.ld || ''))) n += +m[1];
-      if (!n) { re.lastIndex = 0; while ((m = re.exec(spv(r, 'Suture') || ''))) n += +m[1]; }
+      if (!n) { re.lastIndex = 0; while ((m = re.exec(sutOf(r) || ''))) n += +m[1]; }
       if (!n) { if (/\b(one|single)\s+strand/i.test(t)) n = 1; else if (/\b(two|double)\s+strands?/i.test(t)) n = 2; else if (/\bthree\s+strands/i.test(t)) n = 3; }
       return n ? [{ k: 'n' + n, l: n + (n === 1 ? ' strand' : ' strands'), n: n }] : [];
     },
     stype: function (r, b) {
       if (b === 'Suture') { var f = String(r.fam || '').replace(/ suture( tape)?$/i, '').replace(/ suture and tape$/i, ''); return f ? [{ k: f, l: f }] : []; }
-      var t = (r.name || '') + ' ' + (r.ld || '') + ' ' + (spv(r, 'Suture') || ''), out = [];
+      var t = (r.name || '') + ' ' + (r.ld || '') + ' ' + (sutOf(r) || ''), out = [];
       if (/XBraid TT|tape/i.test(t)) out.push({ k: 'XBraid TT', l: 'XBraid TT tape' });
       if (/XBraid S\b/.test(t)) out.push({ k: 'XBraid S', l: 'XBraid S' });
       if (/Force Fiber/i.test(t)) out.push({ k: 'Force Fiber', l: 'Force Fiber' });
-      if (/polyester/i.test(spv(r, 'Suture') || '')) out.push({ k: 'Polyester', l: 'Polyester' });
+      if (/polyester/i.test(sutOf(r) || '')) out.push({ k: 'Polyester', l: 'Polyester' });
       return out;
     },
     ssize: function (r) { return r.sz ? [{ k: r.sz, l: r.sz, n: sizeOrder(r.sz) }] : []; },
-    slen: function (r) { return one(inVal(spv(r, 'Strand length') || spv(r, 'Total length') || spv(r, 'Loop length'))); }
+    slen: function (r) { return one(inFirst(r, ['Strand length', 'Total length', 'Overall length', 'Loop length'])); }
   };
   function facetVals(h, k, b) {
     h.fx = h.fx || {};
@@ -1385,8 +1392,9 @@ var GLOSS = {
   function termFuzzy(e, t) {
     if (!/^[A-Z]{4,}$/.test(t)) return false;
     var maxD = t.length >= 7 ? 2 : 1;
-    for (var i = 0; i < e.words.length; i++) {
-      if (editLE(t, e.words[i], maxD)) return true;
+    var ws = e.words || (e.words = wordsOf(e.raw));   // P50: built on the first typo-tolerant search, not for every card at boot
+    for (var i = 0; i < ws.length; i++) {
+      if (editLE(t, ws[i], maxD)) return true;
     }
     return false;
   }
@@ -8290,6 +8298,21 @@ var GLOSS = {
   function tbxStart() {
     window.addEventListener('hashchange', route); route();
     window.__tbxRouted = true; // boot succeeded: later errors are bugs, not cache corruption (see heal)
+    // P50 — the launch-animation contract: once the first screen has painted (the frame after route()), mark the app
+    // ready: html.tbx-ready, the 'tbx-ready' event and window.__tbxReadyAt (performance.now()). A start-up failure
+    // sets html.tbx-failed and 'tbx-boot-failed' instead (TBX_FAIL, index.html). Never throws.
+    try {
+      var tbxReady = function () {
+        try {
+          if (window.__tbxReadyAt) return;
+          window.__tbxReadyAt = (window.performance && performance.now) ? performance.now() : Date.now();
+          document.documentElement.classList.add('tbx-ready');
+          window.dispatchEvent(new Event('tbx-ready'));
+        } catch (eR) {}
+      };
+      if (window.requestAnimationFrame) requestAnimationFrame(function () { setTimeout(tbxReady, 0); });
+      setTimeout(tbxReady, 1000);                   // no frames while the page is hidden: don't keep a waiting animation up
+    } catch (eR0) {}
     // P35: the entry on screen is saved when the app is hidden or reloaded (update banner), not only when it is left
     var navHide = function () { try { if (NAV.cur) navSave(NAV.cur); } catch (e) {} };
     window.addEventListener('pagehide', navHide);

@@ -11,6 +11,7 @@
 <meta property="og:url" content="https://sportsmedtoolbox.com/">
 <meta property="og:image" content="https://sportsmedtoolbox.com/icon-512.png">
 <meta name="twitter:card" content="summary">
+<script>/* P50: start the (encrypted, ~0.15 MB) data download before the inline CSS below is parsed; the gate's getPayload() takes it over. Its failure is swallowed here (getPayload() then fetches again). */window.__tbxPL=null;try{window.__tbxPL=fetch('payload.enc.json').then(function(r){if(!r.ok)throw new Error('payload http '+r.status);return r.json();});window.__tbxPL.catch(function(){});}catch(e){window.__tbxPL=null;}</script>
 <script>
 /* P4 — start-up fail-safe. Lives in index.html because it has to work when the app bundle is what failed.
    TBX_PROBE(ms): does OUR site answer? A HEAD request skips the service worker (it only serves GET), so the cached app
@@ -574,6 +575,8 @@ body.ct-chrome-off #fb-fab{display:none;}
   align-items:center; justify-content:center;
   padding:calc(var(--sat) + 24px) 20px calc(var(--sab) + 24px);}
 html.authed #lock{opacity:0; visibility:hidden; pointer-events:none; transition:opacity .22s, visibility .22s;}
+/* P50: after a typed unlock the app boots at once, under the lock; the lock stays up until its 0.7 s animation ends */
+html.authed #lock.lk-hold{opacity:1; visibility:visible;}
 #lock .lk-card{width:100%; max-width:340px; text-align:center;}
 #lock .lk-badge{width:56px; height:56px; margin:0 auto 18px; border-radius:16px; background:var(--panel);
   border:1px solid var(--line); display:flex; align-items:center; justify-content:center;}
@@ -1579,12 +1582,68 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
     for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
     return btoa(s);
   }
-  function getPayload() {
+  // P50: take over the download started in <head> (window.__tbxPL) once. If it failed, the password path (again=true)
+  // fetches afresh: the rep typed for a while, signal may be back. A Remember-me launch doesn't: a second try a moment
+  // later meets the same network, so it makes one request, as before (and a failure shows the card, with Try again).
+  function getPayload(again) {
     if (payload) return Promise.resolve(payload);
+    var pre = null;
+    try { pre = window.__tbxPL; window.__tbxPL = null; } catch (e) {}
+    if (pre && typeof pre.then === 'function') return pre.then(function (j) { payload = j; return j; }, function (e) { if (again) return fetchPayload(); throw e; });
+    return fetchPayload();
+  }
+  function fetchPayload() {
     return fetch('payload.enc.json').then(function (r) {
       if (!r.ok) throw new Error('payload http ' + r.status);
       return r.json();
     }).then(function (j) { payload = j; return j; });
+  }
+  // P49: z = 'deflate-raw' — the data was compressed before it was encrypted. Inflate it with DecompressionStream
+  // (iOS 16.4+), otherwise with lib/inflate.js (fflate): that script is deferred, so wait for it, or load it (it is in
+  // the service worker's CORE, so this works offline too). P50: f = 'json' — the four data globals as JSON, no eval.
+  // A payload without z/f is the old format and still opens. An unknown z or f is a decode error: the "didn't open"
+  // card, with the saved login kept.
+  var GLOBALS = ['TOOLBOX', 'TBX_GTIN', 'TBX_GTIN14', 'TBX_WN'];
+  var DCL = false;
+  try { DCL = document.readyState !== 'loading'; if (!DCL) document.addEventListener('DOMContentLoaded', function () { DCL = true; }); } catch (e) {}
+  function whenInflate() {
+    return new Promise(function (res, rej) {
+      function have() { return typeof window.TBX_INFLATE === 'function'; }
+      function inject() {
+        try {
+          var s = document.createElement('script'); s.src = 'lib/inflate.js';
+          s.onload = function () { if (have()) res(window.TBX_INFLATE); else rej(new Error('inflate unavailable')); };
+          s.onerror = function () { rej(new Error('inflate unavailable')); };
+          document.head.appendChild(s);
+        } catch (e) { rej(e); }
+      }
+      try {
+        if (have()) res(window.TBX_INFLATE);
+        else if (DCL) inject();
+        else document.addEventListener('DOMContentLoaded', function () { try { if (have()) res(window.TBX_INFLATE); else inject(); } catch (e) { rej(e); } });   // deferred scripts run before it
+      } catch (e) { rej(e); }
+    });
+  }
+  function viaFflate(buf) { return whenInflate().then(function (inf) { return inf(new Uint8Array(buf)); }); }
+  function inflateRaw(buf) {
+    if (typeof DecompressionStream === 'function') {
+      try {
+        return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()
+          .then(null, function () { return viaFflate(buf); });
+      } catch (e) {}                                // no 'deflate-raw' (or no Blob.stream): fflate
+    }
+    return viaFflate(buf);
+  }
+  function decode(buf, P) {
+    if (P.z && P.z !== 'deflate-raw') return Promise.reject(new Error('unknown payload compression z=' + P.z));
+    if (P.f && P.f !== 'json') return Promise.reject(new Error('unknown payload format f=' + P.f));
+    return (P.z ? inflateRaw(buf) : Promise.resolve(buf)).then(function (b) {
+      var txt = new TextDecoder().decode(b);
+      if (P.f !== 'json') return txt;               // the old format: data.js + gtin.js + whatsnew.js as JS text
+      var o = JSON.parse(txt);
+      if (!o || typeof o !== 'object' || !o.TOOLBOX || typeof o.TOOLBOX !== 'object') throw new Error('payload JSON without TOOLBOX');
+      return { json: o };
+    });
   }
   function keyFromPassword(v, P) {
     return crypto.subtle.importKey('raw', new TextEncoder().encode(v), 'PBKDF2', false, ['deriveKey'])
@@ -1614,7 +1673,8 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
   }
   function bootWith(js) {
     phase('eval');
-    (0, eval)(js);
+    if (typeof js === 'string') (0, eval)(js);     // an old-format payload
+    else for (var gi = 0; gi < GLOBALS.length; gi++) if (GLOBALS[gi] in js.json) window[GLOBALS[gi]] = js.json[GLOBALS[gi]];   // P50: data only
     document.documentElement.classList.add('authed');
     window.dispatchEvent(new Event('tbx-unlock'));
     // The app script can still be downloading when a stored key finishes decrypting
@@ -1642,7 +1702,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
           phase('decrypt');
           return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(P.iv) }, key, b64d(P.ct))
             .catch(function (e) { throw (e && e.name === 'OperationError') ? new WrongKey(e) : e; })
-            .then(function (buf) { phase('decode'); return new TextDecoder().decode(buf); });
+            .then(function (buf) { phase('decode'); return decode(buf, P); });
         });
     }).then(function (js) {
       safeBoot(js);
@@ -1679,7 +1739,7 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
     busy = true;
     err.textContent = '';
     var P0, K0;
-    getPayload().then(function (P) {
+    getPayload(true).then(function (P) {
       P0 = P;
       return keyFromPassword(v, P);
     }).then(function (key) {
@@ -1700,13 +1760,14 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
         } catch (e3) {}
         pw.blur();
         phase('decode');
-        Promise.resolve(new TextDecoder().decode(buf)).then(function (js) {
+        Promise.resolve().then(function () { return decode(buf, P0); }).then(function (js) {
           var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-          if (reduce) { safeBoot(js); }
-          else {
-            lock.classList.add('open');
-            setTimeout(function () { safeBoot(js); }, 700);
+          // P50: boot now, under the lock (lk-hold keeps it up while its 0.7 s animation plays); it lifts onto a ready Home
+          if (!reduce) {
+            try { lock.classList.add('open'); lock.classList.add('lk-hold'); } catch (eH) {}
+            setTimeout(function () { try { lock.classList.remove('lk-hold'); } catch (eH2) {} }, 700);
           }
+          safeBoot(js);
         }, function (e) { window.TBX_FAIL('decode', e); });
       });
     }).catch(function (e4) {
@@ -1724,9 +1785,9 @@ button.ug-lr{cursor:pointer;} button.ug-lr:active{background:var(--panel2);}
   });
 })();
 </script>
-<script src="lib/inflate.js"></script>
-<script src="lib/zxing-reader.js"></script>
-<script src="app-4.148.js"></script>
+<script src="lib/inflate.js" defer></script>
+<script src="lib/zxing-reader.js" defer></script>
+<script src="app-4.149.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>

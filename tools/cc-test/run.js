@@ -3,29 +3,13 @@
 // the pull-vs-flush race, retry/backoff, roster rejection, offline persistence, expiry,
 // and the Field Ops count sheet (xlsx/csv readers, reconcile, capability gate, cross-phone sync).
 //   cd tools/cc-test && npm i jsdom@24 && APP_PW=<catalog pw> node run.js
-const { JSDOM } = require('jsdom'); const fs = require('fs'); const path = require('path'); const crypto = require('crypto');
+const { JSDOM } = require('jsdom'); const fs = require('fs'); const path = require('path');
 const R = path.resolve(__dirname, '../..');
 const results = []; const check = (n, ok, d) => { results.push({ n, ok: !!ok }); console.log((ok ? 'PASS ' : 'FAIL ') + n + (d ? '  — ' + d : '')); };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function decryptPayload(pw) {
-  const P = JSON.parse(fs.readFileSync(R + '/payload.enc.json', 'utf8'));
-  const key = crypto.pbkdf2Sync(pw, Buffer.from(P.salt, 'base64'), P.it, 32, 'sha256');
-  const ct = Buffer.from(P.ct, 'base64'); const d = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(P.iv, 'base64'));
-  d.setAuthTag(ct.slice(-16));
-  try { return Buffer.concat([d.update(ct.slice(0, -16)), d.final()]).toString(); }
-  catch (e) {
-    for (const w of (P.wraps || [])) {
-      try {
-        const wct = Buffer.from(w.ct, 'base64'); const dw = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(w.iv, 'base64')); dw.setAuthTag(wct.slice(-16));
-        const raw = Buffer.concat([dw.update(wct.slice(0, -16)), dw.final()]);
-        const d2 = crypto.createDecipheriv('aes-256-gcm', raw, Buffer.from(P.iv, 'base64')); d2.setAuthTag(ct.slice(-16));
-        return Buffer.concat([d2.update(ct.slice(0, -16)), d2.final()]).toString();
-      } catch (e2) {}
-    }
-    throw new Error('wrong password');
-  }
-}
+// the catalog payload as a script for w.eval — either envelope format (tools/payload-lib.cjs)
+const { payloadScript } = require(R + '/tools/payload-lib.cjs');
 
 // The Field Ops reconcile core, lifted verbatim from the bundle so the fake sheet answers fops_status like fops.gs does.
 const CORE = (() => { const APP = /<script src="(app[^"]*\.js)"/.exec(fs.readFileSync(R + '/index.html', 'utf8'))[1]; const src = fs.readFileSync(R + '/' + APP, 'utf8');
@@ -81,7 +65,7 @@ async function boot(sheet, storage) {
   w.fetch = (url, opts) => { let body = null; try { body = opts && opts.body ? JSON.parse(opts.body) : null; } catch (e) {}
     return sheet.handle(String(url), body).then(j => ({ ok: true, json: () => Promise.resolve(j), text: () => Promise.resolve(JSON.stringify(j)) })); };
   w.ZXingWASM = { readBarcodes: () => Promise.resolve([]), prepareZXingModule() {} }; w.scrollTo = () => {};
-  w.eval(decryptPayload(process.env.APP_PW));
+  w.eval(payloadScript(R, process.env.APP_PW));
   if (!w.TextEncoder) { w.TextEncoder = TextEncoder; w.TextDecoder = TextDecoder; }   // browsers have these; jsdom's window does not
   w.eval(fs.readFileSync(R + '/lib/inflate.js', 'utf8'));
   w.document.documentElement.classList.add('authed');
