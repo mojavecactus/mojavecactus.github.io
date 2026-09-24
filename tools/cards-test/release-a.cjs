@@ -38,7 +38,9 @@ async function boot(o) {
   // Release A (quiet fixes on the v1 card): P7 P13 P43 P44
   const t = await boot(); const D = t.w.TOOLBOX;
   await t.go('#/pn/3910200080');
-  check('A: still the v1 card', t.$('#content .card') && !t.$('.pcard') && t.$('.card img.photo'));
+  // release 6 replaced the 4.143 layout with the new card (the old one stays as its automatic fallback, see card-test.cjs);
+  // the release-A fixes below must hold on whichever card is on screen
+  check('A: the product card renders with its photos', t.$('#content .card') && t.$('.card img.photo'));
   t.$('.card img.photo').click(); await sleep(5);
   check('A: lightbox opens and locks scroll', !t.$('#lb').hidden && t.w.document.body.style.overflow === 'hidden');
   await t.go('#/');

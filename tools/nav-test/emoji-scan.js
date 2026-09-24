@@ -12,7 +12,7 @@ const KEEP = [ // [glyph, a piece of the source line it sits on]
   ['\u2713', "'sent \\u2713'"], ['\u2713', "'Sent \\u2713'"], ['\u2197', 'Open in Google Sheets'], ['\u26A1', 'cc-torch'], ['\u2795', 'Add a teammate'],
   ['\u2795', 'New Territory'], ['\u21BB', 'Refresh territories'], ['\u21BB', "ind.id = 'ptr'"], ['\u21BB', 'fa2-rf'], ['\u{1F4E6}', 'No counts yet'],
   ['\u{1F4CB}', 'fops-ic'], ['\u26A0', 'fops-warn'], ['\u25B2', 'k-arrows'], ['\u25BC', 'k-arrows'], ['\u270E', 'k-edit'], ['\u2705', 'Nothing on hand'],
-  ['\u{1F4D2}', 'No events yet'], ['\u22EE', 'Open the browser menu']
+  ['\u{1F4D2}', 'No events yet'], ['\u22EE', 'Open the browser menu'], ['\u2713', "' saved ✓'"]
 ];
 const APP = /<script src="(app[^"]*\.js)"/.exec(fs.readFileSync(R + '/index.html', 'utf8'))[1];
 // symbols that are UI glyphs (not typography like — · › ’ “ ” – × ° ± ≤ ≥ ″ β → ←)

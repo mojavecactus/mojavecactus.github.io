@@ -105,6 +105,16 @@ from the global install. Suites marked *data.js* need the decrypted catalog (ste
     paint it.
 - `node tools/cards-test/release-a.cjs` (*data.js*) — product cards: navigation closes the photo viewer and
   share sheet, the spec grid, shared/copied text carries the name, REF and link.
+- `node tools/cards-test/card-test.cjs [--no-walk]` (*data.js*) — the release-6 card: block order (title → status →
+  key facts → sticky part-number band → Instrumentation links → jump chips → specs), key facts lifted from the table
+  without repeats, one-line status with details, one pill style, the readable spec table, "Specs coming" (flag only
+  with the owner key), the photo strip and viewer (swipe, keys, Close, page numbers), the v1 fallback, and a walk that
+  renders every card (items, probes, shavers) and checks each spec row shows once.
+- `APP_PW=<catalog pw> node tools/cards-test/card-shots.cjs --out <dir> [--site <dir>] [--port 84xx] [--engine webkit]`
+  (Playwright, service worker blocked) — card screenshots at 320/390/430 plus interactions (status open, sticky band,
+  jump, strip swipe, viewer, Back closes it, share sheet, owner flag) and `<out>/measure.json` (block positions, tap
+  targets under 44 pt, overflow past the card). `--sweep` renders every card at 390×844 into `<out>/heights.json` and
+  prints the height / first-spec-value percentiles; run it on the old and the new build to compare.
 - `tools/platform-test/` (Playwright; serves the repo root through its own Pages-like server):
   - `APP_PW=<catalog pw> node tools/platform-test/boot-failsafe.js [--engine webkit]` — a start-up failure
     keeps the saved login, never wipes caches offline or unregisters the service worker, and shows the

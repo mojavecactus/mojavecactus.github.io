@@ -39,7 +39,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.146';
+  var APPVER = '4.147';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -395,7 +395,7 @@ var GLOSS = {
     }
     if (rb) rb.addEventListener('click', function () { refresh(); });
     if (bodyEl) bodyEl.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('[data-bo-retry]')) refresh(); });
-    CURREFRESH = function () { return new Promise(function (res) { refresh(res); }); }; // P48: pull down to refresh (the ↻ spins too)
+    CURREFRESH = function () { return new Promise(function (res) { refresh(res); }); }; // P48: pull down to refresh (the refresh arrow spins too)
     if (!BO.data || Date.now() - BO.at > BO_STALE_MS) refresh();
   }
 
@@ -975,6 +975,7 @@ var GLOSS = {
     if (fv) {
       var f = JSON.parse(fv.getAttribute('data-fav'));
       toggleFav(f);
+      if (fv.classList.contains('cd-ico')) { var favNow = isFav(f.route); fv.classList.toggle('on', favNow); fv.setAttribute('aria-pressed', String(favNow)); toastMsg(favNow ? 'Added to Favorites' : 'Removed from Favorites', 1600); return; }
       fv.classList.toggle('on', isFav(f.route));
       fv.innerHTML = isFav(f.route) ? ICON.starOn + 'Favorited' : ICON.star + 'Favorite';
       return;
@@ -1623,7 +1624,8 @@ var GLOSS = {
     });
     return e;
   }
-  function specCard(o) {
+  // the 4.143 card, kept as the automatic fallback of the new card (cardHTML)
+  function specCardV1(o) {
     var chips = (o.chips || []).map(function (c) {
       return '<span class="chip' + (c.k ? ' ' + c.k : '') + (c.dim ? ' dim' : '') + '">' + esc(c.t) + '</span>'; }).join('');
     var rows = (o.specs || []).filter(function (s) { return s[1]; }).map(function (s) {
@@ -1671,6 +1673,300 @@ var GLOSS = {
       (o.note ? '<div class="note">' + mark(o.note).replace(/\n/g, '<br>') + '</div>' : '') +
       (o.src ? '<div class="src">Sources: ' + esc(o.src) + '</div>' : '') + '</div>';
   }
+
+  // ==== R6 product card (N6 P28 P29 P30 P31 P32 P33 N13) ==================================================
+  // Block order: title (+ small photo) → status lines → warning → key facts → sticky part-number band (Copy, Favorite, Share)
+  // → related links (Instrumentation / Associated / Parts / guides) → jump chips → specs (table | "Specs coming")
+  // → labels + variants → Used with → RFT Best Practice → photo strip → related parts → note → sources.
+  // Stable hooks: #pcard[data-sku][data-kind], h1[data-hero="title"], img[data-hero="image"], .pgal-s, #lb,
+  // .coll/.open, .rel / .cd-ico / .st-l; section ids cd-rel cd-specs cd-used cd-bp cd-photos cd-parts cd-note cd-src.
+  // specCardV1 (the 4.143 card) stays as the automatic fallback: cardHTML() renders it if this code throws.
+
+  // THE product-photo <img>. Every photo on the new card (title photo, strip) and in the viewer is built here, so
+  // photo behaviour (offline placeholder, retry, "saved" checks) attaches in one place. Returns exactly one <img>.
+  function photoImgHTML(src, alt, attrs) {
+    return '<img src="' + esc(src) + '" alt="' + esc(alt == null ? 'Product reference photo' : alt) + '"' + (attrs ? ' ' + attrs : '') + '>';
+  }
+  var CARD_SEQ = 0;
+  function cdSvg(d, w, extra) {
+    return '<svg viewBox="0 0 24 24" width="' + (w || 22) + '" height="' + (w || 22) + '" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (extra || '') + '>' + d + '</svg>';
+  }
+  var CI = {
+    copy: cdSvg('<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.2"/><path d="M15.5 8.5V6.2A2.2 2.2 0 0 0 13.3 4H6.2A2.2 2.2 0 0 0 4 6.2v7.1a2.2 2.2 0 0 0 2.2 2.2h2.3"/>'),
+    star: cdSvg('<path class="st-f" d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/>'),
+    share: cdSvg('<path d="M12 3.5v11"/><path d="M8.2 7.2L12 3.5l3.8 3.7"/><path d="M8 10.5H6.5A1.5 1.5 0 0 0 5 12v7a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19v-7a1.5 1.5 0 0 0-1.5-1.5H16"/>'),
+    zoom: cdSvg('<circle cx="10.5" cy="10.5" r="6"/><path d="M20 20l-5-5M10.5 8v5M8 10.5h5"/>', 15, ' stroke-width="2.2"')
+  };
+
+  // P30 — one tappable line per status; the original sentences (date + report stamp, note, report link) open under it.
+  // Other status lines (e.g. a scanned lot/expiry) can join the stack: STATUS_PROVIDERS.push(fn(sku) → [{k, pill, sum, det}]).
+  var STATUS_PROVIDERS = [];
+  function boSum(r) {
+    if (r.clearDate) return boPast(r.clearDate) ? 'clear date passed' : 'clears ' + boFmt(r.clearDate);
+    if (r.clearText) return 'clears ' + esc(r.clearText);
+    return r.since ? 'since ' + boFmt(r.since) : 'no clear date given';
+  }
+  function statusRowsFor(sku) {
+    var rows = [], e = boFor(sku),
+        rep = '<button type="button" class="bo-more" data-go="' + esc(boReportRoute(sku)) + '">Backorder Report &#x203A;</button>'; // P46: the report, filtered to this part
+    if (e) {
+      if (e.st.bo) rows.push({ k: 'bo', pill: BO_PILL.bo, sum: boSum(e.bo),
+        det: '<div class="bo-line">' + boWhen(e.bo) + '</div>' + (e.bo.note ? '<div class="bo-msg">' + esc(e.bo.note) + '</div>' : '') + rep });
+      if (e.st.ctl) rows.push({ k: 'ctl', pill: BO_PILL.ctl, sum: '24–36 hr ship delay',
+        det: '<div class="bo-line">Inventory controlled · 24–36 hr shipping delay</div>' + (e.ctl.msg ? '<div class="bo-msg">' + esc(e.ctl.msg) + '</div>' : '') + rep });
+      if (e.st.clr && !e.st.bo) rows.push({ k: 'clr', pill: BO_PILL.clr, sum: 'week of ' + boFmt(e.clr.clearedOn),
+        det: '<div class="bo-line">Cleared backorder · week of ' + boFmt(e.clr.clearedOn) + '</div>' + rep });
+    }
+    STATUS_PROVIDERS.forEach(function (fn) { try { (fn(sku) || []).forEach(function (r) { rows.push(r); }); } catch (eSp) {} });
+    return rows;
+  }
+  function statusHTML(sku) {
+    var rows = statusRowsFor(sku); if (!rows.length) return '';
+    var base = 'st' + (++CARD_SEQ);
+    // .bobanner / .bopill are kept: tools/bo/app-test.js reads them (banner before the part-number band)
+    return '<div class="bobanner">' + rows.map(function (r, i) {
+      var id = base + '-' + i;
+      return '<div class="st-row st-' + esc(r.k) + '"><button type="button" class="st-l" data-coll aria-expanded="false" aria-controls="' + id + '">' +
+        '<span class="bopill ' + esc(r.k) + '">' + esc(r.pill) + '</span><span class="st-t">' + r.sum + '</span><span class="st-c" aria-hidden="true">&#x203A;</span></button>' +
+        '<div class="coll" id="' + id + '"><div class="coll-in"><div class="st-d">' + r.det + '</div></div></div></div>';
+    }).join('') + '</div>';
+  }
+
+  // N6 — key facts: up to 3 EXISTING spec rows shown as tiles under the title and left out of the table (nothing added
+  // or reworded). Rows come from the first table section only; tiles show when the table has >= 6 plain rows and >= 2
+  // rows qualify. Rules: [labels in priority order, skip when the value is already in the title].
+  var KF_RULES = {
+    anchor: [[['Drill diameter', 'Drill size', 'Pilot hole'], 0], [['Drill depth', 'Pilot depth', 'Min socket depth'], 0],
+      [['Length', 'Anchor length'], 0], [['Diameter', 'Anchor size', 'Anchor diameter', 'Max anchor diameter'], 1], [['Cannula', 'Minimum cannula'], 0]],
+    knee: [[['Min tunnel', 'Suggested tunnel size'], 0], [['Min socket depth'], 0], [['Flip length'], 0], [['Loop length'], 0], [['Cortical footprint'], 0]],
+    screw: [[['Drill size', 'Drill diameter'], 0], [['Length', 'Total length'], 1], [['Recommended tendon'], 0]],
+    disp: [[['Inner diameter', 'Internal diameter'], 0], [['Diameter', 'Outer diameter', 'Cutting diameter', 'Cutting-head diameter', 'Shaft diameter', 'Drill diameter', 'Tip diameter'], 1],
+      [['Working length', 'Length', 'Total length'], 1], [['Drill depth'], 0], [['Positive stop'], 0], [['Angle'], 1], [['Tip'], 0]],
+    instr: [[['Diameter', 'Inner diameter', 'Outer diameter', 'Cutting diameter', 'Cutting-head diameter', 'Shaft diameter', 'Tip diameter', 'Drill diameter'], 1],
+      [['Working length', 'Length', 'Marked length', 'Total length'], 1], [['Angle', 'Curvature', 'Offset'], 1], [['Tip'], 0], [['Size'], 1]],
+    suture: [[['Strand length', 'Loop length', 'Total length'], 0], [['Needle'], 0], [['Color'], 1]],
+    bio: [[['Dimensions', 'Size', 'Length', 'Label measurements', 'Graft size', 'Volume', 'Particle size'], 1], [['Preservation'], 1], [['Storage'], 0]],
+    shaver: [[['Diameter'], 1], [['Length', 'Working length'], 0], [['Series'], 1]],
+    probe: [[['Cut default'], 0], [['Coag'], 0], [['Outer diameter', 'Diameter'], 1]]
+  };
+  var KF_MAX = 22, KF_GATE = 6, KF_BAD = /^(no minimum|not listed|not published|size variable|see |varies)/i;
+  function kfRule(o) {
+    if (o.kind === 'shaver' || o.kind === 'probe') return o.kind;
+    var c = o.cat || '';
+    if (c === 'Screws') return 'screw';
+    if (c === 'Knee/Meniscus Anchors') return 'knee';
+    if (c === 'Artelon' || c === 'Other') return '';
+    if (IMPLANT_CATS.indexOf(c) !== -1) return 'anchor';
+    return c === 'Disposables' ? 'disp' : c === 'Instruments' ? 'instr' : c === 'Suture' ? 'suture' : c === 'Allografts & Biologics' ? 'bio' : '';
+  }
+  function kfNorm(s) { return String(s || '').toLowerCase().replace(/\s+/g, '').replace(/[″"]/g, 'in'); }
+  // rows = the card's non-empty spec rows (the same array the table renders); returns [{i, k, v}], i = row index
+  function keyFactsFor(o, rows) {
+    var rule = KF_RULES[kfRule(o)]; if (!rule) return [];
+    var plain = 0, sec1 = rows.length;
+    for (var r = 0; r < rows.length; r++) { if (rows[r][0]) plain++; else if (sec1 === rows.length) sec1 = r; }
+    if (plain < KF_GATE) return [];
+    var title = kfNorm(o.name), out = [], used = {};
+    for (var g = 0; g < rule.length && out.length < 3; g++) {
+      var hit = -1;
+      for (var l = 0; l < rule[g][0].length && hit < 0; l++) for (var j = 0; j < sec1; j++) if (rows[j][0] === rule[g][0][l]) { hit = j; break; }
+      if (hit < 0 || used[hit]) continue;
+      var v = String(rows[hit][1]).trim();
+      if (v.length > KF_MAX || KF_BAD.test(v) || (rule[g][1] && title.indexOf(kfNorm(v)) !== -1)) continue;
+      used[hit] = 1; out.push({ i: hit, k: rows[hit][0], v: v });
+    }
+    return out.length >= 2 ? out : [];
+  }
+
+  // P29 — one ≥44 pt amber chevron pill for every related link; more than 5 → the first 4 + "N more" (N13).
+  function relPill(r, cls) {
+    cls = 'rel' + (cls ? ' ' + cls : '');
+    if (r.menu) return '<button type="button" class="' + cls + '" data-lmenu=\'' + esc(JSON.stringify({ t: r.t, items: r.menu })) + '\'>' + esc(r.t) + '</button>';
+    if (r.pnm) return '<button type="button" class="' + cls + '" data-pnm="' + esc(r.pnm) + '">' + esc(r.t) + '</button>';
+    return '<button type="button" class="' + cls + '" data-go="' + esc(r.go) + '">' + esc(r.t) + '</button>';
+  }
+  function pillsHTML(list, idBase) {
+    if (!list.length) return '';
+    if (list.length <= 5) return '<div class="rel-row">' + list.join('') + '</div>';
+    var id = idBase + '-x';
+    return '<div class="rel-row">' + list.slice(0, 4).join('') +
+      '<button type="button" class="rel rel-more" data-coll data-more="' + (list.length - 4) + '" aria-expanded="false" aria-controls="' + id + '">' + (list.length - 4) + ' more</button></div>' +
+      '<div class="coll" id="' + id + '"><div class="coll-in"><div class="rel-row">' + list.slice(4).join('') + '</div></div></div>';
+  }
+  var REL_SYS = /^#\/(instr|parts|fam|sub)\//;
+  // P28 — right under the part-number band: the system links (Instrumentation / Associated … / Parts) and the hidden
+  // guide cards (User guide, Error codes, Thawing guide, "Replaces … — why?"). Item-to-item links stay after the photos.
+  function relTopHTML(o, seq) {
+    var sys = (o.links || []).filter(function (l) { return REL_SYS.test(l.go || ''); }).map(function (l) { return relPill(l); });
+    var refs = (o.refs || []).map(function (r) { return relPill(r, 'rel-ref'); });
+    var h = pillsHTML(sys.concat(refs), 'rel' + seq);
+    return h ? '<div class="cd-rel" id="cd-rel">' + h + '</div>' : '';
+  }
+  function relUsedHTML(o, seq) { // instrument cards: the implants that list this instrument (after the table, as before)
+    var used = (o.used || []).map(function (u) { return relPill(u); });
+    return used.length ? '<div class="cd-used" id="cd-used"><div class="eyebrow vhead">Used with</div>' + pillsHTML(used, 'use' + seq) + '</div>' : '';
+  }
+  function relPartsHTML(o, seq) { // item-to-item links (drill guide, handle, versions…): after the photos, as before
+    var item = (o.links || []).filter(function (l) { return !REL_SYS.test(l.go || ''); }).map(function (l) { return relPill(l); });
+    return item.length ? '<div class="cd-parts" id="cd-parts">' + pillsHTML(item, 'prt' + seq) + '</div>' : '';
+  }
+  // P32 — swipeable photo strip below the spec table ("1/4" counter); tap opens the viewer on that photo.
+  function isSmallPhoto(o, im) { return !o.imgFull && (im.indexOf('img/serfas-') === 0 || im.indexOf('img/shaver-') === 0); }
+  function photosHTML(o) {
+    var imgs = o.imgs || [], n = imgs.length; if (!n) return '';
+    return '<section class="cd-photos" id="cd-photos" tabindex="-1" aria-label="Photos"><div class="pgal" data-n="' + n + '">' +
+      '<div class="pgal-t"' + (n > 1 ? ' role="group" aria-roledescription="carousel" aria-label="' + n + ' photos"' : '') + '>' +
+      imgs.map(function (im, i) {
+        var sm = isSmallPhoto(o, im);
+        return '<button type="button" class="pgal-s' + (sm ? ' sm' : '') + '" data-i="' + i + '" data-src="' + esc(im) + '" aria-label="' +
+          (n > 1 ? 'Photo ' + (i + 1) + ' of ' + n : 'Photo') + ', open full screen">' +
+          photoImgHTML(im, 'Product reference photo', 'class="photo' + (sm ? ' photo-sm' : '') + '" loading="lazy" decoding="async"') +
+          '<span class="pgal-z" aria-hidden="true">' + CI.zoom + '</span></button>';
+      }).join('') + '</div>' + (n > 1 ? '<span class="pgal-n" aria-hidden="true">1/' + n + '</span>' : '') + '</div></section>';
+  }
+  // N6 — jump chips: sections further down the card (Specs · Diagrams · Sources), only those present, only when there
+  // are 3 of them and only on long cards: a chip row on a card that one flick scrolls through just pushes the specs down.
+  // The Instrumentation links need no chip: P28 puts them directly under the band.
+  // cardLen = the card's height at 390 pt estimated from its content (fitted on all 1,440 cards, median error ±70 pt);
+  // above 1,000 ≈ longer than 1.4 screens.
+  function cardLen(o, rows) {
+    var chars = 0; rows.forEach(function (s) { chars += String(s[1]).length; });
+    return 590 + 34 * rows.length + 1.3 * chars + 0.4 * (o.note || '').length + 1.1 * (o.bp || '').length + 1.4 * (o.warn || '').length;
+  }
+  function jumpChipsHTML(list, len) {
+    if (list.length < 3 || len <= 1000) return '';
+    return '<nav class="cd-jump" aria-label="On this card">' + list.map(function (j) {
+      return '<button type="button" class="cd-j" data-jump="' + esc(j[0]) + '">' + esc(j[1]) + '</button>'; }).join('') + '</nav>';
+  }
+  function specCard(o) {
+    var seq = ++CARD_SEQ;
+    var rowsAll = (o.specs || []).filter(function (s) { return s[1]; });
+    var kf = keyFactsFor(o, rowsAll), skip = {};
+    kf.forEach(function (f) { skip[f.i] = 1; });
+    var rows = rowsAll.map(function (s, i) {
+      if (skip[i]) return '';
+      if (!s[0]) return '<div class="lhead">' + esc(s[1]) + '</div>';
+      return '<div class="lr"><div class="lk">' + esc(s[0]) + '</div><div class="lv">' + mark(s[1]) + '</div></div>';
+    }).join('');
+    var imgs = o.imgs || [];
+    var built = rowsAll.length > 0 || !!o.note || !!o.bp || !!imgs.length;
+    var tagb = (o.tags || []).map(function (tg) { return ' <span class="subtag">' + esc(tg) + '</span>'; }).join('');
+    // title + the small photo beside it (the photo-morph landing slot; lists never show photos)
+    var hero = imgs.length ? '<button type="button" class="pc-hero" data-lb="0" aria-label="Photos, open full screen">' +
+      photoImgHTML(imgs[0], '', 'data-hero="image" decoding="async"') + '</button>' : '';
+    var head = '<div class="pc-head"><div class="pc-tt"><h1 data-hero="title">' + esc(o.name) + tagb + '</h1>' +
+      (o.fam ? '<div class="fam">' + esc(o.fam) + '</div>' : '') + '</div>' + hero + '</div>';
+    var kfHTML = kf.length ? '<div class="kf' + (kf.length === 2 ? ' kf2' : '') + '" role="list" aria-label="Key specs">' + kf.map(function (f) {
+      return '<div class="kf-i' + (f.v.length > 10 ? ' kf-long' : '') + '" role="listitem"><span class="kf-k">' + esc(f.k) + '</span><span class="kf-v">' + esc(f.v) + '</span></div>';
+    }).join('') + '</div>' : '';
+    // sticky part-number band: part #, unit, and the Copy / Favorite / Share icons (44 pt each)
+    var icons = '<button type="button" class="cd-ico cd-copy" data-copy="' + esc(o.sku) + '" aria-label="Copy part number">' + CI.copy + '</button>';
+    if (o.fav) {
+      var on = isFav(o.fav.route);
+      icons += '<button type="button" class="cd-ico cd-fav' + (on ? ' on' : '') + '" data-fav=\'' + esc(JSON.stringify(o.fav)) + '\' aria-pressed="' + on + '" aria-label="Favorite">' + CI.star + '</button>' +
+        '<button type="button" class="cd-ico cd-share" data-share="1" aria-label="Share">' + CI.share + '</button>';
+    }
+    var sku = String(o.sku || '');
+    var band = '<div class="pnblock"><div class="pn-v"><div class="num mono' + (sku.length > 10 ? ' pn-l' : '') + '">' + esc(sku) + '</div>' +
+      (o.uom ? '<div class="pn-u">' + esc(o.uom) + '</div>' : '') + '</div><div class="pn-i">' + icons + '</div></div>';
+    // P33 — neutral "Specs coming" for everyone; the owner's phone (usage admin key) also sees the build flag
+    var adm = false; try { adm = !!ugAdmin(); } catch (eA) {}
+    var specs = rows ? '<div class="ledger">' + rows + '</div>' : '';
+    if (!rowsAll.length && !imgs.length) specs = '<div class="cd-soon">Specs coming</div>' + (!built && adm ? '<div class="cd-todo">Not built yet · owner view</div>' : '');
+    var lab = (o.chips || []).filter(function (c) { return c.k || kfNorm(o.name).indexOf(kfNorm(c.t)) === -1; }).map(function (c) { // drop the size chip that repeats the title
+      return '<span class="chip' + (c.k ? ' ' + c.k : '') + (c.dim ? ' dim' : '') + '">' + esc(c.t) + '</span>'; }).join('');
+    var jumps = [];
+    if (specs) jumps.push(['cd-specs', 'Specs']);
+    if (imgs.length) jumps.push(['cd-photos', 'Diagrams']);
+    if (o.src) jumps.push(['cd-src', 'Sources']);
+    return '<div class="card pcard" id="pcard" data-sku="' + esc(sku) + '" data-kind="' + esc(o.kind || 'item') + '">' +
+      head +
+      statusHTML(sku) +
+      (o.warn ? '<div class="warn">' + ICON.warn + esc(o.warn) + '</div>' : '') +
+      kfHTML +
+      band +
+      relTopHTML(o, seq) +
+      jumpChipsHTML(jumps, cardLen(o, rowsAll)) +
+      (specs ? '<section class="cd-specs" id="cd-specs" tabindex="-1" aria-label="Specs">' + specs + '</section>' : '') +
+      (lab ? '<div class="chips cd-lab">' + lab + '</div>' : '') +
+      (o.vars && o.vars.length ? '<div class="eyebrow vhead">Variants</div><div class="chips cd-vars">' + o.vars.map(function (v) {
+        return '<button type="button" class="chip link" data-go="' + esc(v.go) + '">' + esc(v.t) + '</button>';
+      }).join('') + '</div>' : '') +
+      relUsedHTML(o, seq) +
+      (o.bp ? '<div class="bp" id="cd-bp"><div class="bp-h">RFT Best Practice</div><div class="bp-b">' + esc(o.bp).replace(/\n/g, '<br>') + '</div></div>' : '') +
+      photosHTML(o) +
+      relPartsHTML(o, seq) +
+      (o.note ? '<div class="note" id="cd-note">' + mark(o.note).replace(/\n/g, '<br>') + '</div>' : '') +
+      (o.src ? '<div class="cd-src" id="cd-src" tabindex="-1"><div class="src">Sources: ' + esc(o.src) + '</div></div>' : '') +
+      '</div>';
+  }
+  // Safety net: a card that throws renders the 4.143 layout instead of a blank screen (a throw during the first route
+  // would trip the heal watchdog). The error goes to the usage hub as "card: …". CARD2 is a test seam (TBX_DEV.card.setV2).
+  var CARD2 = { render: specCard };
+  function cardHTML(o) {
+    try { return CARD2.render(o); } catch (eC) {
+      try { ugErr('card: ' + String((eC && eC.message) || eC).slice(0, 60) + ' (' + (o && o.sku) + ')', 'card', 0); } catch (eU) {} // usage hub: deduped, ≤5 a session
+      return specCardV1(o);
+    }
+  }
+  function cardRM() { return !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  // N13 — collapsible blocks (status details, "N more"): grid-template-rows 0fr → 1fr, which animates in iOS Safari 16+
+  // (older versions just open); the tapped control stays under the finger (Safari has no CSS scroll anchoring).
+  function keepInView(anchor, change) {
+    var y0 = anchor.getBoundingClientRect().top; change();
+    if (cardRM()) { var d0 = anchor.getBoundingClientRect().top - y0; if (Math.abs(d0) > 0.5) window.scrollBy(0, d0); return; }
+    var t0 = Date.now();
+    (function pin() {
+      var dy = anchor.getBoundingClientRect().top - y0;
+      if (Math.abs(dy) > 0.5) window.scrollBy(0, dy);
+      if (Date.now() - t0 < 320) requestAnimationFrame(pin);
+    })();
+  }
+  // N6 — a jump lands the section just under the sticky header + part-number band
+  function cardJump(id) {
+    var sec = document.getElementById(id); if (!sec) return;
+    var bar = document.getElementById('bar'), band = document.querySelector('#pcard > .pnblock');
+    var off = (bar ? bar.getBoundingClientRect().bottom : 0) + (band ? band.getBoundingClientRect().height : 0) + 10;
+    var y = Math.max(0, Math.round(sec.getBoundingClientRect().top + (window.pageYOffset || 0) - off));
+    try { window.scrollTo({ top: y, behavior: cardRM() ? 'auto' : 'smooth' }); } catch (eS) { window.scrollTo(0, y); }
+    try { sec.focus({ preventScroll: true }); } catch (eF) {}
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest ? e.target.closest('[data-coll]') : null;
+    if (t) {
+      var box = document.getElementById(t.getAttribute('aria-controls') || '');
+      if (!box) return;
+      var open = t.getAttribute('aria-expanded') !== 'true';
+      keepInView(t, function () {
+        t.setAttribute('aria-expanded', String(open)); box.classList.toggle('open', open);
+        if (t.hasAttribute('data-more')) t.textContent = open ? 'Fewer' : t.getAttribute('data-more') + ' more';
+      });
+      return;
+    }
+    var j = e.target && e.target.closest ? e.target.closest('.cd-jump [data-jump]') : null;
+    if (j) cardJump(j.getAttribute('data-jump'));
+  });
+  // P32 — strip counter ("2/4"): scroll events don't bubble, so one capture-phase listener serves every strip
+  document.addEventListener('scroll', function (e) {
+    var t = e.target;
+    if (!t || !t.classList || !t.classList.contains('pgal-t') || t.__raf) return;
+    t.__raf = requestAnimationFrame(function () {
+      t.__raf = 0;
+      var s = t.firstElementChild, w = s ? s.getBoundingClientRect().width + 10 : 1;
+      var i = Math.max(0, Math.min(t.children.length - 1, Math.round(t.scrollLeft / w)));
+      var n = t.parentNode && t.parentNode.querySelector('.pgal-n');
+      if (n) n.textContent = (i + 1) + '/' + t.children.length;
+    });
+  }, true);
+  // the part-number band sticks right under the header: --hdr-h follows the header's real height (the CSS default is
+  // the same sum), so a header change (landscape, zoom, a new header) never leaves a gap or an overlap
+  (function () {
+    var bar = document.getElementById('bar'), RO = window.ResizeObserver;
+    if (!bar || !RO) return;
+    try {
+      new RO(function () { var h = bar.getBoundingClientRect().height; if (h > 0) document.documentElement.style.setProperty('--hdr-h', Math.round(h) + 'px'); }).observe(bar);
+    } catch (eR) {}
+  })();
 
   // ---- instrumentation resolver ----
   // P51: family index (fam -> item indexes, D.items order) and an exact-sku map, built once. instrFor used to walk every
@@ -2707,7 +3003,7 @@ var GLOSS = {
         if (entry) (tgtHidden ? refs : links).push(entry);
       });
     }
-    render(specCard({ name: it.name, fam: it.fam, sku: it.sku, uom: it.uom, chips: chips, tags: it.tags,
+    render(cardHTML({ kind: 'item', cat: it.cat, name: it.name, fam: it.fam, sku: it.sku, uom: it.uom, chips: chips, tags: it.tags,
       specs: it.specs, note: it.note, src: it.src, imgs: it.imgs, imgFull: it.imgFull, warn: it.warn, links: links, refs: refs, bp: it.bp,
       vars: variantsFor(it), used: usedWith(it),
       fav: { route: pnRoute(it.sku), it: { t: it.t || it.name, sz: it.sz || '', ld: it.ld || '', sku: it.sku } } }));
@@ -2715,14 +3011,14 @@ var GLOSS = {
   function probeCard(p) {
     setTitle('SERFAS RF Wands', ''); backBtn.hidden = false;
     CUR_IT = p;
-    render(specCard({ name: p.name, fam: p.fam, sku: p.sku, uom: p.uom, tags: p.tags, specs: p.specs, imgs: p.imgs, imgFull: p.imgFull, note: p.note,
+    render(cardHTML({ kind: 'probe', name: p.name, fam: p.fam, sku: p.sku, uom: p.uom, tags: p.tags, specs: p.specs, imgs: p.imgs, imgFull: p.imgFull, note: p.note,
       src: p.src,
       fav: { route: pnRoute(p.sku), it: { t: p.name, sku: p.sku } } }));
   }
   function shaverCard(s) {
     setTitle('Shaver Blades', ''); backBtn.hidden = false;
     CUR_IT = s;
-    render(specCard({ name: s.name, fam: (s.fam ? s.fam + ' series' : 'Shaver blades & burs'), sku: s.sku, uom: s.uom, tags: s.tags, specs: s.specs, imgs: s.imgs, imgFull: s.imgFull, warn: s.warn,
+    render(cardHTML({ kind: 'shaver', name: s.name, fam: (s.fam ? s.fam + ' series' : 'Shaver blades & burs'), sku: s.sku, uom: s.uom, tags: s.tags, specs: s.specs, imgs: s.imgs, imgFull: s.imgFull, warn: s.warn,
       note: s.note, src: s.src,
       fav: { route: pnRoute(s.sku), it: { t: s.name, sku: s.sku } } }));
   }
@@ -7771,7 +8067,7 @@ var GLOSS = {
         usedByIndex();
         var w = null; for (var wi = 0; wi < D.items.length && !w; wi++) { var x = D.items[wi]; if (!x.hidden && x.specs && x.specs.length > 4 && x.note) w = x; }
         if (!w) return;
-        var html = specCard({ name: w.name, fam: w.fam, sku: w.sku, uom: w.uom, chips: [], tags: w.tags, specs: w.specs, note: w.note, src: w.src,
+        var html = cardHTML({ kind: 'item', cat: w.cat, name: w.name, fam: w.fam, sku: w.sku, uom: w.uom, chips: [], tags: w.tags, specs: w.specs, note: w.note, src: w.src,
           imgs: [], links: [], refs: [], bp: w.bp, vars: variantsFor(w), used: usedWith(w), fav: { route: pnRoute(w.sku), it: { t: w.t || w.name, sku: w.sku } } });
         var box = document.createElement('div');
         box.setAttribute('aria-hidden', 'true');
@@ -7810,33 +8106,85 @@ var GLOSS = {
     setTimeout(function () { toast.textContent = 'Copied'; toast.classList.remove('act'); toastNext(); }, 250);
   }
 
-  var LB_CLOSE = null;
-  // ---- image lightbox (tap to zoom) ----
+  var LB_CLOSE = null, VIEWER_DEV = null;
+  // ---- photo viewer (P32 / N7) — replaces the single-image lightbox ----
+  // A card photo opens the card's whole set: swipe (or ← →) between photos, "2 / 4" and the card name at the top,
+  // pinch / double-tap / wheel zoom as before, Close at the bottom. Any other image in #content (guide pages, the
+  // About logo) still opens alone. No captions or source links yet: they wait for Nate's approved lists.
   (function () {
-    var lb = document.getElementById('lb'), img = document.getElementById('lb-img'),
-        closeB = document.getElementById('lb-close');
-    if (!lb) return;
-    var scale = 1, tx = 0, ty = 0, ptrs = {}, lastDist = 0, lastTap = 0, moved = false;
-    function apply() { img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; }
+    var lb = document.getElementById('lb'), track = document.getElementById('lb-track'), closeB = document.getElementById('lb-close'),
+        nEl = document.getElementById('lb-n'), tEl = document.getElementById('lb-title'),
+        prevB = document.getElementById('lb-prev'), nextB = document.getElementById('lb-next');
+    if (!lb || !track || !closeB) return;
+    var items = [], idx = 0, img = null, scale = 1, tx = 0, ty = 0, ptrs = {}, lastDist = 0, lastTap = 0, moved = false, sw = null, opener = null;
+    function apply() { if (img) img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; }
     function reset() { scale = 1; tx = 0; ty = 0; apply(); }
-    function openLB(src) { img.src = src; reset(); lb.hidden = false; document.body.style.overflow = 'hidden'; }
-    function closeLB() { lb.hidden = true; img.src = ''; document.body.style.overflow = ''; }
+    function place(dx, anim) {
+      track.style.transition = anim && !cardRM() ? 'transform .26s cubic-bezier(.2,.8,.2,1)' : 'none';
+      track.style.transform = 'translate3d(calc(' + (-idx * 100) + '% + ' + (dx || 0) + 'px),0,0)';
+    }
+    function show(i, anim) {
+      reset();
+      idx = Math.max(0, Math.min(items.length - 1, i));
+      var s = track.children[idx]; img = s ? s.querySelector('img') : null;
+      reset(); place(0, anim);
+      if (nEl) nEl.textContent = items.length > 1 ? (idx + 1) + ' / ' + items.length : '';
+      if (prevB) prevB.disabled = idx === 0;
+      if (nextB) nextB.disabled = idx >= items.length - 1;
+      lb.classList.toggle('lb-multi', items.length > 1);
+    }
+    function openLB(list, i, title, from) {
+      if (!list || !list.length) return;
+      items = list; opener = from || null;
+      track.innerHTML = list.map(function (src) { return '<div class="lb-s">' + photoImgHTML(src, '', 'draggable="false"') + '</div>'; }).join('');
+      if (tEl) tEl.textContent = title || '';
+      lb.hidden = false; document.body.style.overflow = 'hidden';
+      show(i || 0, false);
+      try { closeB.focus({ preventScroll: true }); } catch (e0) {}
+    }
+    function closeLB() {
+      if (lb.hidden) return;
+      lb.hidden = true; track.innerHTML = ''; img = null; items = []; ptrs = {}; sw = null;
+      document.body.style.overflow = '';
+      var o = opener; opener = null;
+      if (o && o.isConnected) { try { o.focus({ preventScroll: true }); } catch (e1) {} }
+    }
     LB_CLOSE = closeLB;
+    VIEWER_DEV = { open: openLB, close: closeLB, show: function (i) { show(i, false); }, state: function () { return { open: !lb.hidden, idx: idx, n: items.length, scale: scale }; } };
     content.addEventListener('click', function (e) {
-      var t = e.target;
-      if (t && t.tagName === 'IMG' && t.getAttribute('src')) { openLB(t.getAttribute('src')); }
+      var t = e.target; if (!t || !t.closest) return;
+      var s = t.closest('.pgal-s, .pc-hero');
+      if (s) {
+        var card = s.closest('.pcard'), h = card && card.querySelector('h1');
+        var list = [].map.call(card ? card.querySelectorAll('.pgal-s') : [], function (b) { return b.getAttribute('data-src') || ''; }).filter(Boolean);
+        var at = +(s.getAttribute('data-i') || s.getAttribute('data-lb') || 0);
+        if (!list.length) { var im0 = s.querySelector('img'); if (im0) list = [(im0.getAttribute('src') || '').split('#')[0]]; at = 0; }
+        openLB(list, at, h && h.firstChild ? h.firstChild.textContent : '', s);
+        return;
+      }
+      if (t.tagName === 'IMG' && t.getAttribute('src')) openLB([t.getAttribute('src')], 0, '', null);
     });
     closeB.addEventListener('click', closeLB);
+    if (prevB) prevB.addEventListener('click', function () { show(idx - 1, true); });
+    if (nextB) nextB.addEventListener('click', function () { show(idx + 1, true); });
+    document.addEventListener('keydown', function (e) {
+      if (lb.hidden) return;
+      if (e.key === 'Escape') closeLB();
+      else if (e.key === 'ArrowRight') show(idx + 1, true);
+      else if (e.key === 'ArrowLeft') show(idx - 1, true);
+    });
     lb.addEventListener('pointerdown', function (e) {
-      if (e.target === closeB) return;
+      if (e.target.closest && e.target.closest('button, a')) return;
       ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
       moved = false;
       var ks = Object.keys(ptrs);
-      if (ks.length === 2) {
-        var a = ptrs[ks[0]], b = ptrs[ks[1]];
-        lastDist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (ks.length === 1) sw = { x0: e.clientX, y0: e.clientY, t0: Date.now(), dx: 0, on: false };
+      else {
+        if (sw && sw.on) show(idx, true); // a second finger cancels paging (pinch wins)
+        sw = null;
+        if (ks.length === 2) { var a = ptrs[ks[0]], b = ptrs[ks[1]]; lastDist = Math.hypot(a.x - b.x, a.y - b.y); }
       }
-      lb.setPointerCapture && lb.setPointerCapture(e.pointerId);
+      try { lb.setPointerCapture(e.pointerId); } catch (eC) {}
     });
     lb.addEventListener('pointermove', function (e) {
       if (!ptrs[e.pointerId]) return;
@@ -7844,30 +8192,42 @@ var GLOSS = {
       if (ks.length === 2) {
         var other = ks[0] === String(e.pointerId) ? ptrs[ks[1]] : ptrs[ks[0]];
         var d = Math.hypot(e.clientX - other.x, e.clientY - other.y);
-        if (lastDist) {
-          var ns = Math.min(6, Math.max(1, scale * (d / lastDist)));
-          scale = ns; apply();
-        }
-        lastDist = d;
-        ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
-        moved = true;
-      } else if (ks.length === 1 && scale > 1) {
-        var p = ptrs[e.pointerId];
-        tx += e.clientX - p.x; ty += e.clientY - p.y;
-        ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
-        moved = true; apply();
-      } else if (Math.abs(e.clientX - ptrs[e.pointerId].x) > 8 || Math.abs(e.clientY - ptrs[e.pointerId].y) > 8) {
-        moved = true;
+        if (lastDist) { scale = Math.min(6, Math.max(1, scale * (d / lastDist))); apply(); }
+        lastDist = d; ptrs[e.pointerId] = { x: e.clientX, y: e.clientY }; moved = true;
+        return;
       }
+      if (ks.length !== 1) return;
+      var p = ptrs[e.pointerId];
+      if (scale > 1.01) { // zoomed: one finger pans the photo (no paging)
+        tx += e.clientX - p.x; ty += e.clientY - p.y; ptrs[e.pointerId] = { x: e.clientX, y: e.clientY }; moved = true; apply();
+        return;
+      }
+      if (sw) {
+        var dx = e.clientX - sw.x0, dy = e.clientY - sw.y0;
+        if (!sw.on && items.length > 1 && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) sw.on = true;
+        if (sw.on) { // the track follows the finger; the first and last photo rubber-band
+          var edge = (idx === 0 && dx > 0) || (idx === items.length - 1 && dx < 0);
+          sw.dx = edge ? dx * 0.3 : dx; place(sw.dx, false); moved = true;
+          return;
+        }
+      }
+      if (Math.abs(e.clientX - p.x) > 8 || Math.abs(e.clientY - p.y) > 8) moved = true;
     });
     lb.addEventListener('pointerup', function (e) {
-      delete ptrs[e.pointerId];
-      lastDist = 0;
+      delete ptrs[e.pointerId]; lastDist = 0;
+      if (sw && sw.on) { // page past 18% of the width, or on a quick flick
+        var w = lb.clientWidth || 1, v = sw.dx / Math.max(1, Date.now() - sw.t0), go = idx;
+        if (sw.dx < -w * 0.18 || (v < -0.45 && sw.dx < -24)) go = idx + 1;
+        else if (sw.dx > w * 0.18 || (v > 0.45 && sw.dx > 24)) go = idx - 1;
+        sw = null; show(go, true);
+        return;
+      }
+      sw = null;
       if (moved) return;
       var now = Date.now();
       if (now - lastTap < 320) {
-        if (scale > 1.05) { reset(); }
-        else {
+        if (scale > 1.05) reset();
+        else if (img) {
           scale = 2.6;
           var r = img.getBoundingClientRect();
           tx -= (e.clientX - r.left) * 1.6; ty -= (e.clientY - r.top) * 1.6;
@@ -7877,12 +8237,19 @@ var GLOSS = {
       } else {
         lastTap = now;
         var self = e.target;
-        setTimeout(function () {
-          if (lastTap && Date.now() - lastTap >= 320) { lastTap = 0; if (self === lb) closeLB(); }
+        setTimeout(function () { // a single tap on the dark area (not the photo) closes, as before
+          if (lastTap && Date.now() - lastTap >= 320) {
+            lastTap = 0;
+            if (self === lb || self === track || (self.classList && self.classList.contains('lb-s'))) closeLB();
+          }
         }, 330);
       }
     });
-    lb.addEventListener('pointercancel', function (e) { delete ptrs[e.pointerId]; lastDist = 0; });
+    lb.addEventListener('pointercancel', function (e) {
+      delete ptrs[e.pointerId]; lastDist = 0;
+      if (sw && sw.on) show(idx, true);
+      sw = null;
+    });
     lb.addEventListener('wheel', function (e) {
       e.preventDefault();
       scale = Math.min(6, Math.max(1, scale * (e.deltaY < 0 ? 1.15 : 0.87)));
@@ -8519,7 +8886,9 @@ var GLOSS = {
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
     cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, TORDER: TORDER, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, head: fopsHead, remove: fopsRemove, progress: fopsProgress, preview: fopsPreview, xlsx: fopsXlsxBytes, xlsxRows: fopsXlsxRows, deliver: fopsDeliver, download: fopsDownload, FO: FO } } };
-  try { window.TBX_DEV.card = { closeOverlays: closeOverlays, shPrep: shPrep, shareLinkText: shareLinkText }; } catch (eDv) {}
+  try { window.TBX_DEV.card = { closeOverlays: closeOverlays, shPrep: shPrep, shareLinkText: shareLinkText, cardHTML: cardHTML, keyFacts: keyFactsFor,
+    statusRows: statusRowsFor, statusProviders: STATUS_PROVIDERS, photoImgHTML: photoImgHTML, viewer: VIEWER_DEV,
+    setV2: function (fn) { CARD2.render = fn || specCard; } }; } catch (eDv) {}
 };
 
 /* ---- Feedback: screenshot + silent send (mailto fallback) ----

@@ -152,10 +152,10 @@ job('p35-card-late-images', async () => {
   // Card A = a card with photos ABOVE the link we follow (86PK2027 Gravity: 3 photos, links at the foot).
   const { p, ctx } = await open({ start: '#/pn/86PK2027' });
   await sleep(1500);
-  await p.evaluate(() => { const ls = [...document.querySelectorAll('#content .linkbtn[data-go], #content .refbtn[data-go]')]; const l = ls[ls.length - 1]; if (l) l.scrollIntoView({ block: 'center' }); });
+  await p.evaluate(() => { const ls = [...document.querySelectorAll('#content .linkbtn[data-go], #content .refbtn[data-go], #content .rel[data-go]')]; const l = ls[ls.length - 1]; if (l) l.scrollIntoView({ block: 'center' }); });
   await sleep(300);
   const y0 = await scrollY(p);
-  const link = await p.evaluate(() => { const ls = [...document.querySelectorAll('#content .linkbtn[data-go], #content .refbtn[data-go]')]; const l = ls[ls.length - 1]; return l ? l.getAttribute('data-go') : null; });
+  const link = await p.evaluate(() => { const ls = [...document.querySelectorAll('#content .linkbtn[data-go], #content .refbtn[data-go], #content .rel[data-go]')]; const l = ls[ls.length - 1]; return l ? l.getAttribute('data-go') : null; });
   if (!link || y0 < 300) { check('p35 card: found a link well down the card', false, 'link=' + link + ' y0=' + y0); await ctx.close(); return; }
   await p.tap('[data-go="' + link + '"]'); await sleep(900);
   // Simulate photos that have not arrived yet (offline cache miss / slow signal): they take no space until released.
@@ -220,6 +220,7 @@ job('p46-bo-from-card', async () => {
   const { p, ctx } = await open();
   await sleep(2200); // the report loads 1.5 s after start; cards drawn before that carry no banner
   await p.evaluate(() => { location.hash = '#/pn/3910500580'; }); await sleep(900);
+  if (await p.$('.bobanner .st-l')) { await p.tap('.bobanner .st-l'); await sleep(400); } // R6 card: the report link sits in the status line's details
   const go = await p.$eval('.bobanner .bo-more', b => b.getAttribute('data-go'));
   await p.tap('.bobanner .bo-more'); await sleep(1200);
   const s = await p.evaluate(() => ({ h: location.hash, q: (document.getElementById('bo-q') || {}).value, rows: document.querySelectorAll('.bo-row').length }));
@@ -393,6 +394,7 @@ job('p40-targets', async () => {
   const home = await probe(['.clearrec', '.rwact', '.footlink']);
   await sleep(1200); // the report arrives 1.5 s after start; the banner needs it
   await p.evaluate(() => { location.hash = '#/pn/3910500522'; }); await sleep(900);
+  await p.evaluate(() => { const t = document.querySelector('.bobanner .st-l'); if (t && t.getAttribute('aria-expanded') !== 'true') t.click(); }); await sleep(400); // R6: open the status details
   const card = await probe(['.chip.link', '.bobanner .bo-more']);
   await p.evaluate(() => { location.hash = '#/bo'; }); await sleep(1200);
   const bo = await probe(['#bo-refresh', '.bochip']);
