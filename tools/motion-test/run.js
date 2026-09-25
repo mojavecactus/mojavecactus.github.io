@@ -1,6 +1,9 @@
 // Motion checks for release 7 (g4 spec §15, T1–T11; T12 is on a device) — Playwright, iPhone-sized, touch.
 // READ-ONLY against the site it serves: every hub is faked, every other non-localhost request is aborted, the service
-// worker is blocked (sw.js 404).
+// worker is blocked (sw.js 404 — in Chromium the real sw.js still installs; open({ noSW: true }) turns workers off, for
+// the N4 jobs that serve their own quotes.json).
+// R10 quote drawer: N4-drawer / N4-quote-layout use their own quote lists; N4-site-quotes loads the site's quotes.json (any
+// count or contents; offline from the service worker's copy when one controls the page).
 //
 //   APP_PW=<catalog pw> [ENGINE=chromium|webkit] node tools/motion-test/run.js [--site <dir>] [--base <live build>]
 //        [--port N] [--runs N] [--only <regex>] [--shots <dir>] [--shots-only]
@@ -72,8 +75,10 @@ let browser;
 async function open(o) {
   o = o || {};
   const base = 'http://localhost:' + (o.port || PORT) + '/';
+  // o.noSW: no service worker at all. (The sw.js 404 below does not reach Chromium's worker script fetch, so the real
+  // sw.js still takes over after the unlock, and a page it controls never goes through route(): N4-quote-layout needs it.)
   const ctx = await browser.newContext({ viewport: o.vp || { width: 390, height: 844 }, deviceScaleFactor: o.dsf || 2, isMobile: ENGINE === 'chromium', hasTouch: true,
-    reducedMotion: o.reduced ? 'reduce' : 'no-preference', colorScheme: 'dark', timezoneId: 'America/New_York',
+    reducedMotion: o.reduced ? 'reduce' : 'no-preference', colorScheme: 'dark', timezoneId: 'America/New_York', serviceWorkers: o.noSW ? 'block' : 'allow',
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1' });
   await ctx.addInitScript((a) => {
     try {
@@ -444,14 +449,37 @@ async function holdLogo(p, ms, move) {
   await sleep(ms); await p.mouse.up();
   return bb;
 }
+// R10: what the open drawer shows — the quote (in curly quotes) and "— Name, source" below it
+const drawerQuote = p => p.evaluate(() => {
+  const d = document.getElementById('ab-drw'), q = d && d.querySelector('.drw-qt'), by = d && d.querySelector('.drw-by'), nm = by && by.querySelector('b');
+  return { q: q ? q.textContent : '', words: q ? q.textContent.replace(/^“|”$/g, '') : '', by: by ? by.textContent : '', name: nm ? nm.textContent : '',
+    nameColor: nm ? getComputedStyle(nm).color : '', fs: q ? getComputedStyle(q).fontSize : '', text: d ? d.textContent : '', shown: !!d && !d.hidden };
+});
+const HOMER = 'If your tools don’t work, make them work. If you can’t make them work, make some that do work.';
+// the tests' own quote lists (never the site's quotes.json, whose count and contents change): served in place of it
+const QFIX = { v: 1, quotes: ['one', 'two', 'three', 'four', 'five'].map((w, i) => Object.assign({ q: 'Fixture quote ' + w + '.', a: 'Author ' + w }, i % 2 ? {} : { s: 'Source ' + w })) };
+async function quotesRoute(ctx, answer) { // needs open({ noSW: true }): a page the service worker controls never reaches route()
+  const n = { calls: 0 };
+  await ctx.route(/\/quotes\.json(\?|$)/, r => { n.calls++; return answer(r, n.calls).catch(() => {}); });
+  return n;
+}
+const fulfillQ = (r, j) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(j) });
 job('N4-drawer', async () => {
-  const { p, ctx } = await open({ start: '#/about' }); await unlock(p); await sleep(1400);
-  const txt = await p.evaluate(() => document.getElementById('ab-drw').textContent);
-  check('N4 the drawer holds only real credit lines + the version/data line (no placeholders)', /Built by\s*Nate Merrell/.test(txt) && /Made for\s*the CT Sports Medicine Team/.test(txt) && /v[\d.]+ · data updated \d{4}-\d\d-\d\d/.test(txt) && !/\[|Your text/.test(txt), txt);
+  const QJ = QFIX.quotes.map(x => x.q);
+  const { p, ctx } = await open({ start: '#/about', noSW: true });
+  const qn = await quotesRoute(ctx, r => fulfillQ(r, QFIX));
+  await unlock(p); await sleep(1400);
+  const lab = await p.evaluate(() => { const d = document.getElementById('ab-drw'), t = d.querySelector('.drw-tray'); return { tray: t.getAttribute('role') + ' ' + t.getAttribute('aria-label'), front: d.querySelector('.drw-front').getAttribute('aria-label'), logo: document.querySelector('.about-hold').getAttribute('aria-label') }; });
+  check('N4 labels: tray group "Quote", handle "Close the quote drawer", logo "SM ToolBox logo — hold for a quote"', lab.tray === 'group Quote' && lab.front === 'Close the quote drawer' && lab.logo === 'SM ToolBox logo — hold for a quote', lab);
+  check('N4 quotes.json is not fetched before a hold', qn.calls === 0, qn.calls);
   await recordAnims(p, 1700);
   const bb = await holdLogo(p, 950); await sleep(500);
   const o = await p.evaluate(() => { const d = document.getElementById('ab-drw'); return { hidden: d.hidden, op: getComputedStyle(d).opacity, open: d.classList.contains('open') }; });
   const a = await anims(p);
+  const q1 = await drawerQuote(p);
+  const w1 = QJ.indexOf(q1.words), want = w1 > -1 ? '— ' + QFIX.quotes[w1].a + (QFIX.quotes[w1].s ? ', ' + QFIX.quotes[w1].s : '') : '?';
+  check('N4 the drawer shows one quote from the list: “words”, then "— Name, source" below (name amber, 16 px text); no credits, no version line', /^“[\s\S]+”$/.test(q1.q) && w1 > -1 && q1.by === want &&
+    q1.nameColor === 'rgb(253, 181, 21)' && q1.fs === '16px' && !/Built by|Made for|data updated/.test(q1.text) && qn.calls === 1, Object.assign({}, q1, { text: undefined, want, calls: qn.calls }));
   check('N4 hold ~1 s: the drawer slides out (visible, opacity 1)', !o.hidden && o.open && o.op === '1', o);
   check('N4 hold + drawer motion is transform/opacity only', a.an.filter(x => /drw|holdbar|hb-fill|l-/.test(x.who)).every(x => x.props.every(k => /^(transform|opacity)$/.test(k))), a.an.filter(x => /drw|holdbar|hb-fill|l-/.test(x.who)).map(x => x.who + ':' + x.props));
   await p.mouse.click(bb.x + bb.width / 2, bb.y + 420); await sleep(450);
@@ -463,10 +491,71 @@ job('N4-drawer', async () => {
   check('N4 moving the finger 20 px cancels the hold', await p.evaluate(() => document.getElementById('ab-drw').hidden));
   // handle closes it; navigation removes it
   await holdLogo(p, 950); await sleep(500);
+  const q2 = await drawerQuote(p);
+  check('N4 two holds → two different quotes (the list fetched once, kept in memory)', q2.shown && QJ.includes(q2.words) && q2.words !== q1.words && qn.calls === 1, { q1: q1.words, q2: q2.words, calls: qn.calls });
   await p.tap('.drw-front'); await sleep(450);
   check('N4 the drawer handle closes it', await p.evaluate(() => document.getElementById('ab-drw').hidden));
+  await holdLogo(p, 950); await sleep(500);
+  const q3 = await drawerQuote(p);
+  await p.evaluate(() => { location.hash = '#/'; }); await sleep(700);
+  const gone = await p.evaluate(() => !document.querySelector('.drw.open') && !document.getElementById('ab-drw'));
+  await p.evaluate(() => { location.hash = '#/about'; }); await sleep(700);
+  check('N4 leaving the screen closes it (a third hold: a third quote)', q3.shown && QJ.includes(q3.words) && new Set([q1.words, q2.words, q3.words]).size === 3 && gone && await p.evaluate(() => document.getElementById('ab-drw').hidden), { q3: q3.words, gone });
   check('N4 the logo is a button (no <img>: no iOS save-image sheet), long-press menu suppressed', await p.evaluate(() => { const b = document.querySelector('.about-hold'); const cs = getComputedStyle(b); return b.tagName === 'BUTTON' && !b.querySelector('img') && (cs.userSelect || cs.webkitUserSelect) === 'none'; }));
   check('N4 no page errors', !(await p.evaluate(() => window.__errs)).length);
+  await ctx.close();
+});
+// R10: the site's own quotes.json, as phones get it (the service worker is not blocked here): it loads and one of its quotes
+// shows (any count, any contents). When the real sw.js controls the page (Chromium), this runs offline: the copy sw.js saved
+// from ASSETS at install is what loads.
+job('N4-site-quotes', async () => {
+  const QJ = JSON.parse(fs.readFileSync(path.join(SITE, 'quotes.json'), 'utf8')).quotes.map(x => String(x.q).trim());
+  const { p, ctx } = await open({ start: '#/about' }); await unlock(p); await sleep(1400);
+  let saved = false;
+  for (let i = 0; i < 30 && !saved; i++) { saved = await p.evaluate(async () => { if (!navigator.serviceWorker || !navigator.serviceWorker.controller || !window.caches) return false;
+    for (const k of (await caches.keys()).filter(k => /^tbx-v\d+-/.test(k))) if (await (await caches.open(k)).match('quotes.json', { ignoreSearch: true })) return true; return false; }).catch(() => false); if (!saved) await sleep(500); }
+  if (saved) await ctx.setOffline(true);
+  await holdLogo(p, 950); await sleep(500);
+  const s = await drawerQuote(p), n = await p.evaluate(() => { const l = window.TBX_DEV.quote.state().list; return l ? l.length : 0; });
+  check('N4 the site\'s quotes.json loads (' + QJ.length + ' quotes' + (saved ? ', offline from the service worker\'s copy' : ', no service worker here') + ') and the drawer shows one of them',
+    s.shown && QJ.includes(s.words) && s.name && n === QJ.length, { words: s.words.slice(0, 80), name: s.name, loaded: n, offline: saved });
+  if (saved) await ctx.setOffline(false);
+  check('N4 no page errors (site list)', !(await p.evaluate(() => window.__errs)).length);
+  await ctx.close();
+});
+// R10: 320 pt: offline with quotes.json not saved → Homer Stryker; then a 300-character quote wraps inside the tray, and the
+// page moves up just enough to show all of it above the bottom bar
+job('N4-quote-layout', async () => {
+  const LONG = { q: ('Long quote for the layout check: every word has to wrap inside the tray at 320 points, the tray grows down over the About card, ' +
+    'nothing runs off the side and nothing scrolls sideways. ').repeat(3).slice(0, 299).trim() + '.', a: 'An Author With A Fairly Long Name', s: 'A long source line, from a speech given somewhere far away, 1910' };
+  let mode = 'offline';
+  const { p, ctx } = await open({ start: '#/about', vp: { width: 320, height: 640 }, noSW: true });
+  await quotesRoute(ctx, r => mode === 'offline' ? r.abort('internetdisconnected') : fulfillQ(r, { v: 1, quotes: [LONG] }));
+  await unlock(p); await sleep(1400);
+  await holdLogo(p, 950); await sleep(500);
+  const f = await drawerQuote(p);
+  check('N4 offline and quotes.json not saved: the drawer shows Homer Stryker\'s quote (never empty, no error)', f.shown && f.words === HOMER && f.by === '— Homer Stryker, Stryker founder' && !(await p.evaluate(() => window.__errs)).length, f);
+  await p.tap('.drw-front'); await sleep(450);
+  await p.evaluate(() => window.scrollTo(0, 0)); await sleep(200);
+  mode = 'long';
+  const y0 = await p.evaluate(() => Math.round(scrollY));
+  await holdLogo(p, 950); await sleep(1500); // open motion, then the page moves up
+  const g = await drawerQuote(p);
+  const L = await p.evaluate(() => {
+    const d = document.getElementById('ab-drw'), t = d.querySelector('.drw-tray'), q = d.querySelector('.drw-qt'), by = d.querySelector('.drw-by'), card = d.closest('.about-card');
+    const R = e => e.getBoundingClientRect(), tr = R(t), qr = R(q), br = R(by), dr = R(d), bar = R(document.getElementById('bottombar')), hdr = R(document.getElementById('bar'));
+    const hit = document.elementFromPoint(br.left + 6, br.top + br.height / 2);
+    return { vw: innerWidth, pageW: document.documentElement.scrollWidth, trayW: Math.round(tr.width), trayH: Math.round(tr.height), trayScroll: t.scrollWidth - t.clientWidth,
+      inside: qr.left >= tr.left && qr.right <= tr.right + 0.5 && br.left >= tr.left && br.right <= tr.right + 0.5, lines: Math.round(qr.height / parseFloat(getComputedStyle(q).lineHeight)),
+      byBottom: Math.round(br.bottom), barTop: Math.round(bar.top), drwTop: Math.round(dr.top), hdrBottom: Math.round(hdr.bottom), sy: Math.round(scrollY),
+      below: Math.round(tr.bottom - R(card).bottom), onTop: !!(hit && hit.closest('.drw')), open: d.classList.contains('open') };
+  });
+  check('N4 320 pt: a 300-character quote and a long source wrap inside the tray (16 px, no sideways overflow), drawn on top as it grows down over the About card',
+    g.shown && g.words === LONG.q && g.fs === '16px' && L.pageW <= L.vw && L.trayScroll <= 0 && L.inside && L.onTop && L.open, Object.assign({ words: g.words.length }, L));
+  check('N4 320 pt: all of it shows once the drawer is out (the page moves up if the tray reached under the bottom bar): the source line above the bottom bar, the handle below the header',
+    L.byBottom <= L.barTop && L.drwTop >= L.hdrBottom, Object.assign({ scrolled: L.sy - y0 }, L));
+  info('N4 320 pt long quote', { lines: L.lines, trayWidth: L.trayW, trayHeight: L.trayH, trayBottomBelowTheCard: L.below, scrolled: L.sy - y0 });
+  check('N4 no page errors (layout)', !(await p.evaluate(() => window.__errs)).length);
   await ctx.close();
 });
 

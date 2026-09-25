@@ -1644,7 +1644,7 @@ html[data-vt="back"]::view-transition-old(tbx-hero){animation:tbx-out .3s linear
 @keyframes tbx-shim{to{transform:translateX(280%)}}
 .sk-stack{position:relative; z-index:0}
 .sk-stack > .sk-old{position:absolute; left:0; right:0; top:0; z-index:-1; pointer-events:none}
-/* ---- N4: hold the About logo ~1 s and a small drawer slides out with the credits */
+/* ---- N4: hold the About logo ~1 s and a small drawer slides out with a quote (R10) */
 .about-card.ab-top{position:relative}
 .about-lg{display:flex; flex-direction:column; align-items:center; margin:4px 0 8px}
 .about-hold{display:block; width:96px; height:96px; margin:0; padding:0; border:0; border-radius:22px; background:none; cursor:pointer;
@@ -1659,11 +1659,12 @@ html[data-vt="back"]::view-transition-old(tbx-hero){animation:tbx-out .3s linear
 .drw-front i{display:block; width:62px; height:9px; border-radius:5px; background:#1D1D22; box-shadow:0 1px 0 rgba(255,255,255,.3)}
 .drw-tray{background:#161618; border:1px solid #4a4336; border-top:0; border-radius:0 0 12px 12px; padding:10px;
   box-shadow:0 16px 34px rgba(0,0,0,.6), inset 0 8px 12px -8px rgba(0,0,0,.9)}
-.drw-grid{display:grid; grid-template-columns:1fr 1fr; gap:6px}
-.drw-c{background:#212124; border:1px solid #34322d; border-radius:8px; padding:9px 10px; min-height:62px}
-.drw-c span{display:block; font-size:10.5px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--amber)}
-.drw-c b{display:block; margin-top:3px; font-size:14px; line-height:1.3; font-weight:650; color:var(--bone)}
-.drw-foot{margin-top:8px; font-size:11px; color:var(--muted); text-align:center}
+/* R10: one quote from quotes.json — the words, then "— Name, source" smaller and muted; up to 300 characters wrap and the
+   tray grows downward over the About card */
+.drw-q{margin:0; padding:6px 6px 4px}
+.drw-qt{margin:0; font-size:var(--fs-base); line-height:1.45; font-weight:500; color:var(--bone); overflow-wrap:break-word; text-wrap:pretty}
+.drw-by{margin-top:10px; font-size:var(--fs-sm); line-height:1.4; color:var(--muted); overflow-wrap:break-word}
+.drw-by b{font-weight:700; color:var(--amber)}
 /* ==== ONE reduced-motion policy (R7 M0): no translate / scale / rotate / morph; fades <= 120 ms; essential feedback stays
    but does not move (scan flash, spinners, the N4 hold bar, the Copy check and star colours). View Transitions are off in JS
    (vtOK), the launch and the logo check TBX_RM(). Every reduced-motion rule of this file lives here. */
@@ -2037,7 +2038,7 @@ if (R.classList.contains('authed')) begin('auto');
 </script>
 <script src="lib/inflate.js" defer></script>
 <script src="lib/zxing-reader.js" defer></script>
-<script src="app-4.151.js"></script>
+<script src="app-4.152.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>

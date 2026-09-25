@@ -41,7 +41,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.151';
+  var APPVER = '4.152';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -3547,15 +3547,82 @@ var GLOSS = {
     if (br) br.addEventListener('click', function () { LOGO.play(br.querySelector('.lg')); });
   })();
   // ---- R7 N4: the toolbox drawer. Hold the About logo ~1 s: the lid lifts as you hold and a bar fills, then a small
-  // drawer slides out of the box with the credits. A quick tap plays N3; moving the finger or a scroll cancels. It closes
-  // on its handle, a tap outside, or leaving the screen. The Credits card below keeps the same text for VoiceOver.
-  // Add a credit line here ([label, text]) and it gets its own compartment. ----
-  var CREDITS = [['Built by', 'Nate Merrell'], ['Made for', 'the CT Sports Medicine Team']];
+  // drawer slides out of the box with a quote (R10). A quick tap plays N3; moving the finger or a scroll cancels. It
+  // closes on its handle, a tap outside, or leaving the screen. The Credits card lower on the page is unchanged. ----
+  // R10 (Nate, 2026-09-24): the drawer holds one motivating quote. The list is quotes.json at the site root
+  // ({v, quotes: [{q, a, s?}]}: words, who said it, where from; tools/verify.mjs checks it). It is fetched when a hold
+  // starts (pointerdown), so it is here when the drawer opens 0.9 s later, and kept in memory; sw.js saves it for
+  // offline in ASSETS, never CORE (it must never hold up an update). Each phone walks its own shuffled order and sees
+  // every quote once before any comes back: localStorage tbx_qbag = {h: hash of the list, o: shuffled indexes,
+  // i: next position}; a new round never starts with the quote that ended the last one; a changed list starts a fresh
+  // bag; with no storage (private mode) the bag lives in memory for the session. No list (offline and not saved, a bad
+  // file, or still on its way) = Homer Stryker's line below: never an empty drawer, never a thrown error.
+  var QUOTE = (function () {
+    var FALLBACK = { q: 'If your tools don\u2019t work, make them work. If you can\u2019t make them work, make some that do work.', a: 'Homer Stryker', s: 'Stryker founder' };
+    var KEY = 'tbx_qbag', LIST = null, HASH = '', BUSY = null, MEM = null;
+    function str(v) { return typeof v === 'string' ? v.trim() : ''; }
+    function clean(j) { // the usable quotes of a quotes.json body (text + who said it), or null
+      var out = [];
+      (j && Array.isArray(j.quotes) ? j.quotes : []).forEach(function (x) {
+        var q = str(x && x.q), a = str(x && x.a);
+        if (q && a) out.push({ q: q, a: a, s: str(x.s) });
+      });
+      return out.length ? out : null;
+    }
+    function hash(list) { // FNV-1a over the count and the quote texts in order: any edit to the list starts a fresh bag
+      var s = list.length + '', h = 0x811c9dc5, i, k;
+      for (i = 0; i < list.length; i++) s += '\n' + list[i].q;
+      for (k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619); }
+      return (h >>> 0).toString(36);
+    }
+    function shuffle(n, notFirst) { // Fisher-Yates; the round never starts with notFirst (the quote that ended the last one)
+      var o = [], i, j, t;
+      for (i = 0; i < n; i++) o.push(i);
+      for (i = n - 1; i > 0; i--) { j = Math.floor(Math.random() * (i + 1)); t = o[i]; o[i] = o[j]; o[j] = t; }
+      if (n > 1 && o[0] === notFirst) { j = 1 + Math.floor(Math.random() * (n - 1)); t = o[0]; o[0] = o[j]; o[j] = t; }
+      return o;
+    }
+    function whole(b, n, h) { // a saved bag counts only if it is this list's and a whole permutation of it
+      if (!b || b.h !== h || !Array.isArray(b.o) || b.o.length !== n || typeof b.i !== 'number' || !(b.i >= 0 && b.i <= n) || b.i % 1) return false;
+      var seen = {};
+      for (var k = 0; k < n; k++) { var x = b.o[k]; if (typeof x !== 'number' || x % 1 || x < 0 || x >= n || seen[x]) return false; seen[x] = 1; }
+      return true;
+    }
+    function readBag() { if (MEM) return MEM; try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } }
+    function saveBag(b) { MEM = b; try { localStorage.setItem(KEY, JSON.stringify(b)); } catch (e) {} }
+    function pick(list, h) { // the index of the next quote to show; advances and saves the bag
+      var n = list.length, b = readBag();
+      if (!whole(b, n, h)) b = { h: h, o: shuffle(n, -1), i: 0 };
+      if (b.i >= n) b = { h: h, o: shuffle(n, b.o[n - 1]), i: 0 };   // every quote shown: a new round
+      saveBag({ h: h, o: b.o, i: b.i + 1 });
+      return b.o[b.i];
+    }
+    function load() { // starts the fetch (or joins the one on its way); resolves with the list or null, never rejects
+      if (LIST) return Promise.resolve(LIST);
+      if (BUSY) return BUSY;
+      try {
+        BUSY = fetch('quotes.json').then(function (r) { if (!r.ok) throw new Error('quotes.json ' + r.status); return r.json(); })
+          .then(function (j) { var l = clean(j); if (l) { LIST = l; HASH = hash(l); } return l; })
+          .catch(function () { return null; })
+          .then(function (l) { BUSY = null; return l; });   // a failure is tried again at the next hold
+        return BUSY;
+      } catch (e) { BUSY = null; return Promise.resolve(null); }
+    }
+    function next() { // the quote for this opening: the next one in the bag, or Homer Stryker's line
+      try { if (LIST) { var x = LIST[pick(LIST, HASH)]; if (x) return x; } } catch (e) {}
+      return FALLBACK;
+    }
+    function html(x) {
+      return '<figure class="drw-q"><blockquote class="drw-qt">\u201c' + esc(x.q) + '\u201d</blockquote>' +
+        '<figcaption class="drw-by">\u2014 <b>' + esc(x.a) + '</b>' + (x.s ? '<span class="drw-s">, ' + esc(x.s) + '</span>' : '') + '</figcaption></figure>';
+    }
+    return { load: load, next: next, html: html, clean: clean, hash: hash, shuffle: shuffle, whole: whole, pick: pick, FALLBACK: FALLBACK, KEY: KEY,
+      state: function () { return { list: LIST, h: HASH, busy: !!BUSY, mem: MEM }; },
+      reset: function () { LIST = null; HASH = ''; BUSY = null; MEM = null; } }; // tests: a fresh session
+  })();
   function drawerHTML() {
-    return '<div class="drw" id="ab-drw" hidden><button type="button" class="drw-front" aria-label="Close the credits drawer"><i></i></button>' +
-      '<div class="drw-tray" role="group" aria-label="Credits"><div class="drw-grid">' + CREDITS.map(function (c) {
-        return '<div class="drw-c"><span>' + esc(c[0]) + '</span><b>' + esc(c[1]) + '</b></div>'; }).join('') +
-      '</div><div class="drw-foot mono">v' + APPVER + ' · data updated ' + esc(D.built) + '</div></div></div>';
+    return '<div class="drw" id="ab-drw" hidden><button type="button" class="drw-front" aria-label="Close the quote drawer"><i></i></button>' +
+      '<div class="drw-tray" role="group" aria-label="Quote">' + QUOTE.html(QUOTE.FALLBACK) + '</div></div>';
   }
   var HOLD = null, HOLD_MS = 900;
   function holdStop(k) { // k: 'tap' (quick release → N3), 'cancel' (spring back), 'open' (the drawer took over)
@@ -3570,8 +3637,18 @@ var GLOSS = {
   function drwOpen(btn) {
     var card = btn.closest('.about-card'), d = card && card.querySelector('.drw'), lg = btn.querySelector('.lg');
     if (!d || !d.hidden) return;
+    try { var tray = d.querySelector('.drw-tray'); if (tray) tray.innerHTML = QUOTE.html(QUOTE.next()); } catch (eQ) {} // R10: this opening's quote
     d.hidden = false; d.classList.add('open');
-    var rm = motionRM(), p = lg ? LOGO.parts(lg) : null;
+    var rm = motionRM(), p = lg ? LOGO.parts(lg) : null, reveal = 0;
+    try { // R10: a long quote on a small phone can reach under the bottom bar: once the drawer is out, the page moves up
+      // just enough to show all of it (never taking the handle under the header). Measured before the motion's transform.
+      var dr = d.getBoundingClientRect(), bbar = document.getElementById('bottombar'), lim = bbar && bbar.offsetHeight ? bbar.getBoundingClientRect().top : window.innerHeight;
+      reveal = Math.min(Math.ceil(dr.bottom + 12 - lim), Math.floor(dr.top - navHdr() - 8));
+    } catch (eRv) { reveal = 0; }
+    if (reveal > 0) setTimeout(function () {
+      if (!d.isConnected || d.hidden || !d.classList.contains('open')) return;
+      try { window.scrollBy({ top: reveal, left: 0, behavior: motionRM() ? 'auto' : 'smooth' }); } catch (eSc) { try { window.scrollBy(0, reveal); } catch (eSc2) {} }
+    }, rm ? 130 : 380);
     if (rm) LOGO.A(d, [{ opacity: 0 }, { opacity: 1 }], { duration: 120 });
     else {
       if (p) {
@@ -3594,6 +3671,7 @@ var GLOSS = {
   document.addEventListener('pointerdown', function (e) {
     var btn = e.target && e.target.closest ? e.target.closest('.about-hold') : null;
     if (!btn || (e.button && e.button !== 0)) return;
+    try { QUOTE.load(); } catch (eQl) {} // R10: the quote list starts on its way now, so it is here when the drawer opens
     holdStop('cancel');
     var lg = btn.querySelector('.lg'), card = btn.closest('.about-card'), d = card && card.querySelector('.drw');
     if (!lg || (d && !d.hidden)) return;
@@ -3632,7 +3710,7 @@ var GLOSS = {
     setTitle('About', ''); backBtn.hidden = false;
     render(
       '<div class="card about-card ab-top" style="text-align:center">' +
-        '<div class="about-lg"><button type="button" class="about-hold" aria-label="SM ToolBox logo — hold for the credits">' + LOGO.html('appicon s96') + '</button><span class="holdbar" aria-hidden="true"><i class="hb-fill"></i></span></div>' +
+        '<div class="about-lg"><button type="button" class="about-hold" aria-label="SM ToolBox logo — hold for a quote">' + LOGO.html('appicon s96') + '</button><span class="holdbar" aria-hidden="true"><i class="hb-fill"></i></span></div>' +
         '<h1 style="margin:0">Sports<span style="color:var(--amber)">Med</span> Toolbox</h1>' +
         '<div style="color:var(--muted); font-size:13px; margin-top:5px">v' + APPVER + ' &middot; data updated ' + esc(D.built) + '</div>' +
         '<div class="ab-photos" id="ab-photos" hidden></div>' +
@@ -9501,6 +9579,7 @@ var GLOSS = {
   try { window.TBX_DEV.card = { closeOverlays: closeOverlays, shPrep: shPrep, shareLinkText: shareLinkText, cardHTML: cardHTML, keyFacts: keyFactsFor,
     statusRows: statusRowsFor, statusProviders: STATUS_PROVIDERS, photoImgHTML: photoImgHTML, viewer: VIEWER_DEV,
     setV2: function (fn) { CARD2.render = fn || specCard; } }; } catch (eDv) {}
+  try { window.TBX_DEV.quote = QUOTE; } catch (eDq) {} // R10: the quote drawer's bag and loading (tools/motion-test/qbag.js)
 };
 
 /* ---- Feedback: screenshot + silent send, kept for later when it can't go now (P45) ----

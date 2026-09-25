@@ -202,6 +202,14 @@ take `APP_PW` open `payload.enc.json` themselves through `tools/payload-lib.cjs`
   and the About drawer. T1 timings are informational (`--base` compares with the live build, the two taking turns; the
   default median of 9 still moves ±20 ms on a shared machine: `--only T1-boot --runs 21` on an idle one); `--shots` saves
   phone-size screenshots.
+- `node tools/motion-test/qbag.js [--site <dir>]` (jsdom, its own quote lists, no passwords, ~20 s) — the About quote drawer (R10):
+  the per-phone shuffle bag (localStorage `tbx_qbag` = `{h, o, i}`: every quote once per round, no quote twice in a row
+  across rounds, a fresh bag when the list changes, in memory when storage is off) and the loading (fetched at the hold's
+  pointerdown, once; Homer Stryker's built-in line offline, on a bad file or while the list is on its way). The quotes
+  live in `quotes.json` at the site root (`{"v":1,"quotes":[{"q":"…","a":"who said it","s":"source (optional)"}]}`):
+  edit it, run verify.mjs (non-empty q and a, q ≤ 300 characters, no duplicate q ignoring case and punctuation, in sw.js
+  ASSETS but never CORE; it warns while placeholders remain) and bump CACHE; any change to the words starts every phone
+  on a fresh round.
 - `tools/nav-test/` — navigation (Back keeps your place, bottom-bar Back, lists, report) and the cycle-count / F&A fence.
   No decrypted data needed.
   - `APP_PW=<catalog pw> [ENGINE=chromium|webkit] [PORT=n] node tools/nav-test/e2e.js [jobRegex]` (Playwright) — search →

@@ -158,7 +158,7 @@ const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) +
   check('P32 the first strip photo opens the viewer on photo 1 of 4', !t.$('#lb').hidden && V.state().idx === 0 && V.state().n === 4 && t.txt('#lb-n') === '1 / 4');
   t.$('#lb-close').click(); await sleep(5);
   check('P32 Close closes', t.$('#lb').hidden && t.w.document.body.style.overflow === '');
-  await t.go('#/about'); { const im = t.w.document.createElement('img'); im.src = 'favicon.svg'; t.$('#content').appendChild(im); im.click(); } await sleep(5); // R7 N4: the About logo is the credits-drawer button now; any other <img> in #content still opens alone
+  await t.go('#/about'); { const im = t.w.document.createElement('img'); im.src = 'favicon.svg'; t.$('#content').appendChild(im); im.click(); } await sleep(5); // R7 N4: the About logo is the drawer button now (R10: a quote drawer); any other <img> in #content still opens alone
   check('P32 a non-card image still opens alone (no counter)', !t.$('#lb').hidden && V.state().n === 1 && t.txt('#lb-n') === '');
   await t.go('#/pn/3910200080'); t.$$('.pgal-s')[1].click(); await sleep(5); await t.go('#/');
   check('P7 navigation closes the viewer and releases the scroll lock', t.$('#lb').hidden && t.w.document.body.style.overflow === '');

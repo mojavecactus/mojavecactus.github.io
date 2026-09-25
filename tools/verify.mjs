@@ -309,6 +309,40 @@ all.forEach(i => (i.specs || []).forEach(([k, v]) => {
   Object.entries(nm).filter(([, v]) => v.length > 1).forEach(([k, v]) => WARN('duplicate name: [' + v.join('/') + '] ' + k.slice(0, 70)));
 }
 
+// ---- 12 quotes.json: the About drawer's quotes (R10) — {v, quotes: [{q, a, s?}]}; best-effort offline (ASSETS, never
+// CORE: a missing or bad file only means the drawer shows its built-in Homer Stryker quote, and must never block an update)
+{
+  let Q = null;
+  try { Q = JSON.parse(readFileSync(R + '/quotes.json', 'utf8')); } catch (e) { FAIL('quotes.json missing or not valid JSON: ' + e.message); }
+  if (Q) {
+    if (Q.v === undefined || Q.v === null) FAIL('quotes.json: no "v" (format version)');
+    if (!Array.isArray(Q.quotes) || !Q.quotes.length) FAIL('quotes.json: "quotes" must be a non-empty list');
+    else {
+      const seen = {}, key = s => s.normalize('NFKD').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''); // case, punctuation, accents
+      let ph = 0;
+      Q.quotes.forEach((x, i) => {
+        const at = 'quotes.json #' + (i + 1);
+        if (!x || typeof x !== 'object' || Array.isArray(x)) return FAIL(at + ': not an object');
+        const q = typeof x.q === 'string' ? x.q.trim() : '', a = typeof x.a === 'string' ? x.a.trim() : '';
+        if (!q) FAIL(at + ': empty "q" (the quote)');
+        if (!a) FAIL(at + ': empty "a" (who said it)' + (q ? ' — ' + q.slice(0, 50) : ''));
+        if ([...q].length > 300) FAIL(at + ': "q" is ' + [...q].length + ' characters (limit 300) — ' + q.slice(0, 50));
+        if (x.s !== undefined && typeof x.s !== 'string') FAIL(at + ': "s" (source) must be text');
+        const k = key(q);
+        if (k && seen[k]) FAIL(at + ': duplicate of #' + seen[k] + ' — ' + q.slice(0, 50)); else if (k) seen[k] = i + 1;
+        if (/^["'“”‘’]/.test(q) && /["'“”‘’]$/.test(q)) WARN(at + ': "q" is wrapped in quote marks — the drawer adds its own');
+        if (/placeholder/i.test(q + ' ' + a)) ph++;
+      });
+      if (ph) WARN('quotes.json: ' + ph + ' placeholder quote(s) — replace them before shipping');
+    }
+  }
+  if (!EMERGENCY_SW) {
+    const A = swList(sw, 'ASSETS') || [], C = swList(sw, 'CORE') || [];
+    if (!A.includes('./quotes.json')) FAIL('sw.js ASSETS must list ./quotes.json (the About drawer offline)');
+    if (C.includes('./quotes.json')) FAIL('sw.js CORE must not list ./quotes.json (a quote must never block an update)');
+  }
+}
+
 // ---- report ----
 warns.forEach(w => console.log('WARN  ' + w));
 if (fails.length) {

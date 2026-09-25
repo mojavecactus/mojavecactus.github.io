@@ -1,4 +1,4 @@
-var CACHE = 'tbx-v386-20260924';
+var CACHE = 'tbx-v387-20260924';
 // P2: photos (img/) and guide pages (guide/pages/) are NOT in these lists. They live in their own long-lived cache,
 // IMG, keyed by content hash from img-manifest.json (tools/img-manifest.mjs): <scope>img/x.jpg?h=<16 hex of sha256>.
 // A release keeps every photo the phone already has, downloads only new or changed ones and prunes removed ones.
@@ -6,9 +6,9 @@ var CACHE = 'tbx-v386-20260924';
 // lose their offline photos. The page fills missing photos in the background (TBX_PHOTOS in the app bundle).
 var IMG = 'tbx-img';
 var IMG_MANIFEST = '73f1a23f75c2a2c8';   // stamped by tools/img-manifest.mjs: a photo change always changes sw.js
-var ASSETS = ['./', './index.html', './app-4.151.js', './ccscan.js', './html2canvas.min.js', './payload.enc.json', './cc.enc.json', './cc-buf.enc.json', './cc-la.enc.json', './cc-syr.enc.json', './cc-ri.enc.json', './cc-wm.enc.json', './cc-sbx.enc.json', './fa2.enc.json', './fa2-fa.enc.json', './manifest.webmanifest', './img-manifest.json', './img-dims.js', './icon-180.png', './icon-512.png', './icon-512-maskable.png', './favicon.svg', './lib/inflate.js', './lib/zxing-reader.js', './lib/zxing_reader.wasm'];
+var ASSETS = ['./', './index.html', './app-4.152.js', './ccscan.js', './html2canvas.min.js', './payload.enc.json', './cc.enc.json', './cc-buf.enc.json', './cc-la.enc.json', './cc-syr.enc.json', './cc-ri.enc.json', './cc-wm.enc.json', './cc-sbx.enc.json', './fa2.enc.json', './fa2-fa.enc.json', './manifest.webmanifest', './img-manifest.json', './img-dims.js', './icon-180.png', './icon-512.png', './icon-512-maskable.png', './favicon.svg', './quotes.json', './lib/inflate.js', './lib/zxing-reader.js', './lib/zxing_reader.wasm'];
 // Core = everything the app needs to run and scan offline. These must land.
-var CORE = ['./', './index.html', './app-4.151.js', './ccscan.js', './html2canvas.min.js', './payload.enc.json', './cc.enc.json', './cc-buf.enc.json', './cc-la.enc.json', './cc-syr.enc.json', './cc-ri.enc.json', './cc-wm.enc.json', './cc-sbx.enc.json', './fa2.enc.json', './fa2-fa.enc.json', './manifest.webmanifest', './img-manifest.json', './img-dims.js', './lib/inflate.js', './lib/zxing-reader.js', './lib/zxing_reader.wasm'];
+var CORE = ['./', './index.html', './app-4.152.js', './ccscan.js', './html2canvas.min.js', './payload.enc.json', './cc.enc.json', './cc-buf.enc.json', './cc-la.enc.json', './cc-syr.enc.json', './cc-ri.enc.json', './cc-wm.enc.json', './cc-sbx.enc.json', './fa2.enc.json', './fa2-fa.enc.json', './manifest.webmanifest', './img-manifest.json', './img-dims.js', './lib/inflate.js', './lib/zxing-reader.js', './lib/zxing_reader.wasm'];
 var SCOPE = self.registration.scope, SCOPE_PATH = new URL(SCOPE).pathname;
 function vurl(u) { return u + (u.indexOf('?') < 0 ? '?v=' : '&v=') + CACHE; }
 function isShell(k) { return /^tbx-v\d+-/.test(k); }     // the per-release app-shell caches; never IMG
@@ -16,8 +16,9 @@ function noop() {}
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) {
     var core = CORE.filter(function (u) { return ASSETS.indexOf(u) > -1 || u === './'; });
-    // Only the core blocks the update. Icons are best-effort and photos are never part of the install (they come from
-    // the old caches below, or from the network later), so one bad download on weak signal can never strand a phone.
+    // Only the core blocks the update. Icons and quotes.json (the About drawer falls back to a built-in quote) are
+    // best-effort and photos are never part of the install (they come from the old caches below, or from the network
+    // later), so one bad download on weak signal can never strand a phone.
     return c.addAll(core.map(vurl)).then(function () {
       var rest = ASSETS.filter(function (u) { return CORE.indexOf(u) < 0; });
       return Promise.all(rest.map(function (u) { return c.add(vurl(u)).catch(noop); }));
