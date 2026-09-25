@@ -26,7 +26,7 @@ const get=(record,path)=>path.split('.').reduce((value,key)=>value?.[key],record
 function set(record,path,value){const keys=path.split('.');if(keys.length===1)record[keys[0]]=value;else record[keys[0]][keys[1]]=value;}
 function present(value){return finite(value)||(typeof value==='string'&&value.trim()!=='');}
 function definition(value){return GRAFTS.find(x=>x.id===canonicalGraftId(value));}
-function separateFemoralCortex(draft){return ['flexible','low_profile'].includes(draft.values.femur.technique)&&FIXATIONS.find(x=>x.id===draft.values.femur.fixation)?.kind==='integrated';}
+function separateFemoralCortex(draft){return ['flexible','low_profile','transtibial'].includes(draft.values.femur.technique)&&FIXATIONS.find(x=>x.id===draft.values.femur.fixation)?.kind==='integrated';}
 function linked(draft){return sides.every(side=>draft.values[side].technique==='transtibial');}
 function allInside(draft){return !!definition(draft.values.graft)?.allInside&&sides.every(side=>draft.values[side].technique==='retrograde');}
 // Decision 2026-09-24: an intact tibial RR socket has only its small cortical opening, so the graft cannot come up the
@@ -47,7 +47,12 @@ export function stepsForCase(input){
   const start=[step('plan','Choose the plan','plan')];
   start.push(step('prep','Prepare and size the graft','prep'));
   if(linked(draft)){
-    start.push(step('linked_pin','Pass one 2.4 mm pin through tibia and femur','pin'),step('tibia_measure','Measure the tibial path','measure','tibia'),step('femur_measure','Measure the femoral path','measure','femur'),step('linked_ream','Ream tibia and femur in one pass','ream'));
+    // Trans-tibial (Nate, Sept 25 2026, checked against published technique): the tibial tunnel first — aimer on the footprint,
+    // 2.4 mm pin drilled up from the anteromedial tibia, tunnel reamed over it — then the femoral pin through that tunnel with
+    // an offset aimer, and the femoral socket reamed through the tibial tunnel to its depth (4.5 mm cortical pass for a button).
+    start.push(step('tibia_measure','Measure the tibial path','measure','tibia'),step('tibia_pin','Place the tibial guide pin','pin','tibia'),step('tibia_ream','Ream the tibial tunnel','ream','tibia'),
+      step('femur_pin','Place the femoral pin through the tibial tunnel','pin','femur'),step('femur_measure','Measure the femoral path','measure','femur'),step('femur_ream','Ream the femoral socket through the tibial tunnel','ream','femur'));
+    if(separateFemoralCortex(draft))start.push(step('femur_cortex_ream','Ream the 4.5 mm cortical passage','ream','femur'));
   }else{
     if(draft.values.femur.technique==='flexible')start.push(step('femur_flexible_pin','Pass the 2.4 mm flexible guide pin','pin','femur'));
     if(draft.values.femur.technique==='low_profile')start.push(step('femur_low_profile_pin','Pass the 2.4 mm low-profile guide pin','pin','femur'));
@@ -100,13 +105,13 @@ export function requiredPathsForStep(input,id){
     for(const side of sides){if(plug(draft,side)){const prefix=side==='femur'?'femoral':'tibial';paths.push(prefix+'PlugLength');if(draft.values[side].plugDiameterOverride)paths.push(prefix+'PlugDiameter');}if(draft.values[side].fixation==='glok')paths.push(side+'.loop');}
     return paths;
   }
-  if(id==='linked_ream')return ['tibia.diameter'];
   if(id==='femur_cortex_ream')return draft.values.femur.blownCortex||draft.values.femur.apertureOverride?['femur.aperture']:[];
   for(const side of sides){
     if(id===side+'_measure')return [side+'.ttl'];
     if(id===side+'_ream'){
-      const through=(side==='tibia'&&['straight','transtibial'].includes(draft.values[side].technique))||(side==='femur'&&['outside_in','transtibial'].includes(draft.values[side].technique))||(draft.values[side].technique==='retrograde'&&draft.values[side].blownCortex);
-      const paths=[...(through?[]:[side+'.socket']),side+'.diameter'];
+      const through=(side==='tibia'&&['straight','transtibial'].includes(draft.values[side].technique))||(side==='femur'&&draft.values[side].technique==='outside_in')||(draft.values[side].technique==='retrograde'&&draft.values[side].blownCortex);
+      // a trans-tibial femoral socket is reamed through the tibial tunnel with that tunnel's reamer: its diameter follows the tibia
+      const paths=[...(through?[]:[side+'.socket']),...(side==='femur'&&linked(draft)?[]:[side+'.diameter'])];
       if(side==='tibia'&&draft.replanningTibialFixation)paths.push('tibia.fixation');
       const materialized=materializeValues(draft.values);
       // A missing measured reamer diameter must not be replaced by the hidden example for gating.
@@ -143,7 +148,7 @@ function normalize(input){
     issues.push({path,message:`${fieldName(path)} was not a finite number and was left blank.`});return null;
   };
   const inputLinked=sides.every(side=>values[side]?.technique==='transtibial');
-  for(const path of numericPaths)if(!(inputLinked&&(path==='femur.diameter'||path.endsWith('.socket')||path.endsWith('.aperture')))&&!path.endsWith('.graftInsertion'))set(out.values,path,readNumeric(get(values,path),path));
+  for(const path of numericPaths)if(!(inputLinked&&path==='femur.diameter')&&!path.endsWith('.graftInsertion'))set(out.values,path,readNumeric(get(values,path),path));
   function readChoice(value,known,path,empty=''){
     if(value===undefined||value===null||value==='')return empty;
     if(typeof value==='string'&&known.includes(value))return value;
@@ -186,14 +191,10 @@ function normalize(input){
       issues.push({path:side+'.xl',message:'XL is available with an integrated femoral button when the cortex is blown.'});
     }
   }
-  if(['outside_in','transtibial'].includes(out.values.femur.technique))out.values.femur.socket=out.values.femur.ttl;
+  if(out.values.femur.technique==='outside_in')out.values.femur.socket=out.values.femur.ttl;
   if(['straight','transtibial'].includes(out.values.tibia.technique)){out.values.tibia.blownCortex=false;out.values.tibia.socket=out.values.tibia.ttl;}
-  if(linked(out)){
-    out.values.femur.diameter=out.values.tibia.diameter;
-    for(const side of sides){out.values[side].aperture=out.values.tibia.diameter;out.values[side].apertureOverride=false;}
-  }
+  if(linked(out))out.values.femur.diameter=out.values.tibia.diameter;
   for(const side of sides){
-    if(linked(out))continue;
     const rawSide=values[side];
     if(object(rawSide)&&typeof rawSide.blownCortex!=='boolean'&&typeof rawSide.apertureOverride!=='boolean'&&finite(out.values[side].aperture)){
       const nominal=nominalAperture(materializeValues(out.values),side);
@@ -204,6 +205,9 @@ function normalize(input){
   out.notes=typeof raw.notes==='string'?raw.notes.slice(0,10000):'';
   if(raw.schema!==undefined&&raw.schema!==2)issues.push({path:'schema',message:'This workflow uses a schema 2 case. Only recognized case fields were retained.'});
   const requested=Array.isArray(raw.completed)?raw.completed:[];
+  // A 6.5 trans-tibial case stored the femoral "socket" as the whole femoral tunnel (one pass through both bones); 6.6 reams a
+  // femoral socket to an entered depth, so that stored full length is cleared (the measurements themselves are kept).
+  if(linked(out)&&requested.some(id=>id==='linked_pin'||id==='linked_ream')&&finite(out.values.femur.socket)&&out.values.femur.socket===out.values.femur.ttl){out.values.femur.socket=null;issues.push({path:'femur.socket',message:'Trans-tibial now reams a femoral socket to a depth you enter; the earlier full-tunnel value was cleared.'});}
   out.replanningTibialFixation=raw.replanningTibialFixation===true&&out.values.tibia.technique==='retrograde'&&!out.values.tibia.fixation&&requested.includes('tibia_measure');
   const steps=stepsForCase(out);
   for(let i=0;i<requested.length;i++){
@@ -244,7 +248,7 @@ function ownerOf(draft,path){
   if(key==='plugDiameterOverride')return 'prep';
   if(key==='xl'||key==='xlTiming')return draft.values.femur.xl&&draft.values.femur.xlTiming!=='after'?'xl_femur':'pass_femur';
   if(side==='femur'&&['aperture','blownCortex','apertureOverride'].includes(key)&&separateFemoralCortex(draft))return 'femur_cortex_ream';
-  if(['socket','diameter','graftInsertion','aperture','blownCortex','apertureOverride'].includes(key))return linked(draft)?'linked_ream':side+'_ream';
+  if(['socket','diameter','graftInsertion','aperture','blownCortex','apertureOverride'].includes(key))return side+'_ream';
   return 'fix_'+side;
 }
 export function updateCaseValue(input,path,value){

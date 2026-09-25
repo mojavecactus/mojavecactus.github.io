@@ -6,8 +6,10 @@ export function resolveModelWorkflow(input,preview=null){
  const done=id=>completed.has(id)&&previewStage!==id;
  const result={active:true,stage,route:input.passage||'through_tibia',progress,preview:!!preview,previewStage:previewStage||null,completed:[...completed],prepared:done('prep')||!!input.graftPrepared};
  for(const side of ['femur','tibia']){
-  const reamed=done(`${side}_ream`)||done('linked_ream'),passed=done(`pass_${side}`),fixed=done(`fix_${side}`);
-  result[side]={measured:done(`${side}_measure`),pin:(done(`${side}_pin`)||done('linked_pin'))&&!reamed||side==='femur'&&(done('femur_flexible_pin')||done('femur_low_profile_pin'))&&!(input.corticalPassageRequired?done('femur_cortex_ream'):reamed),reamed,cortexReamed:side==='femur'&&done('femur_cortex_ream'),cortexReaming:side==='femur'&&previewStage==='femur_cortex_ream',reamProgress:reamed?1:[`${side}_ream`,'linked_ream'].includes(previewStage)?progress:0,passed,fixed,measuring:previewStage===`${side}_measure`,pinning:previewStage===`${side}_pin`||side==='femur'&&['femur_flexible_pin','femur_low_profile_pin'].includes(previewStage)||previewStage==='linked_pin',reaming:[`${side}_ream`,'linked_ream'].includes(previewStage),passing:previewStage===`pass_${side}`,fixing:previewStage===`fix_${side}`};
+  const reamed=done(`${side}_ream`),passed=done(`pass_${side}`),fixed=done(`fix_${side}`);
+  // A femoral pin that also guides the 4.5 mm cortical pass (flexible, low-profile, trans-tibial with a button) stays until that pass.
+  const femoralPin=done('femur_pin')||done('femur_flexible_pin')||done('femur_low_profile_pin');
+  result[side]={measured:done(`${side}_measure`),pin:side==='femur'?femoralPin&&!(input.corticalPassageRequired?done('femur_cortex_ream'):reamed):done(`${side}_pin`)&&!reamed,reamed,cortexReamed:side==='femur'&&done('femur_cortex_ream'),cortexReaming:side==='femur'&&previewStage==='femur_cortex_ream',reamProgress:reamed?1:previewStage===`${side}_ream`?progress:0,passed,fixed,measuring:previewStage===`${side}_measure`,pinning:previewStage===`${side}_pin`||side==='femur'&&['femur_flexible_pin','femur_low_profile_pin'].includes(previewStage),reaming:previewStage===`${side}_ream`,passing:previewStage===`pass_${side}`,fixing:previewStage===`fix_${side}`};
  }
  if(result.route!=='all_inside'&&result.femur.passed)result.tibia.passed=true;
  result.showPrepared=result.prepared&&stage==='prep'&&previewStage!=='prep';
@@ -51,7 +53,7 @@ export function allInsideCenterline({femoralTip,femoralEntry,tibialEntry,tibialT
 // A flexible blind socket retains its pin bore until the separate button pass.
 // A screw socket reamed through the bone already creates a full-size exit.
 export function modelCorticalOpening({technique,fixation,socketDepth,ttl,socketDiameter,apertureDiameter,workflowActive,cortexReamed}){
- if(['flexible','low_profile'].includes(technique)&&workflowActive&&!cortexReamed){
+ if(['flexible','low_profile','transtibial'].includes(technique)&&workflowActive&&!cortexReamed){
   if(['biosteon','wedge'].includes(fixation)&&socketDepth>=ttl)return socketDiameter;
   return 2.4;
  }

@@ -5,7 +5,7 @@ export function measurementGuideSpec(geometry,selection,fieldIssues={}){
  if(!geometry||!selection||!Number.isFinite(selection.value))return null;
  const [side,field]=String(selection.path).split('.');
  if(!['femur','tibia'].includes(side)||!['ttl','socket','diameter','aperture'].includes(field))return null;
- const shared=geometry.linked?.enabled&&field==='diameter',sides=shared?['tibia','femur']:[side];
+ const shared=geometry.linked?.enabled&&field==='diameter'&&selection.shared!==false,sides=shared?['tibia','femur']:[side];
  const invalid=(fieldIssues[selection.path]||[]).some(issue=>issue.level==='error');
  return {path:selection.path,field,value:selection.value,shared,invalid,color:invalid?'#ff7777':'#ffcc56',parts:sides.map(name=>{
   const g=geometry[name],length=field==='ttl'?g.ttl:field==='aperture'?0:clamp(g.socketDepth,0,240),start=field==='aperture'?g.cortex:g.entry,end=field==='ttl'?g.cortex:point(start,g.direction,length);
