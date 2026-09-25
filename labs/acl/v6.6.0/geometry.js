@@ -12,6 +12,7 @@ const norm=a=>Math.hypot(...a);
 const unit=a=>mul(a,1/(norm(a)||1));
 const regionPoints=new WeakMap();
 const finite=(x,d)=>Number.isFinite(+x)?+x:d;
+const fm1=x=>Number(Number(x).toFixed(1)).toString();
 export const point=(a,u,t)=>add(a,mul(u,t));
 export const displayLength=x=>Math.min(300,Math.max(-100,finite(x,0)));
 export const renderTTL=x=>Math.min(160,Math.max(12,finite(x,36)));
@@ -111,27 +112,74 @@ function transform(reference,side,requested,entry){
 }
 export function transformBonePoint(transform,p){return add(transform.matrix.map(row=>dot(row,p)),transform.translation);}
 
-function solveLinkedRoute(reference,requestedFemur,requestedTibia,jointSpan,tibialTranslation){
- const contexts=tunnelSurfaces.get(reference),f=contexts.femur,t=contexts.tibia,key=String(jointSpan);contexts.linkedCandidates??=new Map();let candidates=contexts.linkedCandidates.get(key);
- if(!candidates){
-  candidates=[];const femoralEntry=[...reference.femur.entry],tibialReference=add(reference.tibia.entry,tibialTranslation);
-  // One line is constrained by the established femoral footprint and actual
-  // cortical surfaces. Changing requested lengths chooses among these lines;
-  // neither bone is resized or independently realigned to manufacture a match.
-  for(let ix=2;ix<=25;ix++)for(let iy=2;iy<=25;iy++){
-   const direction=unit([ix*.05,iy*.05,-1]),fExit=hit(femoralEntry,direction,f.triangles,.15);if(!fExit||fExit.point[0]<12||dot(fExit.normal,direction)<.05)continue;
-   const backward=mul(direction,-1),localOrigin=sub(femoralEntry,tibialTranslation),tEntry=hit(localOrigin,backward,t.triangles,.15);if(!tEntry||tEntry.distance<10||tEntry.distance>40)continue;
-   const tExit=hit(tEntry.point,backward,t.triangles,.15);if(!tExit||tExit.distance<8||dot(tExit.normal,backward)<.02||tExit.point[1]>-8)continue;
-   const tibialEntry=add(tEntry.point,tibialTranslation),tibialCortex=add(tExit.point,tibialTranslation),footprintDeviation=norm(sub(tibialEntry,tibialReference));if(footprintDeviation>13)continue;
-   candidates.push({direction,femoralEntry,femoralCortex:fExit.point,femoralNormal:fExit.normal,tibialEntry,tibialCortex,tibialNormal:tExit.normal,femurTTL:fExit.distance,tibiaTTL:tExit.distance,jointSpan:tEntry.distance,footprintDeviation});
-  }
-  if(!candidates.length)throw Error('No continuous trans-tibial path crosses both fixed reference bones.');contexts.linkedCandidates.set(key,candidates);
+// Trans-tibial route (Sept 25 2026, checked against published technique and Nate's drawing): the tibial guide pin enters the
+// anteromedial tibia and runs up to the ACL tibial footprint at a steep angle — about 60–75° to the joint line seen from the
+// front, 45–75° from the side — and the femoral pin, drilled later through the reamed tibial tunnel, continues that line into
+// the femur and out through the anterolateral cortex. One straight line from the fixed tibial footprint therefore carries both
+// tunnels at the 90° reference pose. The line is chosen from the entered tibial length and those typical angles; the femoral
+// length it reaches is the atlas's, and a different measured femoral length is disclosed, not forced (the tibial tunnel is
+// already reamed when the femur is measured). Neither bone is resized or realigned.
+export const TRANSTIBIAL_ANGLES=Object.freeze({coronal:68,sagittal:60,coronalRange:[56,82],sagittalRange:[44,76]});
+const DEG=Math.PI/180;
+export function transtibialAngles(direction){const u=unit(direction),z=Math.abs(u[2]);return {coronal:Math.atan2(z,Math.abs(u[0]))/DEG,sagittal:Math.atan2(z,Math.abs(u[1]))/DEG};}
+// Every trans-tibial ray stays inside a cone around the footprint, so each one only tests the triangles of the region it can reach:
+// the tibia below and around the footprint (local coordinates) and the distal femur above it. The bounds are generous boxes.
+function transtibialRegions(local,footprint,f,t){
+ const inBox=(tri,lo,hi)=>tri.pts.some(p=>p.every((x,i)=>x>=lo[i]&&x<=hi[i]));
+ return {tibia:t.triangles.filter(tri=>inBox(tri,[local[0]-45,local[1]-45,local[2]-20],[local[0]+30,local[1]+30,local[2]+110])),
+  femur:f.triangles.filter(tri=>inBox(tri,[footprint[0]-30,footprint[1]-30,footprint[2]-110],[footprint[0]+60,footprint[1]+80,footprint[2]+10]))};
+}
+function transtibialCandidate(context,coronal,sagittal){
+ const {local,footprint,tibialTranslation,regions}=context,direction=unit([1/Math.tan(coronal*DEG),1/Math.tan(sagittal*DEG),-1]),down=mul(direction,-1);
+ // toward the femur: lateral (+x), posterior on the tibia (+y), proximal on the tibia (-z)
+ const tExit=hit(local,down,regions.tibia,.15);if(!tExit||tExit.distance<15||tExit.distance>80||dot(tExit.normal,down)<.02||!corticalPredicate('tibia',tExit.point,tExit.normal,local))return null;
+ const fEntry=hit(footprint,direction,regions.femur,.3);if(!fEntry||fEntry.distance<8||fEntry.distance>40||dot(fEntry.normal,direction)>-.02)return null;
+ const tAbove=hit(local,direction,regions.tibia,.3);if(tAbove&&tAbove.distance<fEntry.distance)return null;
+ const fExit=hit(fEntry.point,direction,regions.femur,.3);if(!fExit||fExit.point[0]<12||dot(fExit.normal,direction)<.05)return null;
+ return {direction,coronal,sagittal,tibialEntry:footprint,tibialCortex:add(tExit.point,tibialTranslation),tibialNormal:tExit.normal,tibiaTTL:tExit.distance,femoralEntry:fEntry.point,femoralEntryNormal:fEntry.normal,femoralCortex:fExit.point,femoralNormal:fExit.normal,femurTTL:fExit.distance,jointSpan:fEntry.distance};
+}
+function solveTranstibialRoute(reference,requestedFemur,requestedTibia,jointSpan,tibialTranslation){
+ const contexts=tunnelSurfaces.get(reference),key=String(tibialTranslation.map(x=>x.toFixed(4)));contexts.transtibial??=new Map();let entry=contexts.transtibial.get(key);
+ if(!entry){
+  const local=[...reference.tibia.entry],footprint=add(local,tibialTranslation),context={local,footprint,tibialTranslation,regions:transtibialRegions(local,footprint,contexts.femur,contexts.tibia)},candidates=[],[c0,c1]=TRANSTIBIAL_ANGLES.coronalRange,[s0,s1]=TRANSTIBIAL_ANGLES.sagittalRange;
+  // a 2° grid over the trans-tibial cone; the chosen line is then refined to the entered tibial length
+  for(let coronal=c0;coronal<=c1;coronal+=2)for(let sagittal=s0;sagittal<=s1;sagittal+=2){const c=transtibialCandidate(context,coronal,sagittal);if(c)candidates.push(c);}
+  if(!candidates.length)throw Error('No trans-tibial path from the tibial footprint crosses both fixed reference bones.');
+  // grid neighbours (2° apart in either angle), for bracketing a requested tibial length anywhere in the cone
+  const index=new Map(candidates.map(x=>[`${x.coronal}|${x.sagittal}`,x])),edges=[];for(const x of candidates)for(const [dc,ds] of [[2,0],[0,2]]){const y=index.get(`${x.coronal+dc}|${x.sagittal+ds}`);if(y)edges.push([x,y,dc/2,ds/2]);}
+  entry={context,candidates,edges,solved:new Map()};contexts.transtibial.set(key,entry);
  }
- const fRequest=finite(requestedFemur,35),tRequest=finite(requestedTibia,40),score=c=>(c.femurTTL-fRequest)**2+(c.tibiaTTL-tRequest)**2+.12*(c.jointSpan-jointSpan)**2+.08*c.footprintDeviation**2;
- let chosen=candidates[0];for(const candidate of candidates)if(score(candidate)<score(chosen))chosen=candidate;
- const c=chosen,supported=Math.abs(c.femurTTL-fRequest)<.05&&Math.abs(c.tibiaTTL-tRequest)<.05&&Math.abs(c.jointSpan-jointSpan)<.05;
- const transformFor=(side,entry,cortex,direction,normal,ttl,requestedTTL,translation)=>({ttl,representedTTL:ttl,requestedTTL,supported:Math.abs(ttl-requestedTTL)<.05,scale:1,axialScale:1,transverseScale:1,matrix:IDENTITY.map(row=>[...row]),entry:[...entry],cortex:[...cortex],direction:[...direction],normal:[...normal],translation:[...translation]});
- return {femur:transformFor('femur',c.femoralEntry,c.femoralCortex,c.direction,c.femoralNormal,c.femurTTL,fRequest,[0,0,0]),tibia:transformFor('tibia',c.tibialEntry,c.tibialCortex,mul(c.direction,-1),c.tibialNormal,c.tibiaTTL,tRequest,tibialTranslation),linked:{enabled:true,start:[...c.tibialCortex],end:[...c.femoralCortex],direction:[...c.direction],totalLength:c.tibiaTTL+c.jointSpan+c.femurTTL,offsets:{tibialCortex:0,tibialEntry:c.tibiaTTL,femoralEntry:c.tibiaTTL+c.jointSpan,femoralCortex:c.tibiaTTL+c.jointSpan+c.femurTTL},requested:{femurTTL:fRequest,tibiaTTL:tRequest,jointSpan},represented:{femurTTL:c.femurTTL,tibiaTTL:c.tibiaTTL,jointSpan:c.jointSpan},supported,sampledCandidates:candidates.length,footprintDeviation:c.footprintDeviation}};
+ const fRequest=finite(requestedFemur,45),tRequest=finite(requestedTibia,40),{coronal:pc,sagittal:ps}=TRANSTIBIAL_ANGLES,[c0,c1]=TRANSTIBIAL_ANGLES.coronalRange,[s0,s1]=TRANSTIBIAL_ANGLES.sagittalRange,solvedKey=`${tRequest}|${jointSpan}`;
+ let c=entry.solved.get(solvedKey);
+ if(!c){
+  const score=x=>4*(x.tibiaTTL-tRequest)**2+.16*((x.coronal-pc)**2+(x.sagittal-ps)**2)+.05*(x.jointSpan-jointSpan)**2;
+  c=entry.candidates[0];for(const candidate of entry.candidates)if(score(candidate)<score(c))c=candidate;
+  // Refine to the entered tibial length: along a few angle paths through the chosen line (both angles, coronal only, sagittal
+  // only), find neighbouring valid lines that bracket the length and bisect between them; keep the closest, nearest the typical angles.
+  if(Math.abs(c.tibiaTTL-tRequest)>=.05){
+   const base=c,found=[];
+   // cheapest first: stop at the first path that brackets the length exactly
+   for(const [dc,ds] of [[1,1],[1,0],[0,1]]){
+    if(found.some(x=>Math.abs(x.tibiaTTL-tRequest)<.05))break;
+    const at=t=>{const coronal=base.coronal+dc*t,sagittal=base.sagittal+ds*t;return coronal<c0||coronal>c1||sagittal<s0||sagittal>s1?null:(t===0?base:transtibialCandidate(entry.context,coronal,sagittal));};
+    const samples=[];for(const t of [-4,-2,0,2,4])samples.push([t,at(t)]);
+    for(let k=0;k+1<samples.length;k++){let [ta,a]=samples[k],[tb,b]=samples[k+1];if(!a||!b||(a.tibiaTTL-tRequest)*(b.tibiaTTL-tRequest)>0)continue;
+     for(let n=0;n<24&&Math.abs(a.tibiaTTL-tRequest)>=.01&&Math.abs(b.tibiaTTL-tRequest)>=.01;n++){const tm=(ta+tb)/2,m=at(tm);if(!m)break;if((a.tibiaTTL-tRequest)*(m.tibiaTTL-tRequest)<=0){b=m;tb=tm;}else{a=m;ta=tm;}}
+     found.push(Math.abs(a.tibiaTTL-tRequest)<Math.abs(b.tibiaTTL-tRequest)?a:b);}
+   }
+   if(!found.some(x=>Math.abs(x.tibiaTTL-tRequest)<.05))for(const [a0,b0,dc,ds] of entry.edges){if((a0.tibiaTTL-tRequest)*(b0.tibiaTTL-tRequest)>0)continue;
+    let a=a0,b=b0,ta=0,tb=2;const at=t=>transtibialCandidate(entry.context,a0.coronal+dc*t,a0.sagittal+ds*t);
+    for(let n=0;n<24&&Math.abs(a.tibiaTTL-tRequest)>=.01&&Math.abs(b.tibiaTTL-tRequest)>=.01;n++){const tm=(ta+tb)/2,m=at(tm);if(!m)break;if((a.tibiaTTL-tRequest)*(m.tibiaTTL-tRequest)<=0){b=m;tb=tm;}else{a=m;ta=tm;}}
+    found.push(Math.abs(a.tibiaTTL-tRequest)<Math.abs(b.tibiaTTL-tRequest)?a:b);}
+   const exact=found.filter(x=>Math.abs(x.tibiaTTL-tRequest)<.05),pool=exact.length?exact:found;
+   if(pool.length){const best=pool.reduce((x,y)=>score(y)<score(x)?y:x);if(Math.abs(best.tibiaTTL-tRequest)<Math.abs(c.tibiaTTL-tRequest))c=best;}
+  }
+  entry.solved.set(solvedKey,c);if(entry.solved.size>256)entry.solved.delete(entry.solved.keys().next().value);
+ }
+ const tibiaSupported=Math.abs(c.tibiaTTL-tRequest)<.05,femurSupported=Math.abs(c.femurTTL-fRequest)<.05;
+ const transformFor=(entryPoint,cortex,direction,normal,ttl,requestedTTL,translation)=>({ttl,representedTTL:ttl,requestedTTL,supported:Math.abs(ttl-requestedTTL)<.05,scale:1,axialScale:1,transverseScale:1,matrix:IDENTITY.map(row=>[...row]),entry:[...entryPoint],cortex:[...cortex],direction:[...direction],normal:[...normal],translation:[...translation]});
+ return {femur:{...transformFor(c.femoralEntry,c.femoralCortex,c.direction,c.femoralNormal,c.femurTTL,fRequest,[0,0,0]),entryNormal:[...c.femoralEntryNormal]},tibia:transformFor(c.tibialEntry,c.tibialCortex,mul(c.direction,-1),c.tibialNormal,c.tibiaTTL,tRequest,tibialTranslation),
+  linked:{enabled:true,technique:'transtibial',start:[...c.tibialCortex],end:[...c.femoralCortex],direction:[...c.direction],coronalDegrees:c.coronal,sagittalDegrees:c.sagittal,totalLength:c.tibiaTTL+c.jointSpan+c.femurTTL,offsets:{tibialCortex:0,tibialEntry:c.tibiaTTL,femoralEntry:c.tibiaTTL+c.jointSpan,femoralCortex:c.tibiaTTL+c.jointSpan+c.femurTTL},requested:{femurTTL:fRequest,tibiaTTL:tRequest,jointSpan},represented:{femurTTL:c.femurTTL,tibiaTTL:c.tibiaTTL,jointSpan:c.jointSpan},supported:tibiaSupported&&femurSupported,tibiaSupported,femurSupported}};
 }
 
 export function constructGeometry(reference,state,evaluation){
@@ -142,11 +190,12 @@ export function constructGeometry(reference,state,evaluation){
  record('jointSpan',state.jointSpan,jointSpan);
  record('graftDiameter',state.graftDiameter,renderDiameter(state.graftDiameter));
  const tentry=point(fentry,reference.jointDirection,jointSpan);
- const isLinked=state.femur.technique==='transtibial'||state.tibia.technique==='transtibial',linkedSolution=isLinked?solveLinkedRoute(reference,state.femur.ttl,state.tibia.ttl,jointSpan,sub(tentry,reference.tibia.entry)):null;
+ const isLinked=state.femur.technique==='transtibial'&&state.tibia.technique==='transtibial',linkedSolution=isLinked?solveTranstibialRoute(reference,state.femur.ttl,state.tibia.ttl,jointSpan,sub(tentry,reference.tibia.entry)):null;
  const femur=linkedSolution?.femur||transform(reference,'femur',state.femur.ttl,fentry),tibia=linkedSolution?.tibia||transform(reference,'tibia',state.tibia.ttl,tentry);
  if(linkedSolution){jointSpan=linkedSolution.linked.represented.jointSpan;record('jointSpan',state.jointSpan,jointSpan);}
  record('femur.ttl',state.femur.ttl,femur.ttl);record('tibia.ttl',state.tibia.ttl,tibia.ttl);
- const anatomyWarnings=[];if(linkedSolution&&!linkedSolution.linked.supported)anatomyWarnings.push({side:'linked',message:`One straight line through this fixed atlas represents ${linkedSolution.linked.represented.femurTTL.toFixed(1)} mm femur, ${linkedSolution.linked.represented.tibiaTTL.toFixed(1)} mm tibia and ${jointSpan.toFixed(1)} mm joint span. Requested lengths are retained; the bones are not resized or bent to force a match.`});
+ const anatomyWarnings=[];
+ if(linkedSolution){const r=linkedSolution.linked;if(!r.tibiaSupported)anatomyWarnings.push({side:'tibia',requestedTTL:r.requested.tibiaTTL,representedTTL:r.represented.tibiaTTL,message:`Entered ${fm1(r.requested.tibiaTTL)} mm cannot be represented by a trans-tibial path from this atlas's tibial footprint. The nearest path at typical trans-tibial angles is ${fm1(r.represented.tibiaTTL)} mm; bone size is unchanged.`});if(!r.femurSupported)anatomyWarnings.push({side:'femur',requestedTTL:r.requested.femurTTL,representedTTL:r.represented.femurTTL,message:`The femoral pin through this tibial tunnel reaches the lateral cortex at ${fm1(r.represented.femurTTL)} mm in this atlas; the measured ${fm1(r.requested.femurTTL)} mm is kept for sizing. The bones are not resized or bent to force a match.`});}
  for(const [side,geometry] of Object.entries({femur,tibia})){
   const points=regionPoints.get(reference)?.[side]||[],mins=[Infinity,Infinity,Infinity],maxs=[-Infinity,-Infinity,-Infinity];
   for(const p of points){const q=transformBonePoint(geometry,p);for(let i=0;i<3;i++){mins[i]=Math.min(mins[i],q[i]);maxs[i]=Math.max(maxs[i],q[i]);}}
@@ -155,12 +204,18 @@ export function constructGeometry(reference,state,evaluation){
   const values=evaluation?.sides?.[side]||state[side];
   geometry.measuredTTL=finite(state[side].ttl,0);
   geometry.requestedSocketDepth=finite(values.socket,0);
-  geometry.socketDepth=linkedSolution?geometry.ttl:displayLength(values.socket);
-  geometry.graftInsertion=displayLength(values.graftInsertion);
+  // trans-tibial: the tibia is a full tunnel; the femur is a socket reamed through it to the entered depth
+  const fullTunnel=!!linkedSolution&&side==='tibia';
+  geometry.socketDepth=fullTunnel?geometry.ttl:displayLength(values.socket);
+  // trans-tibial femur: the atlas line may be shorter than the measured femur; a socket and graft that fit the measured length are
+  // drawn just inside the atlas cortex (recorded as an illustration limit), never as an overrun
+  const insideAtlas=len=>linkedSolution&&side==='femur'&&len>geometry.ttl-.5&&len<=geometry.measuredTTL+1e-7?Math.max(0,geometry.ttl-.5):len;
+  geometry.socketDepth=insideAtlas(geometry.socketDepth);
+  geometry.graftInsertion=insideAtlas(displayLength(values.graftInsertion));
   geometry.socket=point(geometry.entry,geometry.direction,geometry.socketDepth);
   geometry.graftTip=point(geometry.entry,geometry.direction,geometry.graftInsertion);
   geometry.socketDiameter=renderDiameter(linkedSolution?(evaluation?.sides?.tibia?.diameter??state.tibia.diameter):values.diameter);
-  geometry.apertureDiameter=linkedSolution?geometry.socketDiameter:renderDiameter(values.aperture);
+  geometry.apertureDiameter=renderDiameter(values.aperture);
   geometry.bonePlug=!!values.bonePlug;
   geometry.plugLength=Math.max(.1,displayLength(values.plugLength??20));
   geometry.plugDiameter=renderDiameter(values.plugDiameter??9);

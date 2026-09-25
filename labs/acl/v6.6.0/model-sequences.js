@@ -3,8 +3,9 @@ const phase=(p,a,b)=>limit((p-a)/(b-a));
 const lerp=(a,b,t)=>a+(b-a)*t;
 
 export function recommendedStepDuration(stage,technique=''){
- if(stage==='linked_ream')return 9500;
- if(stage==='linked_pin')return 6000;
+ // trans-tibial femoral passes travel up the tibial tunnel first
+ if(technique==='transtibial'&&stage==='femur_pin')return 5200;
+ if(technique==='transtibial'&&['femur_ream','femur_cortex_ream'].includes(stage))return 7500;
  if(stage==='femur_cortex_ream')return 5500;
  if(stage==='trim_tibia')return 3500;
  if(stage==='femur_measure'&&technique==='flexible')return 3500;
@@ -50,12 +51,18 @@ export function adjustableFemoralPassPose(progress,{ttl,buttonLength=13,xlBefore
  return {progress:p,advance:phase(p,0,.42),flip:phase(p,.42,.55),seat:phase(p,.55,.63),tension:phase(p,.63,1),clearance,centerDepth:ttl+clearance*(1-phase(p,.55,.63)),phase:p<.42?'button-advance-graft-lags':p<.55?'flip':p<.63?'seat-button':'tension-adjustable-loop'};
 }
 
-// Distances run continuously from the outer tibial cortex toward the femur.
+// Trans-tibial femoral pin: distances run continuously from the outer tibial cortex, up the reamed tibial tunnel, across the
+// joint and through the femur (it is drilled in from outside the tibia and leaves the anterolateral femur).
 export function linkedPinPose(progress,{totalLength}){
  const p=limit(progress),length=Math.max(.1,Number(totalLength)||.1),headDistance=lerp(-20,length+12,p);
- return {progress:p,phase:p>=1?'pin-through-both-bones':'advance-linked-pin',headDistance,tailDistance:headDistance-length-45,diameter:2.4,visible:true};
+ return {progress:p,phase:p>=1?'pin-through-tibial-tunnel-and-femur':'advance-femoral-pin',headDistance,tailDistance:headDistance-length-45,diameter:2.4,visible:true};
 }
-export function linkedReamerPose(progress,{tibiaTTL,jointSpan,femurTTL}){
- const p=limit(progress),tibia=Math.max(.1,Number(tibiaTTL)||.1),joint=Math.max(0,Number(jointSpan)||0),femur=Math.max(.1,Number(femurTTL)||.1),totalLength=tibia+joint+femur,advance=phase(p,0,.73),withdraw=phase(p,.73,1),furthest=lerp(-18,totalLength+4,advance),headDistance=furthest-withdraw*(totalLength+44);
- return {progress:p,phase:p>=1?'complete':p<.73?'continuous-through-ream':'withdraw',visible:p<1,pinVisible:p<1,headDistance,totalLength,tibialCutDepth:Math.max(0,Math.min(tibia,furthest)),femoralCutDepth:Math.max(0,Math.min(femur,furthest-tibia-joint)),rotation:p*Math.PI*36};
+// Trans-tibial femoral reaming: the reamer (or the 4.5 mm cortical reamer) rides the femoral pin up through the already reamed
+// tibial tunnel, cuts the femoral socket to its depth (or the cortical passage from the socket end through the cortex), and comes
+// back out the tibia. headDepth is measured from the femoral aperture along the femoral axis (negative = joint / tibial tunnel).
+export function transtibialFemoralReamerPose(progress,{approach,socketDepth,ttl,corticalPassage=false,graftDiameter=9}){
+ const p=limit(progress),back=Math.max(0,Number(approach)||0)+18,depth=Math.max(0,Number(socketDepth)||0),through=Math.max(depth,Number(ttl)||0),target=corticalPassage?through+2:depth,advance=phase(p,0,.74),withdraw=phase(p,.74,1);
+ const furthest=lerp(-back,target,advance),headDepth=furthest-withdraw*(target+back+12);
+ return {visible:p<1,phase:p>=1?'complete':p<.74?(corticalPassage?'cortical-passage':'socket'):'withdraw',progress:p,headDepth,headDiameter:corticalPassage?4.5:graftDiameter,
+  socketCutDepth:corticalPassage?depth:Math.max(0,Math.min(depth,furthest)),corticalCutDepth:corticalPassage?Math.max(0,Math.min(through,furthest)):0,pass:corticalPassage?'cortical-passage':'socket',rotation:p*Math.PI*32};
 }

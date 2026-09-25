@@ -18,7 +18,7 @@ export function plannedFemoralInsertion(caseOrState){
     if(!finite(data.ttl)||!finite(data.loop))return null;
     return data.ttl-data.loop+(finite(state.foldHeight)?state.foldHeight:4);
   }
-  const depth=['outside_in','transtibial'].includes(data.technique)||(data.technique==='retrograde'&&data.blownCortex)?data.ttl:data.socket;
+  const depth=data.technique==='outside_in'||(data.technique==='retrograde'&&data.blownCortex)?data.ttl:data.socket;
   return finite(depth)?depth:null;
 }
 // Prepared length is end to end: bone plugs are already included.
@@ -104,11 +104,10 @@ export function sanitizeState(input) {
     if(typeof raw.plugDiameterOverride==='boolean')state[side].plugDiameterOverride=raw.plugDiameterOverride;
     for(const key of ['ttl','socket','diameter','aperture','graftInsertion','loop','screwDiameter','screwLength']) {
       const bounds=['diameter','aperture','screwDiameter'].includes(key)?INPUT_BOUNDS.diameter:INPUT_BOUNDS.length;
-      const derived=(inputLinked&&(key==='aperture'||(side==='femur'&&key==='diameter')))||key==='graftInsertion'||(key==='socket'&&((side==='tibia'&&['straight','transtibial'].includes(state[side].technique))||(side==='femur'&&['outside_in','transtibial'].includes(state[side].technique))))||(key==='socket'&&state[side].technique==='retrograde'&&state[side].blownCortex);
+      const derived=(inputLinked&&side==='femur'&&key==='diameter')||key==='graftInsertion'||(key==='socket'&&((side==='tibia'&&['straight','transtibial'].includes(state[side].technique))||(side==='femur'&&state[side].technique==='outside_in')))||(key==='socket'&&state[side].technique==='retrograde'&&state[side].blownCortex);
       if(!derived)state[side][key]=readNumber(raw[key],state[side][key],`${side}.${key}`,bounds);
     }
   }
-  if(state.femur.technique==='transtibial')state.femur.socket=state.femur.ttl;
   if(linkedState(state))state.femur.diameter=state.tibia.diameter;
   if(state.femur.technique==='outside_in'){
     state.femur.socket=state.femur.ttl;
@@ -118,7 +117,6 @@ export function sanitizeState(input) {
   for(const side of ['femur','tibia']) {
     if(state[side].technique==='retrograde'&&state[side].blownCortex)state[side].socket=state[side].ttl;
     const raw=isObject(original[side])?original[side]:{};
-    if(linkedState(state)){state[side].aperture=state.tibia.diameter;state[side].apertureOverride=false;continue;}
     const nominal=nominalAperture(state,side);
     // Legacy saved custom openings are retained as explicit overrides, not erased.
     if(typeof raw.blownCortex!=='boolean' && raw.aperture!==undefined && finite(nominal) && !near(state[side].aperture,nominal)) {
@@ -146,12 +144,11 @@ export function sanitizeState(input) {
 export function nominalAperture(state,side) {
   const data=state?.[side];
   if(!data||!['femur','tibia'].includes(side))return null;
-  if(linkedState(state))return finite(state.tibia.diameter)?state.tibia.diameter:null;
   if(data.technique==='retrograde'){const reamer=RR_REAMERS.find(x=>near(x.diameter,Number(data.diameter)));return reamer?(side==='tibia'?4.5:reamer.shaft):null;}
   if(side==='tibia'&&['straight','transtibial'].includes(data.technique))return finite(Number(data.diameter))?Number(data.diameter):null;
-  if(side==='femur'&&['outside_in','transtibial'].includes(data.technique))return finite(data.diameter)?data.diameter:null;
+  if(side==='femur'&&data.technique==='outside_in')return finite(data.diameter)?data.diameter:null;
   if(side==='femur'&&fixationById(data.fixation)?.kind==='integrated')return 4.5;
-  if(side==='femur'&&['flexible','low_profile'].includes(data.technique)&&fixationById(data.fixation)?.kind==='screw'&&!(Number(data.socket)>=Number(data.ttl)))return 2.4;
+  if(side==='femur'&&['flexible','low_profile','transtibial'].includes(data.technique)&&fixationById(data.fixation)?.kind==='screw'&&!(Number(data.socket)>=Number(data.ttl)))return 2.4;
   if(side==='femur'&&(data.technique==='outside_in'||(finite(Number(data.socket))&&finite(Number(data.ttl))&&Number(data.socket)>=Number(data.ttl))))return finite(Number(data.diameter))?Number(data.diameter):null;
   return null;
 }
@@ -370,7 +367,7 @@ function fieldFeedback(state,sides,issues) {
   const sharedReamer=linkedState(state);
   const fieldIssues={},fieldLimits={},hardwareStatus={femur:{buttonInvalid:false,screwInvalid:false,reasons:[]},tibia:{buttonInvalid:false,screwInvalid:false,reasons:[]}};
   const put=(paths,issue)=>{
-    if(sharedReamer&&paths.some(path=>['femur.diameter','femur.aperture','tibia.aperture'].includes(path)))paths=[...paths,'tibia.diameter'];
+    if(sharedReamer&&paths.includes('femur.diameter'))paths=[...paths,'tibia.diameter'];
     for(const path of paths) {
       if(!fieldIssues[path])fieldIssues[path]=[];
       if(!fieldIssues[path].some(x=>x.id===issue.id))fieldIssues[path].push({id:issue.id,level:issue.level,message:issue.message});
@@ -384,19 +381,18 @@ function fieldFeedback(state,sides,issues) {
   limit('flipAllowance',0.1,100,'Published G-Lok flip allowance is 7 mm.');
   for(const side of ['femur','tibia']) {
     const d=state[side],r=sides[side],prefix=side==='femur'?'femoral':'tibial',fix=fixationById(d.fixation),isScrew=fix?.kind==='screw',isButton=['integrated','abs'].includes(fix?.kind);
-    const femoralPaths=sides.femur.minSocket!==null?['femur.ttl','femur.loop','foldHeight']:['femur.socket',...((['outside_in','transtibial'].includes(state.femur.technique)||(state.femur.technique==='retrograde'&&state.femur.blownCortex))?['femur.ttl']:[])];
+    const femoralPaths=sides.femur.minSocket!==null?['femur.ttl','femur.loop','foldHeight']:['femur.socket',...((state.femur.technique==='outside_in'||(state.femur.technique==='retrograde'&&state.femur.blownCortex))?['femur.ttl']:[])];
     const insertionPaths=side==='tibia'?['tibia.graftInsertion','graftLength',...femoralPaths]:femoralPaths;
     const catalog=SCREWS.filter(x=>x.family===d.fixation);
     const maxInsertion=Math.min(d.socket,d.ttl,state.graftLength-state.jointSpan-(side==='femur'?20:sides.femur.graftInsertion));
     const minimumSocket=Math.max(0.1,side==='femur'&&r.minSocket===null?20:r.trimAmount>0?r.inBoneGraftInsertion:r.graftInsertion,r.minSocket??0,isScrew?d.screwLength:0);
     limit(`${side}.ttl`,Math.max(0.1,d.socket,r.trimAmount>0?r.inBoneGraftInsertion:r.graftInsertion,isScrew?d.screwLength:0),300,'Total bone path must contain socket, insertion and any screw length.');
-    limit(`${side}.socket`,((side==='tibia'&&['straight','transtibial'].includes(d.technique))||(side==='femur'&&['outside_in','transtibial'].includes(d.technique))||(d.technique==='retrograde'&&d.blownCortex))?d.ttl:minimumSocket,d.ttl,r.minSocket!==null?`G-Lok minimum is ${fm(r.minSocket)} mm; socket cannot exceed total tunnel.`:'Entered reamed depth must contain the planned insertion and screw path.');
+    limit(`${side}.socket`,((side==='tibia'&&['straight','transtibial'].includes(d.technique))||(side==='femur'&&d.technique==='outside_in')||(d.technique==='retrograde'&&d.blownCortex))?d.ttl:minimumSocket,d.ttl,r.minSocket!==null?`G-Lok minimum is ${fm(r.minSocket)} mm; socket cannot exceed total tunnel.`:'Entered reamed depth must contain the planned insertion and screw path.');
     limit(`${side}.graftInsertion`,r.bonePlug?Math.max(20,r.plugLength):20,maxInsertion,'The 20 mm planning minimum applies. Insertion cannot exceed reamed depth, total bone path or the available graft-length budget.');
     limit(`${side}.diameter`,Math.max(0.1,state.graftDiameter,r.bonePlug?r.plugDiameter:0),50,'Reamed diameter must accommodate the prepared graft and any bone plug.');
     const buttonSpan=r.buttonSpec?.outerDiameter??r.buttonSpec?.width;
     const projection=r.buttonSpec?.projection||0;
     limit(`${side}.aperture`,Math.max(0.1,r.nominalAperture??0,r.shaftDiameter??0,projection,d.technique==='retrograde'&&d.blownCortex?d.diameter:0,d.xl&&d.xlTiming==='before'?XL.passageWidth:0),fix?.kind==='abs'?buttonSpan:50,fix?.kind==='abs'?`Opening must be strictly larger than the ${projection} mm projection, and smaller than the ${buttonSpan} mm narrow footprint. `:r.nominalAperture!==null?`Nominal passage is ${fm(r.nominalAperture)} mm; edit only when cortical opening is enlarged.`:'No universal nominal passage is established for this instrument/construct.');
-    if(sharedReamer)limit(`${side}.aperture`,state.tibia.diameter,state.tibia.diameter,'The linked reamer makes both cortical openings at the shared diameter.');
     limit(`${side}.loop`,15,50,'G-Lok catalog loops: 15, 20, 25, 30, 35, 40, 45, 50 mm.');
     limit(`${side}.screwLength`,catalog.length?Math.min(...catalog.map(x=>x.length)):0.1,Math.min(d.ttl,d.socket),'Screw length must be a published catalog pair and fit the entered bone and reamed path.');
     limit(`${side}.screwDiameter`,catalog.length?Math.min(...catalog.map(x=>x.diameter)):0.1,catalog.length?Math.max(...catalog.map(x=>x.diameter)):50,'Use a published diameter/length pair. Guide suggestions do not overwrite the surgeon-selected size.');
