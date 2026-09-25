@@ -1671,7 +1671,8 @@ html[data-vt="back"]::view-transition-old(tbx-hero){animation:tbx-out .3s linear
    (vtOK), the launch and the logo check TBX_RM(). Every reduced-motion rule of this file lives here. */
 /* ---- Case Labs (4.154): Home title menu → one shiny "Case Labs" button (the wordmark's type in a box with a slow sheen and glow)
    → labs/acl/. The hand-over is a container transform by transform only: the curtain (the Case Labs stage) grows from the tapped
-   box to the whole screen while the wordmark flies to its centre; the lab page continues from that frame. Reduce Motion: none. ---- */
+   box to the whole screen while the wordmark pops up to its middle and zooms on to the top left, onto the lab header's brand
+   (4.155); the lab page continues from that frame. Reduce Motion: none. ---- */
 #bar .t.labs{cursor:pointer; -webkit-user-select:none; user-select:none}
 #bar .t.labs .lb-caret{display:inline-block; vertical-align:middle; margin:-3px 0 0 6px; color:var(--muted); transition:transform var(--m-base) var(--e-out), color 150ms linear}
 #bar .t.labs[aria-expanded="true"] .lb-caret{transform:rotate(180deg); color:var(--amber)}
@@ -1700,8 +1701,20 @@ html[data-vt="back"]::view-transition-old(tbx-hero){animation:tbx-out .3s linear
 @keyframes lm-glow{0%, 100%{opacity:.35} 45%{opacity:1}}
 #labcurtain{position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:1000; pointer-events:none; transform-origin:0 0; border-radius:13px;
   background:radial-gradient(130% 85% at 50% 42%, #2b2926 0%, #1c1b1a 52%, #121212 100%); transition:transform var(--m-launch) var(--e-out)}
-#labword{position:fixed; left:0; top:0; z-index:1001; pointer-events:none; white-space:nowrap; font-weight:700; letter-spacing:.2px; line-height:1.15; color:var(--bone);
-  transform-origin:50% 50%; transition:transform var(--m-launch) var(--e-inout), opacity var(--m-base) var(--e-out)}
+/* 4.155: the flying wordmark is the lab header's brand, type for type (labs/acl lab.css .brand .nm), so it lands on it exactly;
+   the flight itself is one Web Animation (pop up to the middle, then zoom to the top left) — see LABS.go */
+#labword{position:fixed; left:0; top:0; z-index:1001; pointer-events:none; white-space:nowrap; color:var(--bone); transform-origin:0 0;
+  font:750 18px/1.1 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing:-.01em}
+/* a hidden copy of the lab's header row (lab.css #top, .r1, .ib, .brand — same metrics and breakpoints): where its brand sits */
+#labghost{position:fixed; left:0; right:0; top:0; visibility:hidden; pointer-events:none; padding:calc(var(--sat) + 16px / var(--z)) calc(16px + var(--sar)) 0 calc(16px + var(--sal))}
+#labghost .lg-r1{display:flex; align-items:center; gap:8px; min-height:calc(44px / var(--z))}
+#labghost .lg-back{flex:none; width:40px; height:40px}
+#labghost .lg-brand{display:flex; align-items:center; min-height:40px; margin-left:-4px; padding:0 6px 0 4px}
+#labghost .lg-nm{white-space:nowrap; font:750 18px/1.1 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; letter-spacing:-.01em}
+#labghost .lg-nm em{font-style:normal}
+@media (max-width:380px){#labghost .lg-r1{gap:6px}}
+@media (max-width:340px){#labghost .lg-nm, #labword{font-size:17px}}
+@media (orientation:landscape) and (max-height:540px){#labghost{padding-top:calc(var(--sat) + 6px)} #labghost .lg-r1{min-height:36px}}
 html.tbx-to-lab #content{opacity:0; transform:translateY(18px); transition:opacity var(--m-base) var(--e-in), transform var(--m-emph) var(--e-in)}
 html.tbx-to-lab #bottombar, html.tbx-to-lab #fb-fab{transform:translateY(120%); transition:transform var(--m-emph) var(--e-in)}
 html.tbx-to-lab #bar{opacity:0; transform:translateY(-10px); transition:opacity var(--m-base) var(--e-in), transform var(--m-base) var(--e-in)}
@@ -2083,7 +2096,7 @@ if (R.classList.contains('authed')) begin('auto');
 </script>
 <script src="lib/inflate.js" defer></script>
 <script src="lib/zxing-reader.js" defer></script>
-<script src="app-4.154.js"></script>
+<script src="app-4.155.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>

@@ -41,7 +41,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.154';
+  var APPVER = '4.155';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -8659,9 +8659,10 @@ var GLOSS = {
   backBtn.addEventListener('click', goBack);
   homeBtn.addEventListener('click', function () { location.hash = '#/'; });
   // ---- Case Labs (4.154): on Home, the title "SportsMed Toolbox" opens a small menu with one shiny "Case Labs" button (the
-  // wordmark style, in a box with a slow sheen). Tapping it — or "here" in the What's New item — hands ToolBox over to the lab:
-  // the box grows into the whole screen as the Case Labs stage, the wordmark flies to its centre and the ToolBox page steps away;
-  // the lab page (its own document, labs/acl/) starts from that same frame (sessionStorage tbx_lab_enter). Opening the menu
+  // wordmark style, in a box with a slow sheen). Tapping it — or "HERE" in the What's New item — hands ToolBox over to the lab:
+  // the box grows into the whole screen as the Case Labs stage, the wordmark pops up and zooms to the top left (4.155) and the
+  // ToolBox page steps away; the lab page (its own document, labs/acl/) starts from that same frame (sessionStorage
+  // tbx_lab_enter). Opening the menu
   // starts downloading the lab into the service-worker cache. Reduce Motion: no animation, same navigation. Home screen only;
   // cycle count / F&A never show this title. Everything here is try/catch-guarded (boot must not fail on it).
   var LABS = (function () {
@@ -8709,32 +8710,58 @@ var GLOSS = {
       var done = function () { if (!menu.classList.contains('open')) { menu.hidden = true; scrim.hidden = true; } };
       if (now || motionRM()) done(); else setTimeout(done, 180);
     }
-    // the hand-over, compositor-only: the curtain is laid out at its final size (the whole screen) and starts scaled onto the
-    // tapped box or row; the wordmark starts over the tapped one (or the row's centre) and ends centred at 30 px, exactly where
-    // the lab page draws it on its first frame
+    // the hand-over, compositor-only (4.155, Nate: "pop up then zoom to the top left of the screen in continuous motion"): the
+    // curtain is laid out at its final size (the whole screen) and starts scaled onto the tapped box or row; the wordmark pops
+    // up from the tapped one to the middle of the stage and, in the same motion, zooms to the top left — onto the exact spot of
+    // the lab header's brand, measured from a hidden copy of that header row (#labghost, same metrics as the lab's CSS). The lab
+    // draws its brand there on its first frame (sessionStorage tbx_lab_enter = {t, x, y, w, h}: where the wordmark landed).
     function go(id, from) {
       var lab = LAB_LIST.filter(function (l) { return l.id === id; })[0]; if (!lab || busy) return;
       busy = true;
-      try { sessionStorage.setItem('tbx_lab_enter', String(Date.now())); } catch (x) {}
-      if (motionRM() || !from || !from.getBoundingClientRect) { location.href = lab.url; return; }
+      var rec = { t: Date.now() }, left = false;
+      var leave = function () { if (left) return; left = true; try { sessionStorage.setItem('tbx_lab_enter', JSON.stringify(rec)); } catch (x) {} location.href = lab.url; };
+      if (motionRM() || !from || !from.getBoundingClientRect) { rec.still = 1; leave(); return; } // no flight: the lab just opens
       var W = window.innerWidth || 1, H = window.innerHeight || 1, fr = from.getBoundingClientRect();
       var cur = document.createElement('div'); cur.id = 'labcurtain'; cur.setAttribute('aria-hidden', 'true');
       cur.style.transform = 'translate(' + fr.left + 'px,' + fr.top + 'px) scale(' + Math.max(.01, fr.width / W) + ',' + Math.max(.01, fr.height / H) + ')';
-      var word = document.createElement('div'); word.id = 'labword'; word.setAttribute('aria-hidden', 'true'); word.innerHTML = WORD;
-      var src = from.querySelector('.lm-word'), fs = src ? (parseFloat(getComputedStyle(src).fontSize) || 19) : 19;
-      // measured and placed with transitions off, so the flight starts from the tapped wordmark (or the tapped row, faded in)
-      word.style.fontSize = fs + 'px'; word.style.transition = 'none'; word.style.visibility = 'hidden';
-      document.body.appendChild(cur); document.body.appendChild(word);
-      var ww = word.offsetWidth, wh = word.offsetHeight, sr = src ? src.getBoundingClientRect() : { left: fr.left + fr.width / 2 - ww / 2, top: fr.top + fr.height / 2 - wh / 2 };
-      word.style.transform = 'translate(' + sr.left + 'px,' + sr.top + 'px)';
-      if (!src) word.style.opacity = '0';
+      var word = document.createElement('div'); word.id = 'labword'; word.setAttribute('aria-hidden', 'true'); word.innerHTML = WORD; word.style.visibility = 'hidden';
+      var ghost = document.createElement('div'); ghost.id = 'labghost'; ghost.setAttribute('aria-hidden', 'true');
+      ghost.innerHTML = '<div class="lg-r1"><span class="lg-back"></span><span class="lg-brand"><span class="lg-nm">' + WORD + '</span></span></div>';
+      document.body.appendChild(cur); document.body.appendChild(word); document.body.appendChild(ghost);
+      var src = from.querySelector('.lm-word'), sr = src ? src.getBoundingClientRect() : null, to = ghost.querySelector('.lg-nm').getBoundingClientRect();
+      var ww = word.offsetWidth || to.width || 1, wh = word.offsetHeight || to.height || 1;
+      ghost.parentNode.removeChild(ghost);
+      rec.x = Math.round(to.left * 100) / 100; rec.y = Math.round(to.top * 100) / 100; rec.w = Math.round(to.width * 100) / 100; rec.h = Math.round(to.height * 100) / 100;
+      var tf = function (x, y, k) { return 'translate(' + x + 'px,' + y + 'px) scale(' + k + ')'; };
+      // from: over the tapped wordmark (the menu button) or, from a What's New link, small in the middle of it, fading in
+      var k0 = sr ? sr.width / ww : .45, x0 = sr ? sr.left : fr.left + fr.width / 2 - ww * k0 / 2, y0 = sr ? sr.top + (sr.height - wh * k0) / 2 : fr.top + fr.height / 2 - wh * k0 / 2;
+      // pop: the middle of the stage, a little above centre, as large as fits (at most 2.3×) — then on to the brand at 1×
+      var k1 = Math.min(2.3, W * .82 / ww), x1 = W / 2 - ww * k1 / 2, y1 = H * .42 - wh * k1 / 2;
       close(true);
       root.classList.add('tbx-to-lab');
-      void cur.offsetWidth; void word.offsetWidth;
-      word.style.transition = ''; word.style.visibility = '';
+      void cur.offsetWidth;
       cur.style.transform = 'none'; cur.classList.add('grow');
-      word.style.transform = 'translate(' + (W / 2 - ww / 2) + 'px,' + (H / 2 - wh / 2) + 'px) scale(' + (30 / fs) + ')'; word.style.opacity = ''; word.classList.add('grow');
-      setTimeout(function () { location.href = lab.url; }, 520);
+      word.style.visibility = '';
+      // One continuous motion, sampled every 25 ms (linear in between): the wordmark's centre travels a smooth arc from the tapped
+      // one through the middle of the stage to the brand; its size pops up (a little overshoot) on the way out and shrinks to the
+      // brand's on the way in. It never stops — it only slows through the middle (the pop) and settles onto the brand.
+      var T = 800, TP = .3, N = 33, A = .4 * (1 - TP) / TP; // A: the zoom leg leaves the middle at the pop leg's closing speed
+      var c0x = x0 + ww * k0 / 2, c0y = y0 + wh * k0 / 2, c1x = x1 + ww * k1 / 2, c1y = y1 + wh * k1 / 2, c2x = to.left + ww / 2, c2y = to.top + wh / 2;
+      var qx = 2 * c1x - (c0x + c2x) / 2, qy = 2 * c1y - (c0y + c2y) / 2; // the arc passes through the middle halfway
+      var frames = [];
+      for (var i = 0; i < N; i++) {
+        var t = i / (N - 1), u, k, y, e;
+        if (t <= TP) { y = t / TP; u = .5 * (.6 * (1 - (1 - y) * (1 - y)) + .4 * y); k = k0 + (k1 - k0) * (1 + 2.25 * Math.pow(y - 1, 3) + 1.25 * Math.pow(y - 1, 2)); }
+        else { y = (t - TP) / (1 - TP); u = .5 + .5 * (A * y + (3 - 2 * A) * y * y + (A - 2) * y * y * y); e = y < .5 ? 4 * y * y * y : 1 - Math.pow(2 - 2 * y, 3) / 2; k = k1 + (1 - k1) * e; }
+        var cx = (1 - u) * (1 - u) * c0x + 2 * u * (1 - u) * qx + u * u * c2x, cy = (1 - u) * (1 - u) * c0y + 2 * u * (1 - u) * qy + u * u * c2y;
+        frames.push({ transform: tf(cx - ww * k / 2, cy - wh * k / 2, k), opacity: sr ? 1 : Math.min(1, t / .16) });
+      }
+      frames[N - 1].transform = tf(to.left, to.top, 1);
+      var anim = null;
+      try { anim = word.animate(frames, { duration: T, fill: 'forwards' }); } catch (x) { anim = null; }
+      if (anim) anim.onfinish = function () { setTimeout(leave, 30); };
+      else { word.style.transform = tf(to.left, to.top, 1); setTimeout(leave, 520); }
+      setTimeout(leave, 1500); // never strand the page if the animation is held back (hidden tab, low-power)
     }
     function reset() { // back from the lab through the back/forward cache: undo the hand-over state
       busy = false; root.classList.remove('tbx-to-lab');

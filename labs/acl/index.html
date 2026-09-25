@@ -19,8 +19,9 @@ var iphone=/iPhone/.test(ua),standalone=navigator.standalone===true||(window.mat
 function apply(){if(!(iphone&&standalone))return;var v=z();if(Math.abs(v-1)<.005)r.style.removeProperty('--z');else r.style.setProperty('--z',String(v));}
 apply();addEventListener('resize',apply);addEventListener('orientationchange',function(){setTimeout(apply,80);});}catch(e){}})();
 </script>
-<script>/* opened from ToolBox (Case Labs menu or What's New): the first paint continues the hand-over (see shell.js) */try{var t=+sessionStorage.getItem('tbx_lab_enter');if(t&&Date.now()-t<5000)document.documentElement.classList.add('lab-enter');sessionStorage.removeItem('tbx_lab_enter');}catch(e){}</script>
-<link rel="stylesheet" href="v6.5.0/lab.css">
+<script>/* opened from ToolBox (Case Labs menu or What's New): the first paint continues the hand-over (see shell.js). The record is
+   {t, x, y, w, h} — where ToolBox's wordmark landed — or, from an older ToolBox, just the time. */try{var v=sessionStorage.getItem('tbx_lab_enter'),o=null;sessionStorage.removeItem('tbx_lab_enter');if(v){try{o=JSON.parse(v);}catch(e){}if(typeof o==='number')o={t:o};}if(o&&o.t&&Date.now()-o.t<5000){document.documentElement.classList.add('lab-enter');window.__labFrom=o;}}catch(e){}</script>
+<link rel="stylesheet" href="v6.5.1/lab.css">
 <script type="importmap">{"imports":{"three":"./lib/three.module.js"}}</script>
 </head>
 <body class="case-lab" data-home="../../">
@@ -52,9 +53,9 @@ apply();addEventListener('resize',apply);addEventListener('orientationchange',fu
    <button type="button" class="chip" id="labels-toggle" aria-pressed="true">Labels</button>
    <button type="button" class="chip" id="orientation-toggle" aria-pressed="true">Orientation</button>
    <button type="button" class="chip" id="xray-toggle" aria-pressed="true">X-ray</button>
-   <button type="button" class="chip" id="legend-toggle" aria-pressed="false" aria-controls="legend">Colour key</button>
+   <button type="button" class="chip" id="legend-toggle" aria-pressed="false" aria-controls="legend">Color key</button>
   </div>
-  <div id="legend" class="legend" aria-label="Colour key" hidden><span><i class="legend-graft"></i>Graft</span><span><i class="legend-socket"></i>Socket</span><span><i class="legend-loop"></i>Loop / tape</span><span><i class="legend-hardware"></i>Fixation</span><span><i class="legend-plug"></i>Bone block</span></div>
+  <div id="legend" class="legend" aria-label="Color key" hidden><span><i class="legend-graft"></i>Graft</span><span><i class="legend-socket"></i>Socket</span><span><i class="legend-loop"></i>Loop / tape</span><span><i class="legend-hardware"></i>Fixation</span><span><i class="legend-plug"></i>Bone block</span></div>
   <div id="sitemenu" class="sitemenu" role="menu" aria-label="Sections" hidden>
    <p class="sm-sec">Case Labs</p>
    <button class="sm-item cur" type="button" role="menuitemradio" aria-checked="true" data-section="acl"><span class="sm-ico lab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5V7c0 2.2 1.8 3.6 4 3.6s4-1.4 4-3.6V2.5"/><path d="M7 21.5v-5c0-1.4 1.1-2.5 2.5-2.5h5c1.4 0 2.5 1.1 2.5 2.5v5"/><path d="M10.6 10.4l2.8 3.6"/></svg></span><span class="sm-t"><b>ACL Case Lab</b><span>Plan, ream and fix in 3D</span></span><span class="sm-ck" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></button>
@@ -63,6 +64,19 @@ apply();addEventListener('resize',apply);addEventListener('orientationchange',fu
    <button class="sm-item" type="button" role="menuitem" data-section="toolbox"><span class="sm-ico tbx"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 13h18M11 13v2h2v-2"/></svg></span><span class="sm-t"><b>Back to the catalog</b><span>Search, scan and specs</span></span><span class="sm-go" aria-hidden="true">›</span></button>
   </div>
  </header>
+ <script>/* the hand-over's last frame: the header brand starts exactly where ToolBox's wordmark stopped and eases home (nothing
+   moves when they already agree; an older ToolBox stopped on a centred 30 px wordmark, which this zooms to the top left) */
+ (function(){try{var o=window.__labFrom,h=document.documentElement;if(!o||o.still||!h.classList.contains('lab-enter')||!Element.prototype.animate)return;
+ if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ var nm=document.querySelector('#title .nm');if(!nm)return;var r=nm.getBoundingClientRect();if(!(r.width>0))return;
+ var W=innerWidth,H=innerHeight,k,x,y,d,e='cubic-bezier(.2,.8,.2,1)';
+ if(o.w>0&&isFinite(o.x)&&isFinite(o.y)){k=o.w/r.width;x=o.x-r.left;y=o.y-r.top;d=220;}
+ else{k=30/18;x=W/2-r.width*k/2-r.left;y=H/2-r.height*k/2-r.top;d=560;e='cubic-bezier(.65,0,.35,1)';}
+ if(Math.abs(k-1)<.01&&Math.abs(x)<.5&&Math.abs(y)<.5)return;
+ nm.style.transformOrigin='0 0';window.__labBrandFrom={x:x,y:y,k:k};
+ nm.animate([{transform:'translate('+x+'px,'+y+'px) scale('+k+')'},{transform:'none'}],{duration:d,easing:e});
+ }catch(e){}})();
+ </script>
 
  <div id="hud" role="group" aria-label="View controls">
   <button class="ib" id="zoom-reset" type="button" aria-label="Reset the view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4h4"/></svg></button>
@@ -103,7 +117,7 @@ apply();addEventListener('resize',apply);addEventListener('orientationchange',fu
      <a href="https://stryker.highspot.com/items/66f58c1d37881198bcdc7e34" target="_blank" rel="noopener">G-Lok ↗</a>
      <a href="anatomy/provenance.html" target="_blank" rel="noopener">Anatomy source &amp; license ↗</a>
     </div><p class="ref-note">Highspot links need your Stryker sign-in.</p></details>
-    <footer><span>ACL Case Lab <b id="lab-version">6.5.0</b> · teaching model, not patient-specific planning</span><span class="credits">Anatomy: <a href="anatomy/provenance.html" target="_blank" rel="noopener">BodyParts3D © DBCLS, CC BY 4.0</a> · <a href="lib/THREE-LICENSE.txt" target="_blank" rel="noopener">three.js (MIT)</a> · <a href="lib/pdf-lib-LICENSE.md" target="_blank" rel="noopener">pdf-lib (MIT)</a></span></footer>
+    <footer><span>ACL Case Lab <b id="lab-version">6.5.1</b> · teaching model, not patient-specific planning</span><span class="credits">Anatomy: <a href="anatomy/provenance.html" target="_blank" rel="noopener">BodyParts3D © DBCLS, CC BY 4.0</a> · <a href="lib/THREE-LICENSE.txt" target="_blank" rel="noopener">three.js (MIT)</a> · <a href="lib/pdf-lib-LICENSE.md" target="_blank" rel="noopener">pdf-lib (MIT)</a></span></footer>
    </div>
   </div>
  </section>
@@ -121,8 +135,7 @@ apply();addEventListener('resize',apply);addEventListener('orientationchange',fu
  </div>
  <div id="toast" class="toast" role="status" hidden></div>
 </div>
-<div id="lab-intro" aria-hidden="true"><span class="nm">Case <em>Labs</em></span></div>
-<script src="v6.5.0/shell.js" defer></script>
-<script type="module" src="v6.5.0/app.js"></script>
+<script src="v6.5.1/shell.js" defer></script>
+<script type="module" src="v6.5.1/app.js"></script>
 </body>
 </html>
