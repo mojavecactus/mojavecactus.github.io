@@ -11,8 +11,8 @@
   function reduced() { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
   function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 
-  // ---- arrival: html.lab-enter was set in <head> when ToolBox handed over (the "Case Labs" wordmark is centred on the same
-  // dark stage ToolBox ended on); lab.css plays the rest. Drop the class once it is over (Reduce Motion: at once).
+  // ---- arrival: html.lab-enter was set in <head> when ToolBox handed over (its "Case Labs" wordmark landed on this header's
+  // brand, on the same dark stage); lab.css builds the rest around it. Drop the class once it is over (Reduce Motion: at once).
   var entering = root.classList.contains('lab-enter');
   if (entering) {
     // ends with the last arrival animation (the view buttons fading in), however late the first frame comes; 4 s at most

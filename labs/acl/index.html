@@ -21,7 +21,7 @@ apply();addEventListener('resize',apply);addEventListener('orientationchange',fu
 </script>
 <script>/* opened from ToolBox (Case Labs menu or What's New): the first paint continues the hand-over (see shell.js). The record is
    {t, x, y, w, h} — where ToolBox's wordmark landed — or, from an older ToolBox, just the time. */try{var v=sessionStorage.getItem('tbx_lab_enter'),o=null;sessionStorage.removeItem('tbx_lab_enter');if(v){try{o=JSON.parse(v);}catch(e){}if(typeof o==='number')o={t:o};}if(o&&o.t&&Date.now()-o.t<5000){document.documentElement.classList.add('lab-enter');window.__labFrom=o;}}catch(e){}</script>
-<link rel="stylesheet" href="v6.5.1/lab.css">
+<link rel="stylesheet" href="v6.5.2/lab.css">
 <script type="importmap">{"imports":{"three":"./lib/three.module.js"}}</script>
 </head>
 <body class="case-lab" data-home="../../">
@@ -88,7 +88,7 @@ apply();addEventListener('resize',apply);addEventListener('orientationchange',fu
   <button id="grab" type="button" aria-label="Show more of the walkthrough" aria-controls="sb"><span></span></button>
   <div id="sb">
    <div class="sh-top">
-    <div id="resume-banner" class="resume-banner" hidden><div><b>A saved case is on this device.</b><span>Every visit starts empty. Resume when you want to continue.</span></div><button type="button" id="resume-case" class="btn pri">Resume</button></div>
+    <div id="resume-banner" class="resume-banner" hidden><div class="rb-text"><b>A saved case is on this device.</b><span>Every visit starts empty.</span></div><div class="rb-acts"><button type="button" id="clear-case" class="btn" aria-label="Clear the saved case">Clear</button><button type="button" id="resume-case" class="btn pri">Resume</button></div></div>
     <div class="sh-h">
      <div class="sh-title"><p class="eyebrow"><span id="step-eyebrow">STEP 01</span><span id="step-count" class="step-count">1 / 12</span></p><h2 id="step-heading" tabindex="-1">Choose the plan</h2><p class="meta"><span id="scene-stage-label" class="sr-only">Choose the plan</span><span id="scene-stage-status">Right knee · 90° reference pose</span></p></div>
     </div>
@@ -117,7 +117,7 @@ apply();addEventListener('resize',apply);addEventListener('orientationchange',fu
      <a href="https://stryker.highspot.com/items/66f58c1d37881198bcdc7e34" target="_blank" rel="noopener">G-Lok ↗</a>
      <a href="anatomy/provenance.html" target="_blank" rel="noopener">Anatomy source &amp; license ↗</a>
     </div><p class="ref-note">Highspot links need your Stryker sign-in.</p></details>
-    <footer><span>ACL Case Lab <b id="lab-version">6.5.1</b> · teaching model, not patient-specific planning</span><span class="credits">Anatomy: <a href="anatomy/provenance.html" target="_blank" rel="noopener">BodyParts3D © DBCLS, CC BY 4.0</a> · <a href="lib/THREE-LICENSE.txt" target="_blank" rel="noopener">three.js (MIT)</a> · <a href="lib/pdf-lib-LICENSE.md" target="_blank" rel="noopener">pdf-lib (MIT)</a></span></footer>
+    <footer><span>ACL Case Lab <b id="lab-version">6.5.2</b> · teaching model, not patient-specific planning</span><span class="credits">Anatomy: <a href="anatomy/provenance.html" target="_blank" rel="noopener">BodyParts3D © DBCLS, CC BY 4.0</a> · <a href="lib/THREE-LICENSE.txt" target="_blank" rel="noopener">three.js (MIT)</a> · <a href="lib/pdf-lib-LICENSE.md" target="_blank" rel="noopener">pdf-lib (MIT)</a></span></footer>
    </div>
   </div>
  </section>
@@ -128,14 +128,14 @@ apply();addEventListener('resize',apply);addEventListener('orientationchange',fu
    <li>Drag to turn the knee. In <b>Straight on</b> it turns left and right, and tilts only 10° up or down.</li>
    <li>Pinch or scroll to zoom; two fingers to move it. <span class="rs">⟲</span> puts the view back.</li>
    <li>Swipe the sheet up to enter measurements and down to see the knee. Tap its handle to switch.</li>
-   <li><b>Preview</b> plays the step; <b>Next</b> records it. <b>New</b> starts an empty case; the last one stays under Resume.</li>
+   <li><b>Preview</b> plays the step; <b>Next</b> records it. <b>New</b> starts an empty case; the last one stays under <b>Resume</b> until you <b>Clear</b> it.</li>
    <li><b>PDF</b> saves the case with a straight-on image of the construct.</li>
   </ol>
   <button type="button" class="btn pri" id="help-ok">Got it</button>
  </div>
  <div id="toast" class="toast" role="status" hidden></div>
 </div>
-<script src="v6.5.1/shell.js" defer></script>
-<script type="module" src="v6.5.1/app.js"></script>
+<script src="v6.5.2/shell.js" defer></script>
+<script type="module" src="v6.5.2/app.js"></script>
 </body>
 </html>

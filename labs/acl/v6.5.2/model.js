@@ -472,7 +472,7 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
  const marker=(p,color,r=3)=>`<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r}" fill="${color}" stroke="#102631" stroke-width="1.4"/>`;
  let overlayRects=[];
  // Labels follow the Case Labs / Portfolio Map style: a black box with a white hairline and bold white text; a 3 px bar in the
- // measurement's colour ties the label to its dimension line.
+ // measurement's color ties the label to its dimension line.
  const LABEL_FONT="-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,system-ui,sans-serif";let textMeasure=null;
  function textWidth(text,size=12){try{textMeasure??=document.createElement('canvas').getContext('2d');textMeasure.font=`700 ${size}px ${LABEL_FONT}`;const w=textMeasure.measureText(text).width;if(w>0)return w;}catch{}return String(text).length*size*.56;}
  function pill(text,p,color){const f=frameRect(),width=Math.min(f.w-16,Math.ceil(textWidth(text))+26),x=clamp(p.x,f.l+width/2+8,f.r-width/2-8),y=clamp(p.y,f.t+22,f.b-22);overlayRects.push({x:x-width/2,y:y-13,w:width,h:26});return `<g transform="translate(${(x-width/2).toFixed(2)},${(y-13).toFixed(2)})"><rect width="${width}" height="26" rx="2" fill="#080808" fill-opacity=".86" stroke="#ffffff" stroke-opacity=".85"/><rect x="1.5" y="1.5" width="3" height="23" fill="${color}"/><text x="${(width+4)/2}" y="17.2" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="700" font-family="${LABEL_FONT}">${escape(text)}</text></g>`;}

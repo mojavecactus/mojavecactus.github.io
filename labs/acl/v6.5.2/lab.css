@@ -17,6 +17,8 @@
   --z:1;
   --sat:calc(env(safe-area-inset-top, 0px) / var(--z)); --sab:calc(env(safe-area-inset-bottom, 0px) / var(--z));
   --sal:calc(env(safe-area-inset-left, 0px) / var(--z)); --sar:calc(env(safe-area-inset-right, 0px) / var(--z));
+  /* the header row sits where ToolBox's does (title centre about 100 pt down at any page zoom): clear of iOS 27's top blur */
+  --hdr-pad:calc(16px / var(--z)); --hdr-row:calc(44px / var(--z));
   --topH:190px; --sheet-vis:360px; --dock:0px;
   /* ToolBox motion tokens */
   --m-tap:90ms; --m-quick:140ms; --m-base:220ms; --m-emph:300ms; --m-sheet:340ms; --m-launch:480ms;
@@ -49,14 +51,15 @@ a:hover{text-decoration:underline}
 .model-error{position:absolute;z-index:6;left:16px;right:calc(var(--dock) + 16px);top:calc(var(--topH) + 16px);padding:14px 16px;border-radius:12px;border:1px solid rgba(242,139,139,.45);background:#2a1d1c;color:#ffd6cc;font-size:14px;line-height:1.5}
 
 /* ---- header ---- */
-#top{position:absolute;left:0;right:0;top:0;z-index:10;padding:calc(var(--sat) + 8px) calc(16px + var(--sar)) 10px calc(16px + var(--sal));background:linear-gradient(to bottom,rgba(17,17,17,.97) 0%,rgba(17,17,17,.9) 74%,rgba(17,17,17,0) 100%)}
-.r1{display:flex;align-items:center;gap:8px;min-height:40px}
-.brand{flex:1;min-width:0;margin:0;font:inherit}
+#top{position:absolute;left:0;right:0;top:0;z-index:10;padding:calc(var(--sat) + var(--hdr-pad)) calc(16px + var(--sar)) 10px calc(16px + var(--sal));--top-bg:linear-gradient(to bottom,rgba(17,17,17,.97) 0%,rgba(17,17,17,.9) 74%,rgba(17,17,17,0) 100%)}
+#top::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:var(--top-bg)}
+.r1{display:flex;align-items:center;gap:8px;min-height:var(--hdr-row)}
+.brand{flex:1;min-width:0;margin:0;font:inherit;display:flex;align-items:center} /* flex, not a text line: the wordmark's spot is exact (ToolBox lands its hand-over on it) */
 .brand button{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-height:40px;margin-left:-4px;padding:0 6px 0 4px;border-radius:10px;position:relative}
 .brand button::after{content:"";position:absolute;inset:-4px}
 .brand button:active{background:#ffffff0d}
 .brand .nm{font:750 18px/1.1 var(--font);letter-spacing:-.01em;white-space:nowrap;color:var(--bone)}
-.brand .nm em,#lab-intro .nm em{font-style:normal;color:var(--amber)}
+.brand .nm em{font-style:normal;color:var(--amber)}
 .brand .tag{flex:none;font:700 10px/1 var(--font);letter-spacing:.07em;text-transform:uppercase;color:var(--cyan);background:var(--cyan-t);padding:4px 7px;border-radius:6px;white-space:nowrap}
 .brand .caret{flex:none;width:14px;height:14px;color:var(--muted);transition:transform var(--m-base) var(--e-out)}
 .brand button[aria-expanded=true] .caret{transform:rotate(180deg);color:var(--amber)}
@@ -84,7 +87,7 @@ a:hover{text-decoration:underline}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block;box-shadow:inset 0 0 0 1px rgba(0,0,0,.35)}
 .legend-graft{background:#eec275}.legend-socket{background:#58c5df}.legend-loop{background:#6ad7b3}.legend-hardware{background:#bacace}.legend-plug{background:#c99671}
 /* section menu under the title */
-.sitemenu{position:absolute;z-index:30;top:calc(var(--sat) + 54px);left:calc(12px + var(--sal));width:min(340px,calc(100vw - 24px));padding:8px;border-radius:16px;border:1px solid #3d3d3d;background:#222;box-shadow:0 18px 50px rgba(0,0,0,.6);transform:translateY(-6px) scale(.98);transform-origin:20% 0;opacity:0;transition:opacity var(--m-quick) var(--e-out),transform var(--m-base) var(--e-out)}
+.sitemenu{position:absolute;z-index:30;top:calc(var(--sat) + var(--hdr-pad) + var(--hdr-row) + 6px);left:calc(12px + var(--sal));width:min(340px,calc(100vw - 24px));padding:8px;border-radius:16px;border:1px solid #3d3d3d;background:#222;box-shadow:0 18px 50px rgba(0,0,0,.6);transform:translateY(-6px) scale(.98);transform-origin:20% 0;opacity:0;transition:opacity var(--m-quick) var(--e-out),transform var(--m-base) var(--e-out)}
 .sitemenu.open{opacity:1;transform:none}
 .sm-sec{margin:8px 10px 4px;font:700 10.5px/1 var(--font);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 .sm-item{display:flex;align-items:center;gap:12px;width:100%;min-height:58px;padding:8px 10px;border-radius:12px;text-align:left;color:var(--bone)}
@@ -130,9 +133,11 @@ a:hover{text-decoration:underline}
 .btn.subtle{background:#2c2c2c}
 .case-progress{height:3px;background:#3a3428;margin-top:12px;border-radius:3px;overflow:hidden}
 .case-progress span{display:block;height:100%;background:var(--amber);transform-origin:0 50%;transform:scaleX(0);transition:transform var(--m-emph) var(--e-out)}
-.resume-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;padding:10px 12px;border-radius:12px;border:1px solid rgba(253,181,21,.38);background:#1d1d1d}
+.resume-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 12px;margin:0 0 12px;padding:10px 12px;border-radius:12px;border:1px solid rgba(253,181,21,.38);background:#1d1d1d}
+.rb-text{flex:1 1 140px;min-width:0}
 .resume-banner b{display:block;font-size:13.5px}
 .resume-banner span{display:block;margin-top:2px;font-size:12px;color:var(--muted)}
+.rb-acts{flex:none;display:flex;gap:8px;margin-left:auto}
 .resume-banner .btn{flex:none}
 .editor-content{padding:4px 0 calc(28px + var(--sab))}
 .step-description{margin:0 0 14px;font-size:13.5px;line-height:1.5;color:var(--dim)}
@@ -283,6 +288,9 @@ footer a{color:var(--dim);text-decoration:underline;text-decoration-color:#6b665
 .help-card li b{color:var(--bone)}
 .help-card .btn{width:100%}
 .toast{position:absolute;left:calc((100% - var(--dock)) / 2);bottom:var(--toast-at,calc(var(--sheet-vis) + 16px));transform:translateX(-50%);z-index:50;width:max-content;max-width:calc(100% - var(--dock) - 32px);padding:9px 14px;border-radius:12px;background:#f4f2ee;color:#161616;font:650 13px/1.4 var(--font);box-shadow:0 8px 24px rgba(0,0,0,.4);pointer-events:none;text-align:center}
+.toast .toast-act{pointer-events:auto;position:relative;margin:-5px -8px -5px 12px;min-height:30px;padding:0 12px;border:0;border-radius:15px;background:#161616;color:var(--amber);font:700 13px/1 var(--font);vertical-align:middle;cursor:pointer}
+.toast .toast-act::after{content:"";position:absolute;inset:-7px -6px}
+.toast .toast-act:active{transform:scale(.96)}
 
 /* ---- docked panel: landscape phones and screens from 860 px ---- */
 @media (min-width:860px) and (min-height:541px){
@@ -323,20 +331,17 @@ footer a{color:var(--dim);text-decoration:underline;text-decoration-color:#6b665
 }
 
 /* ---- the hand-over from ToolBox: html.lab-enter is set in <head> before the first paint, so these animations start with it.
-   The "Case Labs" wordmark sits where ToolBox left it (centre of the screen), rises and fades; the lab arrives under it.
-   Compositor-only (transform / opacity); shell.js drops the class afterwards. ---- */
-#lab-intro{display:none}
-html.lab-enter #lab-intro{display:grid;place-items:center;position:fixed;inset:0;z-index:200;pointer-events:none;background:radial-gradient(130% 85% at 50% 42%,#2b2926 0%,#1c1b1a 52%,#121212 100%);animation:lab-fade-out 420ms var(--e-out) 380ms both}
-#lab-intro .nm{font:700 30px/1.15 var(--font);letter-spacing:.2px;color:var(--bone);white-space:nowrap} /* = ToolBox's wordmark at the end of its hand-over */
-html.lab-enter #lab-intro .nm{animation:lab-word-up 620ms var(--e-inout) 140ms both}
-html.lab-enter #top{animation:lab-drop var(--m-launch) var(--e-out) 420ms both}
-html.lab-enter #sheet{animation:lab-rise 560ms var(--e-out) 460ms both}
-html.lab-enter .viewport{animation:lab-grow 700ms var(--e-out) 300ms both}
-html.lab-enter #hud{animation:lab-fade-in var(--m-launch) var(--e-out) 700ms both}
-@keyframes lab-fade-out{to{opacity:0}}
+   ToolBox's "Case Labs" wordmark pops up and zooms to the top left, landing exactly on this header's brand; the brand is
+   therefore on screen from the first frame (an inline script eases out any difference), on the same dark stage (#app's own
+   background = ToolBox's curtain), and the rest of the lab builds around it. Compositor-only (transform / opacity); shell.js
+   drops the class afterwards. ---- */
+html.lab-enter #top::before,html.lab-enter #top #back,html.lab-enter #top .brand .tag,html.lab-enter #top .brand .caret,html.lab-enter #top .acts{animation:lab-fade-in 320ms var(--e-out) 160ms both}
+html.lab-enter .lenses,html.lab-enter .tools{animation:lab-drop 420ms var(--e-out) 200ms both}
+html.lab-enter #sheet{animation:lab-rise 560ms var(--e-out) 260ms both}
+html.lab-enter .viewport{animation:lab-grow 640ms var(--e-out) 160ms both}
+html.lab-enter #hud{animation:lab-fade-in var(--m-launch) var(--e-out) 520ms both}
 @keyframes lab-fade-in{from{opacity:0}}
-@keyframes lab-word-up{0%{transform:none;opacity:1}100%{transform:translateY(-34vh) scale(.62);opacity:0}}
-@keyframes lab-drop{from{transform:translateY(-28px);opacity:0}}
+@keyframes lab-drop{from{transform:translateY(-14px);opacity:0}}
 @keyframes lab-rise{from{transform:translateY(100%)}}
 @keyframes lab-grow{from{transform:scale(.94);opacity:0}}
 /* leaving for ToolBox: the sheet drops, the header lifts, the knee fades */
@@ -348,4 +353,4 @@ html.lab-leaving .viewport,html.lab-leaving #hud{transform:scale(.96);opacity:0;
   html.lab-leaving #sheet{transform:translateX(110%)!important}
 }
 @keyframes lab-slide{from{transform:translateX(110%)}}
-@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}html.lab-enter #lab-intro{display:none}}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
