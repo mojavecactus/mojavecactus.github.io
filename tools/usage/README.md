@@ -6,6 +6,15 @@ while the app is open — and sends it to a hub on the syksmtoolbox Apps Script.
 into forms**: each phone is a random id (`tbx_uid`), sessions end after 30 idle minutes, cycle-count and F&A
 screens are recorded by screen name only. The cycle-count scanner is not tracked.
 
+**Real people only (since 4.153).** Nothing is recorded — no id, no queue, no request — in automated or test
+browsers (`navigator.webdriver`: Playwright, Puppeteer, Selenium; HeadlessChrome, jsdom, Electron user agents; an
+iPhone / iPad / Mac user agent on a Linux or Windows `navigator.platform`, which is Playwright WebKit and device
+emulation; Playwright / Selenium / PhantomJS page globals), in a browser switched off on the dashboard foot ("Don’t
+count this device" → `localStorage.tbx_unotrack = 1`; "Count it again" undoes it; Lock this device keeps it), and for
+the rest of a launch after machine-speed navigation (15 screens or cards inside 5 s; what hadn't gone out is dropped).
+The dashboard itself still works in all of them. A test that needs the tracker in a real browser engine must fake
+`navigator.webdriver` and `navigator.platform` on purpose, and must never carry the live hub URL.
+
 - App side (bundle `app-<ver>.js`, "Usage (anonymous)" module): config = `TOOLBOX.usage {url, key}` in the
   encrypted payload (`usage.off: true` switches it off). Events queue in memory, are saved when the app is
   hidden and restored on the next launch, and go out in batches of ≤100 with a batch id (the hub drops a

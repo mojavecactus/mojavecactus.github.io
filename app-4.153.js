@@ -41,7 +41,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.152';
+  var APPVER = '4.153';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -441,7 +441,25 @@ var GLOSS = {
   var UG = { q: [], fly: null, busy: false, timer: null, at: 0, back: 0, last: 0, lastAny: 0, started: false,
     view: '', viewT: 0, sq: null, sqT: null, qSeen: {}, errs: 0, errSeen: {}, mem: '', mute: 0 };
   var UG_SESS_MS = 30 * 60000, UG_MAXQ = 400, UG_BATCH = 100;
-  function ugOn() { return !!UGH; }
+  // Real people only. Nothing is recorded in automated or test browsers (WebDriver: Playwright, Puppeteer, Selenium;
+  // headless Chrome, jsdom, Electron; an iPhone / iPad / Mac user agent on a Linux or Windows machine = Playwright WebKit
+  // or device emulation), in a browser switched off on the dashboard ("Don’t count this device" → localStorage
+  // tbx_unotrack = 1, which Lock this device keeps) or after machine-speed navigation (ugRoute). The dashboard still
+  // works in all of them: it only needs UGH.
+  var UG_OFF = ugOffWhy();
+  function ugOffWhy() {
+    try {
+      var n = navigator, w = window, ua = String(n.userAgent || ''), pf = String(n.platform || ''), de = document.documentElement;
+      if (n.webdriver === true) return 'auto';
+      if (/HeadlessChrome|PhantomJS|jsdom|Electron\//i.test(ua)) return 'auto';
+      if (/iPhone|iPad|Macintosh/.test(ua) && /Linux|Win/i.test(pf)) return 'auto';
+      if (w.__playwright__binding__ || w.__pwInitScripts || w.callPhantom || w._phantom || w.__nightmare || w.domAutomation || w.domAutomationController || w._selenium || w.callSelenium) return 'auto';
+      if (de && (de.getAttribute('webdriver') || de.getAttribute('selenium') || de.getAttribute('driver'))) return 'auto';
+    } catch (e) {}
+    try { if (localStorage.getItem('tbx_unotrack') === '1') return 'flag'; } catch (e2) {}
+    return '';
+  }
+  function ugOn() { return !!UGH && !UG_OFF; }
   function ugRnd(n) {
     var a = 'abcdefghijklmnopqrstuvwxyz0123456789', s = '', r = null;
     try { r = window.crypto.getRandomValues(new Uint8Array(n)); } catch (e) {}
@@ -483,7 +501,14 @@ var GLOSS = {
     if (UG.timer) clearTimeout(UG.timer);
     UG.at = at; UG.timer = setTimeout(function () { UG.timer = null; ugFlush(false); }, ms);
   }
-  function ugSave() { try { localStorage.setItem('tbx_uq', JSON.stringify({ q: UG.q.slice(-UG_MAXQ), fly: UG.fly })); } catch (e) {} }
+  function ugSave() { if (UG_OFF) { try { localStorage.removeItem('tbx_uq'); } catch (e0) {} return; } try { localStorage.setItem('tbx_uq', JSON.stringify({ q: UG.q.slice(-UG_MAXQ), fly: UG.fly })); } catch (e) {} }
+  // stop recording on this page and drop what hasn't gone out (why: 'flag' = switched off here, 'fast' = machine speed)
+  function ugHalt(why) {
+    UG_OFF = why; UG.q = []; UG.fly = null; UG.sq = null;
+    if (UG.timer) { clearTimeout(UG.timer); UG.timer = null; }
+    if (UG.sqT) { clearTimeout(UG.sqT); UG.sqT = null; }
+    try { localStorage.removeItem('tbx_uq'); } catch (e) {}
+  }
   function ugLoad() {
     try {
       var j = JSON.parse(localStorage.getItem('tbx_uq') || 'null'); localStorage.removeItem('tbx_uq');
@@ -559,6 +584,9 @@ var GLOSS = {
       if (UG.mute) { var mu = UG.mute; UG.mute = 0; if (now - mu < 3000) return; } // N9 "Search it" on the dashboard: the owner's look, not a visit
       if (ty + ':' + key === UG.view && now - UG.viewT < 1500) return; // a re-render, not a new visit
       UG.view = ty + ':' + key; UG.viewT = now;
+      // 15 screens / cards inside 5 s is a script driving the page, not a person: nothing more from this launch
+      var rt = UG.rt || (UG.rt = []); rt.push(now); if (rt.length > 15) rt.shift();
+      if (rt.length === 15 && now - rt[0] < 5000) { ugHalt('fast'); return; }
       ugEv(ty, key, x);
     } catch (e2) {}
   }
@@ -804,6 +832,12 @@ var GLOSS = {
     go.addEventListener('click', tryKey);
     inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryKey(); });
   }
+  function ugSelfHTML() { // this device on the dashboard foot: counted or not, and the switch
+    if (UG_OFF === 'flag') return 'This device isn’t counted. <button class="footlink" id="ug-self-on">Count it again</button>';
+    if (UG_OFF === 'fast') return 'This visit isn’t counted: it moved faster than a person.';
+    if (UG_OFF) return 'This browser isn’t counted: it’s automated.';
+    return '<button class="footlink" id="ug-self-off">Don’t count this device</button>';
+  }
   function usageScreen() {
     setTitle('Team Usage', ''); backBtn.hidden = false;
     if (!UGH) { render(emptyHTML(ICON.chart, 'Usage isn’t set up', 'This build has no usage hub configured.', '')); return; }
@@ -817,7 +851,8 @@ var GLOSS = {
       '<div class="grouphead ug-gh">Latest activity</div><div class="card ug-feed" id="ug-feed"></div>' +
       '<div class="ug-filters" id="ug-filters"></div>' +
       '<div id="ug-period"></div>' +
-      '<div class="ug-foot">Anonymous: each phone is a random id — no names, nothing typed into forms.<br>' +
+      '<div class="ug-foot">Anonymous: each phone is a random id — no names, nothing typed into forms. Test and automated browsers are never counted.<br>' +
+      '<span id="ug-self">' + ugSelfHTML() + '</span><br>' +
       '<button class="footlink" id="ug-forget">Forget the key on this device</button></div></div>');
     var root = content.querySelector('.ug');
     if (!root) return; // #/usage?q=… paints search results instead (render → resultsHTML): nothing of the dashboard to wire up
@@ -1104,6 +1139,14 @@ var GLOSS = {
       if (t.closest && t.closest('[data-ug-retry]')) { loadStats(false); return; }
       var mo = t.closest && t.closest('[data-ug-more]');
       if (mo) { var mk = mo.getAttribute('data-ug-more'); UGD.more[mk] = true; if (mk === 'feed') drawLive(); else drawPeriod(); return; }
+      if (t.closest && t.closest('#ug-self-off')) {
+        try { localStorage.setItem('tbx_unotrack', '1'); } catch (e5) {}
+        ugHalt('flag'); var so = document.getElementById('ug-self'); if (so) so.innerHTML = ugSelfHTML(); return;
+      }
+      if (t.closest && t.closest('#ug-self-on')) {
+        try { localStorage.removeItem('tbx_unotrack'); } catch (e6) {}
+        UG_OFF = ugOffWhy(); var sn = document.getElementById('ug-self'); if (sn) sn.innerHTML = ugSelfHTML(); return;
+      }
       if (t.closest && t.closest('#ug-forget')) {
         try { localStorage.removeItem('tbx_uadm'); } catch (e2) {}
         UGD.live = null; UGD.stats = {}; UGD.q = null; UGD.qIncl = -1; UGD.qAt = 0; UGD.qOff = false; UGD.qErr = ''; UGD.qEdit = ''; UGD.qOver = {}; UGD.qMarks = [];
@@ -9572,7 +9615,7 @@ var GLOSS = {
   try { window.TBX_FEEDBACK_INIT(D.fb); } catch (eFb) {}
   // dev/test hooks (harmless in production)
   window.TBX_DEV = { expStatus: expStatus, showExpBanner: showExpBanner, cardText: cardText, composeCardPNG: composeCardPNG,
-    usage: { UG: UG, UGD: UGD, on: ugOn, id: ugId, ev: ugEv, flush: ugFlush, route: ugRoute, start: ugStart, scanRecord: ugScan, scan: function (t) { if (UG.scanDev) UG.scanDev(t); } },
+    usage: { UG: UG, UGD: UGD, on: ugOn, off: function () { return UG_OFF; }, offWhy: ugOffWhy, id: ugId, ev: ugEv, flush: ugFlush, route: ugRoute, start: ugStart, scanRecord: ugScan, scan: function (t) { if (UG.scanDev) UG.scanDev(t); } },
     // sync engine, for tools/cc-test
     fa2: { scanCode: fa2ScanCode, state: function () { return FA2; } },
     cc: { CC: CC, SY: SY, deriveCore: ccDeriveCore, derive: ccDerive, enqueue: ccEnqueue, flush: ccFlush, pull: ccPull, syncSt: ccSyncSt, syncLoad: ccSyncLoad, terrSet: terrSet, isExpired: ccIsExpired, expInput: ccExpInput, hubTerrAdd: hubTerrAdd, TERR: TERR, TORDER: TORDER, histPrune: ccHistPrune, expIso: expIso, expDisp: expDisp, catCount: catCount, fops: { keyMat: fopsKeyMat, keyLot: fopsKeyLot, dash: fopsDash, reconcile: fopsReconcile, ver: fopsVer, readXlsx: fopsReadXlsx, readCsv: fopsReadCsv, fromGrid: fopsFromGrid, parseFile: fopsParseFile, st: fopsSt, onPull: fopsOnPull, fetch: fopsFetch, status: fopsStatus, local: fopsLocal, hint: fopsHint, hintHTML: fopsHintHTML, card: fopsCard, head: fopsHead, remove: fopsRemove, progress: fopsProgress, preview: fopsPreview, xlsx: fopsXlsxBytes, xlsxRows: fopsXlsxRows, deliver: fopsDeliver, download: fopsDownload, FO: FO } } };

@@ -2,7 +2,8 @@
 // Covers: completely inert without TOOLBOX.usage; what each screen/card/search/scan/favorite/share/error records
 // (and what it must not: CT/F&A screens by name only, nothing typed into forms); batching, the batch id resend
 // after a lost reply, offline, app-hidden keepalive + saved queue, restore on the next launch; admin flag; the
-// #/usage gate and dashboard rendered from real UCORE output; the 5-tap entry; no page errors.
+// #/usage gate and dashboard rendered from real UCORE output; the 5-tap entry; no page errors; real people only
+// (automated / test browsers, "Don't count this device", machine-speed navigation record nothing).
 //   cd tools/bo && npm i jsdom@24 (once; this suite borrows it) && APP_PW=<catalog pw> node ../usage/app-test.js
 const path = require('path');
 const { JSDOM, VirtualConsole } = require(require.resolve('jsdom', { paths: [path.join(__dirname, '../bo/node_modules'), path.join(__dirname, '../cc-test/node_modules'), __dirname] }));
@@ -78,6 +79,9 @@ async function boot(opts) {
   const w = dom.window; const errs = []; const calls = []; const hub = opts.hub || Hub();
   const UA = opts.ua || 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
   Object.defineProperty(w.navigator, 'userAgent', { get: () => UA, configurable: true });
+  if (opts.webdriver !== undefined) Object.defineProperty(w.navigator, 'webdriver', { get: () => opts.webdriver, configurable: true });
+  if (opts.platform !== undefined) Object.defineProperty(w.navigator, 'platform', { get: () => opts.platform, configurable: true });
+  if (opts.globals) Object.keys(opts.globals).forEach(k => { w[k] = opts.globals[k]; });
   const t0 = Date.now();
   w.addEventListener('error', e => errs.push(e.message));
   if (opts.storage) Object.keys(opts.storage).forEach(k => w.localStorage.setItem(k, opts.storage[k]));
@@ -484,6 +488,80 @@ const typeQ = async (t, v) => { const q = t.$('#q'); q.value = v; q.dispatchEven
     check('P45 + P23: "Ask Nate to add …" opens prefilled, the name kept and the note focused at its end', ask && /^Please add “zzqxvk”/.test(t.$('#fb-note').value) && t.$('#fb-name').value === 'Nate R' && t.w.document.activeElement === t.$('#fb-note') && t.$('#fb-note').selectionStart === t.$('#fb-note').value.length);
     await sleep(700);
     check('no page errors', t.errs.length === 0, t.errs); }
+
+  // ---- 9. real people only: automated / test browsers, "Don't count this device", machine-speed navigation ----
+  { const evCalls = (t) => usageCalls(t).filter(c => c.body && c.body.action === 'u_ev');
+    const browse = async (t) => { // a short visit at a person's pace: a card, home, a search, the app to the background and back
+      await t.go('#/pn/3910500580'); await sleep(300); await t.go('#/'); await typeQ(t, 'iconix'); await sleep(2300);
+      t.setHidden(true); await sleep(30); t.setHidden(false); await sleep(2700); await t.flush();
+    };
+    const stored = (t) => Object.keys(t.w.localStorage).filter(k => /^tbx_u(id|sess|q)$/.test(k));
+    const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
+    const IPH = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
+    const bots = [
+      ['WebDriver (Playwright, Puppeteer, Selenium)', { webdriver: true }],
+      ['headless Chrome', { ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.7390.37 Safari/537.36', platform: 'Linux x86_64' }],
+      ['Playwright WebKit on Linux (a Mac user agent)', { ua: MAC, platform: 'Linux x86_64' }],
+      ['iPhone emulation on a Linux machine', { ua: IPH, platform: 'Linux x86_64' }],
+      ['iPhone emulation on Windows', { ua: IPH, platform: 'Win32' }],
+      ['jsdom', { ua: 'Mozilla/5.0 (linux) AppleWebKit/537.36 (KHTML, like Gecko) jsdom/24.1.3' }],
+      ['an Electron app\'s browser', { ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Claude/1.3.0 Chrome/138.0.0.0 Electron/37.2.0 Safari/537.36', platform: 'MacIntel' }],
+      ['a Playwright binding on the page', { globals: { __playwright__binding__: function () {} } }]
+    ];
+    for (const [label, o] of bots) {
+      const t = await boot(o); await browse(t);
+      check('bots: ' + label + ' → nothing sent, nothing stored', evCalls(t).length === 0 && stored(t).length === 0 && t.w.TBX_DEV.usage.off() === 'auto' && t.errs.length === 0,
+        { sent: evCalls(t).length, stored: stored(t), off: t.w.TBX_DEV.usage.off(), errs: t.errs });
+    }
+    { const t = await boot({ webdriver: true, storage: { tbx_uadm: 'admin-key-123' } });
+      await t.go('#/usage'); await until(() => usageCalls(t).some(c => c.body && c.body.action === 'u_live') && t.$('#ug-self'), 3000);
+      check('bots: the dashboard still works in an automated browser, and says it isn’t counted', /This browser isn’t counted: it’s automated/.test(t.txt('#ug-self') || '') && !t.$('#ug-self-off') && !!t.$('#ug-livebody'), t.txt('#ug-self'));
+      check('bots: dashboard foot says test and automated browsers are never counted', /Test and automated browsers are never counted/.test(t.txt('.ug-foot') || ''), t.txt('.ug-foot')); }
+    for (const [label, o] of [['an iPhone', { ua: IPH, platform: 'iPhone', webdriver: false }], ['Safari on a Mac', { ua: MAC, platform: 'MacIntel' }],
+      ['an iPad (desktop user agent)', { ua: MAC, platform: 'MacIntel' }],
+      ['Android (a Linux platform)', { ua: 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36', platform: 'Linux aarch64' }],
+      ['Chrome on Windows', { ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36', platform: 'Win32' }]]) {
+      const t = await boot(o); await browse(t);
+      const ev = t.events();
+      check('people: ' + label + ' is still counted', t.w.TBX_DEV.usage.off() === '' && ev.some(e => e[1] === 'open') && ev.some(e => e[1] === 'card' && e[2] === '3910500580') && ev.some(e => e[1] === 'search' && e[2] === 'iconix'),
+        { off: t.w.TBX_DEV.usage.off(), ev: ev.map(e => e[1] + ':' + e[2]) });
+    }
+    // "Don't count this device" on the dashboard (owner only), remembered, and back
+    { const t = await boot({ storage: { tbx_uadm: 'admin-key-123' } });
+      await sleep(2700); await t.flush(); const n0 = evCalls(t).length;
+      await t.go('#/pn/3910500582'); await sleep(40); // queued, not sent yet
+      await t.go('#/usage'); await until(() => t.$('#ug-self-off'), 3000);
+      check('switch: dashboard offers “Don’t count this device”', /Don’t count this device/.test(t.txt('#ug-self') || ''), t.txt('#ug-self'));
+      t.$('#ug-self-off').click(); await sleep(40);
+      check('switch: tapped → saved on the device, the unsent card dropped, the foot says so', t.w.localStorage.getItem('tbx_unotrack') === '1' && t.w.TBX_DEV.usage.UG.q.length === 0 && t.w.TBX_DEV.usage.off() === 'flag' &&
+        /This device isn’t counted/.test(t.txt('#ug-self')) && !!t.$('#ug-self-on'), { q: t.w.TBX_DEV.usage.UG.q.length, self: t.txt('#ug-self') });
+      await t.go('#/pn/3910500580'); await t.go('#/'); await typeQ(t, 'nanotack'); await sleep(2300); t.setHidden(true); await sleep(30); t.setHidden(false); await sleep(2700); await t.flush();
+      check('switch: nothing more leaves this device (no card, search, keepalive or saved queue)', evCalls(t).length === n0 && !t.events().some(e => e[2] === '3910500582' || e[2] === 'nanotack') && !t.w.localStorage.getItem('tbx_uq'), { before: n0, after: evCalls(t).length });
+      const t2 = await boot({ storage: { tbx_unotrack: '1', tbx_uadm: 'admin-key-123' } }); await browse(t2);
+      check('switch: remembered on the next launch', evCalls(t2).length === 0 && t2.w.TBX_DEV.usage.off() === 'flag');
+      await t2.go('#/usage'); await until(() => t2.$('#ug-self-on'), 3000);
+      t2.$('#ug-self-on').click(); await sleep(40);
+      check('switch: “Count it again” → flag gone, the offer is back', t2.w.localStorage.getItem('tbx_unotrack') === null && !!t2.$('#ug-self-off') && t2.w.TBX_DEV.usage.off() === '');
+      await t2.go('#/pn/3910500580'); await sleep(2700); await t2.flush();
+      check('switch: counted again from the next screen', t2.events().some(e => e[1] === 'card' && e[2] === '3910500580'), t2.events().map(e => e[1] + ':' + e[2]));
+      check('switch: no page errors', t.errs.length === 0 && t2.errs.length === 0, t.errs.concat(t2.errs)); }
+    // machine-speed navigation: a script flipping through cards
+    { const t = await boot();
+      await sleep(2700); await t.flush(); const n0 = t.events().length;
+      const skus = ['3910500580', '3910500582', '3910500569', '3910500568', 'CAT02644', '3911714571', '0234101015', '3910080040'];
+      for (let i = 0; i < 20; i++) { t.w.location.hash = i % 2 ? '#/' : '#/pn/' + skus[(i / 2) % skus.length]; await sleep(60); }
+      await sleep(2700); await t.flush(); t.setHidden(true); await sleep(30); t.setHidden(false); await sleep(100); await t.flush();
+      check('fast: 15 screens inside 5 s → none of it is sent, and nothing more this launch', t.w.TBX_DEV.usage.off() === 'fast' && t.events().length === n0 && !t.w.localStorage.getItem('tbx_uq'),
+        { off: t.w.TBX_DEV.usage.off(), sent: t.events().length - n0 });
+      await t.go('#/pn/3910500580'); await sleep(2700); await t.flush();
+      check('fast: still nothing after the burst', t.events().length === n0);
+      const h = await boot(); await sleep(2700); await h.flush();
+      for (let i = 0; i < 20; i++) { h.w.location.hash = i % 2 ? '#/' : '#/pn/' + skus[(i / 2) % skus.length]; await sleep(450); }
+      await sleep(2700); await h.flush();
+      check('fast: the same 20 screens at a person’s pace (0.45 s each) are all counted', h.w.TBX_DEV.usage.off() === '' && h.events().filter(e => e[1] === 'card' || e[1] === 'view').length >= 20,
+        { off: h.w.TBX_DEV.usage.off(), n: h.events().filter(e => e[1] === 'card' || e[1] === 'view').length });
+      check('fast: no page errors', t.errs.length === 0 && h.errs.length === 0, t.errs.concat(h.errs)); }
+  }
 
   const failed = results.filter(r => !r.ok).length;
   console.log('\n' + (results.length - failed) + '/' + results.length + ' passed');
