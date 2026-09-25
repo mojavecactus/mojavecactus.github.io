@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>/* team password: only a device already unlocked in ToolBox opens the lab (same check as ToolBox's own first paint) */try{if(!(sessionStorage.getItem('tbx_k2')||localStorage.getItem('tbx_k2')))location.replace('../../');}catch(e){location.replace('../../');}</script>
+
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#151515">
+<meta name="robots" content="noindex">
+<title>ACL Case Lab · Case Labs · SM ToolBox</title>
+<script>
+/* Same page-zoom compensation as the ToolBox shell (tbx-v371): iOS 27 home-screen apps apply the phone's page
+   zoom but report env(safe-area-inset-*) unzoomed, so safe-area lengths divide by the measured zoom (--z). */
+(function(){try{var r=document.documentElement,ua=navigator.userAgent||'',P=[.5,.75,.85,1,1.15,1.25,1.5,1.75,2,2.5,3];
+function near(z){for(var i=0;i<P.length;i++)if(Math.abs(P[i]-z)<.02)return P[i];return null;}
+function z(){var w=innerWidth,h=innerHeight,ref=w>h?Math.max(screen.width,screen.height):Math.min(screen.width,screen.height),d=devicePixelRatio||1,v=w>0&&ref>0?Math.round(ref/w*1000)/1000:1;if(Math.abs(v-1)<.005&&Math.abs(d-Math.round(d))>.02){var c=near(d/3);if(c===null)c=near(d/2);if(c!==null)v=c;}v=Math.min(3,Math.max(.5,v));return v>0?v:1;}
+var iphone=/iPhone/.test(ua),standalone=navigator.standalone===true||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||(iphone&&!/Safari\//.test(ua));
+function apply(){if(!(iphone&&standalone))return;var v=z();if(Math.abs(v-1)<.005)r.style.removeProperty('--z');else r.style.setProperty('--z',String(v));}
+apply();addEventListener('resize',apply);addEventListener('orientationchange',function(){setTimeout(apply,80);});}catch(e){}})();
+</script>
+<script>/* opened from ToolBox (Case Labs menu or What's New): the first paint continues the hand-over (see shell.js) */try{var t=+sessionStorage.getItem('tbx_lab_enter');if(t&&Date.now()-t<5000)document.documentElement.classList.add('lab-enter');sessionStorage.removeItem('tbx_lab_enter');}catch(e){}</script>
+<link rel="stylesheet" href="v6.5.0/lab.css">
+<script type="importmap">{"imports":{"three":"./lib/three.module.js"}}</script>
+</head>
+<body class="case-lab" data-home="../../">
+<div id="app">
+ <div id="sabm" aria-hidden="true"></div>
+ <div id="viewport" class="viewport" role="region" aria-label="3D case model">
+  <h2 id="scene-title" class="sr-only">Straight on · femoral notch</h2>
+  <div id="labels" aria-hidden="true"></div>
+  <div id="model-loading" class="model-loading"><span></span>Preparing the 3D knee…</div>
+  <div id="model-error" class="model-error" role="alert" hidden></div>
+ </div>
+
+ <header id="top">
+  <div class="r1">
+   <a class="ib" id="back" href="../../" aria-label="Back to SM ToolBox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></a>
+   <h1 class="brand"><button id="title" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="sitemenu" aria-label="Case Labs, ACL Case Lab. Sections menu"><span class="nm">Case <em>Labs</em></span><span class="tag">ACL</span><svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></h1>
+   <div class="acts">
+    <button class="ib ib-txt" id="new-case" type="button" aria-label="Start a new case"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New</span></button>
+    <button class="ib ib-pdf" id="export-button" type="button" aria-label="Download the case PDF">PDF</button>
+   </div>
+  </div>
+  <nav class="lenses" id="lenses" role="tablist" aria-label="Camera view">
+   <button type="button" role="tab" data-view="anterior" aria-selected="true">Straight on</button>
+   <button type="button" role="tab" data-view="detail" aria-selected="false">Femur</button>
+   <button type="button" role="tab" data-view="tibia" aria-selected="false">Tibia</button>
+   <button type="button" role="tab" data-view="side" aria-selected="false">Side</button>
+  </nav>
+  <div class="tools" id="tools" role="toolbar" aria-label="Display options">
+   <button type="button" class="chip" id="labels-toggle" aria-pressed="true">Labels</button>
+   <button type="button" class="chip" id="orientation-toggle" aria-pressed="true">Orientation</button>
+   <button type="button" class="chip" id="xray-toggle" aria-pressed="true">X-ray</button>
+   <button type="button" class="chip" id="legend-toggle" aria-pressed="false" aria-controls="legend">Colour key</button>
+  </div>
+  <div id="legend" class="legend" aria-label="Colour key" hidden><span><i class="legend-graft"></i>Graft</span><span><i class="legend-socket"></i>Socket</span><span><i class="legend-loop"></i>Loop / tape</span><span><i class="legend-hardware"></i>Fixation</span><span><i class="legend-plug"></i>Bone block</span></div>
+  <div id="sitemenu" class="sitemenu" role="menu" aria-label="Sections" hidden>
+   <p class="sm-sec">Case Labs</p>
+   <button class="sm-item cur" type="button" role="menuitemradio" aria-checked="true" data-section="acl"><span class="sm-ico lab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5V7c0 2.2 1.8 3.6 4 3.6s4-1.4 4-3.6V2.5"/><path d="M7 21.5v-5c0-1.4 1.1-2.5 2.5-2.5h5c1.4 0 2.5 1.1 2.5 2.5v5"/><path d="M10.6 10.4l2.8 3.6"/></svg></span><span class="sm-t"><b>ACL Case Lab</b><span>Plan, ream and fix in 3D</span></span><span class="sm-ck" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></button>
+   <button class="sm-item" type="button" role="menuitem" data-section="help"><span class="sm-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.2 2.5c-.5.2-.8.6-.8 1.1v.6"/><circle cx="12" cy="17" r=".7" fill="currentColor" stroke="none"/></svg></span><span class="sm-t"><b>How to use the lab</b><span>Turning the knee, the sheet, the PDF</span></span></button>
+   <p class="sm-sec">SportsMed Toolbox</p>
+   <button class="sm-item" type="button" role="menuitem" data-section="toolbox"><span class="sm-ico tbx"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M9 8V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 13h18M11 13v2h2v-2"/></svg></span><span class="sm-t"><b>Back to the catalog</b><span>Search, scan and specs</span></span><span class="sm-go" aria-hidden="true">›</span></button>
+  </div>
+ </header>
+
+ <div id="hud" role="group" aria-label="View controls">
+  <button class="ib" id="zoom-reset" type="button" aria-label="Reset the view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4h4"/></svg></button>
+  <button class="ib" id="zoom-in" type="button" aria-label="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg></button>
+  <button class="ib" id="zoom-out" type="button" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+ </div>
+
+ <section id="sheet" class="editor" data-state="half" aria-label="ACL case walkthrough">
+  <button id="grab" type="button" aria-label="Show more of the walkthrough" aria-controls="sb"><span></span></button>
+  <div id="sb">
+   <div class="sh-top">
+    <div id="resume-banner" class="resume-banner" hidden><div><b>A saved case is on this device.</b><span>Every visit starts empty. Resume when you want to continue.</span></div><button type="button" id="resume-case" class="btn pri">Resume</button></div>
+    <div class="sh-h">
+     <div class="sh-title"><p class="eyebrow"><span id="step-eyebrow">STEP 01</span><span id="step-count" class="step-count">1 / 12</span></p><h2 id="step-heading" tabindex="-1">Choose the plan</h2><p class="meta"><span id="scene-stage-label" class="sr-only">Choose the plan</span><span id="scene-stage-status">Right knee · 90° reference pose</span></p></div>
+    </div>
+    <div class="case-actions">
+     <button type="button" id="previous-step" class="btn" aria-label="Previous step">‹ Back</button>
+     <button type="button" id="preview-step" class="btn">▶ Preview</button>
+     <button type="button" id="complete-step" class="btn pri continue">Next ›</button>
+    </div>
+    <div class="case-progress" aria-hidden="true"><span id="progress-bar"></span></div>
+   </div>
+   <div class="editor-content">
+    <p id="step-description" class="step-description"></p>
+    <div id="step-fields"></div>
+    <div id="step-validation" class="step-validation" role="status" hidden></div>
+    <p id="geometry-warning" class="geometry-warning" role="status" hidden></p>
+    <div id="step-fit" class="step-fit"></div>
+    <details class="case-map"><summary><span class="cm-k">Case sequence</span><span id="case-map-summary">Steps</span><span class="cm-open">Steps</span></summary><ol id="step-list"></ol></details>
+    <div class="editor-footer"><span class="status-dot"></span><span id="editor-summary">No graft or measurements selected</span><span id="save-status" class="save-status"></span></div>
+    <details class="panel-details case-record" id="case-record"><summary><span>Case record</span><b id="record-title">No plan selected</b></summary><div id="case-record-content"></div></details>
+    <details class="panel-details source-notes"><summary><span>References</span></summary><div class="source-links reference-links">
+     <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC9042781/" target="_blank" rel="noopener">Joint-span study (Dwyer 2022) ↗</a>
+     <a data-ref="biosteonSizing" href="https://stryker.highspot.com/items/5da9d53ec79c52440875f22a" target="_blank" rel="noopener">Biosteon sizing guide ↗</a>
+     <a href="https://stryker.highspot.com/items/5da9d5b98117170abd17e254" target="_blank" rel="noopener">VersiTomic ACL technique ↗</a>
+     <a href="https://stryker.highspot.com/items/632ce17dc7cc948bbd27dc07" target="_blank" rel="noopener">VersiTomic RR all-inside technique ↗</a>
+     <a href="https://stryker.highspot.com/items/66f6ff47cbab12f1d158d622" target="_blank" rel="noopener">ProCinch family ↗</a>
+     <a href="https://stryker.highspot.com/items/66f58c1d37881198bcdc7e34" target="_blank" rel="noopener">G-Lok ↗</a>
+     <a href="anatomy/provenance.html" target="_blank" rel="noopener">Anatomy source &amp; license ↗</a>
+    </div><p class="ref-note">Highspot links need your Stryker sign-in.</p></details>
+    <footer><span>ACL Case Lab <b id="lab-version">6.5.0</b> · teaching model, not patient-specific planning</span><span class="credits">Anatomy: <a href="anatomy/provenance.html" target="_blank" rel="noopener">BodyParts3D © DBCLS, CC BY 4.0</a> · <a href="lib/THREE-LICENSE.txt" target="_blank" rel="noopener">three.js (MIT)</a> · <a href="lib/pdf-lib-LICENSE.md" target="_blank" rel="noopener">pdf-lib (MIT)</a></span></footer>
+   </div>
+  </div>
+ </section>
+
+ <div id="help" class="help-card" role="dialog" aria-modal="false" aria-labelledby="help-title" hidden>
+  <h2 id="help-title">ACL Case Lab</h2>
+  <ol>
+   <li>Drag to turn the knee. In <b>Straight on</b> it turns left and right, and tilts only 10° up or down.</li>
+   <li>Pinch or scroll to zoom; two fingers to move it. <span class="rs">⟲</span> puts the view back.</li>
+   <li>Swipe the sheet up to enter measurements and down to see the knee. Tap its handle to switch.</li>
+   <li><b>Preview</b> plays the step; <b>Next</b> records it. <b>New</b> starts an empty case; the last one stays under Resume.</li>
+   <li><b>PDF</b> saves the case with a straight-on image of the construct.</li>
+  </ol>
+  <button type="button" class="btn pri" id="help-ok">Got it</button>
+ </div>
+ <div id="toast" class="toast" role="status" hidden></div>
+</div>
+<div id="lab-intro" aria-hidden="true"><span class="nm">Case <em>Labs</em></span></div>
+<script src="v6.5.0/shell.js" defer></script>
+<script type="module" src="v6.5.0/app.js"></script>
+</body>
+</html>

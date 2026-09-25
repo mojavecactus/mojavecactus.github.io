@@ -286,11 +286,15 @@ job('p18-gloss-swallow', async () => {
 job('p17-whatsnew', async () => {
   const { p, ctx } = await open({ ls: { tbx_wn_seen: '1' } });
   await sleep(400);
+  // the expected newest item and version come from the payload (What's New is data): v7 = "Sep 9" (Backorder Report),
+  // v8 = "Sep 25" (ACL case lab, whose item opens the lab)
+  const wn = await p.evaluate(() => { const w = window.TBX_WN || { items: [] }, last = w.items[w.items.length - 1] || {}; return { v: String(w.v), d: last.d || '', oldest: (w.items[0] || {}).d || '' }; });
   const first = await p.evaluate(() => { const el = [...document.querySelectorAll('#wncard .wn-i')].find(x => getComputedStyle(x).display !== 'none'); return el ? el.textContent.slice(0, 12) : ''; });
-  expect('p17 newest What\'s New item shown first', /Aug 24/.test(first), /Sep 9/.test(first), first);
-  await p.tap('#wncard .wn-i[data-go]'); await sleep(600);
-  const seen = await p.evaluate(() => localStorage.getItem('tbx_wn_seen'));
-  expect('p17 tapping an item marks What\'s New seen', seen === '1', seen === '7', 'tbx_wn_seen=' + seen);
+  expect('p17 newest What\'s New item shown first', wn.oldest !== wn.d && first.startsWith(wn.oldest), first.startsWith(wn.d), first + ' (newest ' + wn.d + ')');
+  // read it before a lab item's hand-over leaves the page (the harness re-seeds tbx_wn_seen on every page load)
+  await p.tap('#wncard .wn-i[data-go], #wncard .wn-i[data-lab-go]'); await sleep(120);
+  const seen = await p.evaluate(() => localStorage.getItem('tbx_wn_seen')).catch(() => 'navigated');
+  expect('p17 tapping an item marks What\'s New seen', seen === '1', seen === wn.v, 'tbx_wn_seen=' + seen + ' (v' + wn.v + ')');
   await ctx.close();
   // first launch: the tour, never What's New on top of it; finishing the tour marks What's New seen
   const f = await open({ tour: true, ls: { tbx_wn_seen: '1' } });
@@ -299,7 +303,7 @@ job('p17-whatsnew', async () => {
   expect('p17 first launch: tour without What\'s New underneath', both.tour && both.wn, both.tour && !both.wn, JSON.stringify(both));
   for (let i = 0; i < 3; i++) { await f.p.tap('.tr-next').catch(() => {}); await sleep(250); }
   const seen2 = await f.p.evaluate(() => localStorage.getItem('tbx_wn_seen'));
-  expect('p17 finishing the tour marks What\'s New seen', seen2 === '1', seen2 === '7', 'tbx_wn_seen=' + seen2);
+  expect('p17 finishing the tour marks What\'s New seen', seen2 === '1', seen2 === wn.v, 'tbx_wn_seen=' + seen2);
   await f.ctx.close();
 });
 

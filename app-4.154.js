@@ -41,7 +41,7 @@ window.TBX_BOOT = function () {
       title = document.getElementById('title'), backBtn = document.getElementById('back'),
       homeBtn = document.getElementById('home'), toast = document.getElementById('toast');
   var content, qInput, CURQ = '', LAST_BROWSE = '', LAST_TITLE = '', CUR_IT = null;
-  var APPVER = '4.153';
+  var APPVER = '4.154';
   if (!D) { return; }
   if (!document.getElementById('content') || !document.getElementById('q') ||
       !document.getElementById('glosspanel')) {
@@ -2636,8 +2636,9 @@ var GLOSS = {
     el.innerHTML = '<div class="wn-h"><span>What&#8217;s new</span>' +
       '<button id="wndismiss" aria-label="Dismiss">' + ICON.close + '</button></div>' +
       WN2.items.slice().reverse().map(function (i, idx) { // whatsnew.js is appended oldest -> newest: newest shows first
-        var inner = '<b>' + esc(i.d) + '</b>' + esc(i.t) + (i.link ? '<span class="wn-link">' + esc(i.link) + '</span>' : '');
+        var inner = '<b>' + esc(i.d) + '</b>' + esc(i.t) + (i.link ? '<span class="wn-link">' + esc(i.link) + '</span>' : '') + (i.after ? esc(i.after) : '');
         var cls = 'wn-i' + (idx ? ' wn-x' : '');
+        if (i.lab) return '<button class="' + cls + '" data-lab-go="' + esc(i.lab) + '">' + inner + '</button>'; // 4.154: opens a Case Lab (LABS)
         var go = i.sku ? pnRoute(i.sku) : (i.go || '');
         return go ? '<button class="' + cls + '" data-go="' + esc(go) + '">' + inner + '</button>'
                   : '<div class="' + cls + '">' + inner + '</div>';
@@ -8657,6 +8658,107 @@ var GLOSS = {
   function goBack() { history.length > 1 ? history.back() : (location.hash = '#/'); }
   backBtn.addEventListener('click', goBack);
   homeBtn.addEventListener('click', function () { location.hash = '#/'; });
+  // ---- Case Labs (4.154): on Home, the title "SportsMed Toolbox" opens a small menu with one shiny "Case Labs" button (the
+  // wordmark style, in a box with a slow sheen). Tapping it — or "here" in the What's New item — hands ToolBox over to the lab:
+  // the box grows into the whole screen as the Case Labs stage, the wordmark flies to its centre and the ToolBox page steps away;
+  // the lab page (its own document, labs/acl/) starts from that same frame (sessionStorage tbx_lab_enter). Opening the menu
+  // starts downloading the lab into the service-worker cache. Reduce Motion: no animation, same navigation. Home screen only;
+  // cycle count / F&A never show this title. Everything here is try/catch-guarded (boot must not fail on it).
+  var LABS = (function () {
+    var LAB_LIST = [{ id: 'acl', url: 'labs/acl/', name: 'ACL Case Lab' }];
+    var root = document.documentElement, menu = null, scrim = null, busy = false, fetched = false, on = false;
+    var CARET = '<svg class="lb-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+    var WORD = 'Case <em>Labs</em>';
+    function titleOn(v) {
+      on = !!v; title.classList.toggle('labs', on);
+      if (on) { if (!title.querySelector('.lb-caret')) title.insertAdjacentHTML('beforeend', CARET); title.setAttribute('role', 'button'); title.setAttribute('tabindex', '0'); title.setAttribute('aria-haspopup', 'menu'); title.setAttribute('aria-expanded', 'false'); }
+      else { ['role', 'tabindex', 'aria-haspopup', 'aria-expanded'].forEach(function (a) { title.removeAttribute(a); }); close(true); }
+    }
+    function build() {
+      if (menu) return;
+      scrim = document.createElement('div'); scrim.id = 'labscrim'; scrim.hidden = true; document.body.appendChild(scrim);
+      menu = document.createElement('div'); menu.id = 'labmenu'; menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'SportsMed Toolbox sections'); menu.hidden = true;
+      menu.innerHTML = '<button class="lm-case" type="button" role="menuitem" data-lab="acl" aria-label="Case Labs: the ACL Case Lab">' +
+        '<span class="lm-shine" aria-hidden="true"></span><span class="lm-word">' + WORD + '</span><span class="lm-sub">ACL · plan, ream and fix in 3D</span></button>';
+      document.body.appendChild(menu);
+      menu.addEventListener('click', function (e) { var b = e.target.closest && e.target.closest('[data-lab]'); if (b) go(b.getAttribute('data-lab'), b); });
+      scrim.addEventListener('click', function () { close(); });
+      menu.addEventListener('keydown', function (e) { if (e.key === 'Escape') { close(); try { title.focus(); } catch (x) {} } });
+    }
+    function prefetch() { // the lab's files into the SW cache while the menu is open (once per page; Data Saver skips it)
+      if (fetched) return; fetched = true;
+      try { if (navigator.connection && navigator.connection.saveData) return; } catch (x) {}
+      try {
+        fetch('labs/acl/files.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) {
+          // the lab opens at labs/acl/ — cache that URL too (the service worker keys by exact path), so it opens offline
+          ['labs/acl/'].concat((m && m.files || []).map(function (f) { return 'labs/acl/' + f; })).forEach(function (u, i) { setTimeout(function () { fetch(u).catch(function () {}); }, i * 25); });
+        }).catch(function () {});
+      } catch (x) {}
+    }
+    function open() {
+      if (!on || busy) return; build(); prefetch();
+      var r = document.getElementById('bar').getBoundingClientRect();
+      menu.style.top = Math.round(r.bottom + 8) + 'px';
+      scrim.hidden = false; menu.hidden = false; title.setAttribute('aria-expanded', 'true');
+      requestAnimationFrame(function () { menu.classList.add('open'); scrim.classList.add('open'); });
+      var f = menu.querySelector('.lm-case'); if (f) { try { f.focus({ preventScroll: true }); } catch (x) {} }
+    }
+    function close(now) {
+      if (!menu || menu.hidden) return;
+      title.setAttribute('aria-expanded', 'false'); menu.classList.remove('open'); scrim.classList.remove('open');
+      var done = function () { if (!menu.classList.contains('open')) { menu.hidden = true; scrim.hidden = true; } };
+      if (now || motionRM()) done(); else setTimeout(done, 180);
+    }
+    // the hand-over, compositor-only: the curtain is laid out at its final size (the whole screen) and starts scaled onto the
+    // tapped box or row; the wordmark starts over the tapped one (or the row's centre) and ends centred at 30 px, exactly where
+    // the lab page draws it on its first frame
+    function go(id, from) {
+      var lab = LAB_LIST.filter(function (l) { return l.id === id; })[0]; if (!lab || busy) return;
+      busy = true;
+      try { sessionStorage.setItem('tbx_lab_enter', String(Date.now())); } catch (x) {}
+      if (motionRM() || !from || !from.getBoundingClientRect) { location.href = lab.url; return; }
+      var W = window.innerWidth || 1, H = window.innerHeight || 1, fr = from.getBoundingClientRect();
+      var cur = document.createElement('div'); cur.id = 'labcurtain'; cur.setAttribute('aria-hidden', 'true');
+      cur.style.transform = 'translate(' + fr.left + 'px,' + fr.top + 'px) scale(' + Math.max(.01, fr.width / W) + ',' + Math.max(.01, fr.height / H) + ')';
+      var word = document.createElement('div'); word.id = 'labword'; word.setAttribute('aria-hidden', 'true'); word.innerHTML = WORD;
+      var src = from.querySelector('.lm-word'), fs = src ? (parseFloat(getComputedStyle(src).fontSize) || 19) : 19;
+      // measured and placed with transitions off, so the flight starts from the tapped wordmark (or the tapped row, faded in)
+      word.style.fontSize = fs + 'px'; word.style.transition = 'none'; word.style.visibility = 'hidden';
+      document.body.appendChild(cur); document.body.appendChild(word);
+      var ww = word.offsetWidth, wh = word.offsetHeight, sr = src ? src.getBoundingClientRect() : { left: fr.left + fr.width / 2 - ww / 2, top: fr.top + fr.height / 2 - wh / 2 };
+      word.style.transform = 'translate(' + sr.left + 'px,' + sr.top + 'px)';
+      if (!src) word.style.opacity = '0';
+      close(true);
+      root.classList.add('tbx-to-lab');
+      void cur.offsetWidth; void word.offsetWidth;
+      word.style.transition = ''; word.style.visibility = '';
+      cur.style.transform = 'none'; cur.classList.add('grow');
+      word.style.transform = 'translate(' + (W / 2 - ww / 2) + 'px,' + (H / 2 - wh / 2) + 'px) scale(' + (30 / fs) + ')'; word.style.opacity = ''; word.classList.add('grow');
+      setTimeout(function () { location.href = lab.url; }, 520);
+    }
+    function reset() { // back from the lab through the back/forward cache: undo the hand-over state
+      busy = false; root.classList.remove('tbx-to-lab');
+      ['labcurtain', 'labword'].forEach(function (id) { var c = document.getElementById(id); if (c && c.parentNode) c.parentNode.removeChild(c); });
+      close(true);
+    }
+    // The menu lives on Home's wordmark only. Watching the title (instead of hooking setTitle) leaves every other screen's
+    // code untouched and also catches titles written directly, e.g. "Search" while typing on Home.
+    function sync() { var home = title.textContent.replace(/\s+/g, ' ').trim() === 'SportsMed Toolbox'; if (home ? !on || !title.querySelector('.lb-caret') : on) titleOn(home); } // Home re-renders its title: put the caret back
+    try { new MutationObserver(sync).observe(title, { childList: true, subtree: true, characterData: true }); } catch (x) {}
+    sync();
+    title.addEventListener('click', function () { if (!on) return; if (menu && !menu.hidden) close(); else open(); });
+    title.addEventListener('keydown', function (e) { if (on && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } });
+    // What's New: an item with "lab" hands over the same way, from the tapped row (it counts as read)
+    document.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('[data-lab-go]') : null; if (!b) return;
+      var id = b.getAttribute('data-lab-go'), r = b.getBoundingClientRect(), from = { getBoundingClientRect: function () { return r; }, querySelector: function () { return null; } };
+      try { hideWN(true); } catch (x) {} // read; and gone if this page comes back from the back/forward cache
+      go(id, from);
+    });
+    window.addEventListener('pageshow', function (e) { if (e.persisted) { try { reset(); } catch (x) {} } });
+    window.addEventListener('hashchange', function () { try { close(true); } catch (x) {} });
+    return { title: titleOn, open: open, close: close, go: go, reset: reset };
+  })();
   // P36: the same Back within thumb reach in the bottom bar — shown exactly when the header Back is (the header one stays)
   (function () {
     var bb = document.getElementById('bb-back'); if (!bb) return;

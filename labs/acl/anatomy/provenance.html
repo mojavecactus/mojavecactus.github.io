@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1E1E1E">
+<title>Anatomy and model limits · ACL Case Lab</title>
+<style>
+:root{color-scheme:dark;--ink:#1E1E1E;--panel:#2A2A2A;--line:#3A3A3A;--bone:#F4F2EE;--muted:#9B968E;--amber:#FDB515;--cyan:#7CCFE8}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--ink);color:var(--bone);font:15px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;padding:0 max(16px,env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+header{position:sticky;top:0;z-index:2;background:var(--ink);padding:calc(10px + env(safe-area-inset-top)) 0 10px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+header a{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:10px;color:var(--bone);text-decoration:none;font-size:22px;line-height:1}
+header a:focus-visible,a:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+header h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.2px}
+header h1 em{font-style:normal;color:var(--amber)}
+main{max-width:760px;margin:0 auto;padding-top:18px}
+h2{font-size:15px;text-transform:uppercase;letter-spacing:.8px;color:var(--amber);margin:28px 0 8px}
+p,li{color:var(--bone)}
+.muted,small{color:var(--muted)}
+a{color:var(--cyan);text-underline-offset:3px}
+ul{padding-left:20px}li{margin:8px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:12px 0}
+.card p{margin:6px 0}
+.links{display:flex;flex-wrap:wrap;gap:8px 14px}
+</style>
+</head>
+<body>
+<header><a href="../" aria-label="Back to ACL Case Lab">‹</a><h1>ACL <em>Case Lab</em> · anatomy and limits</h1></header>
+<main>
+<div class="card">
+<p>The lab shows a selected construct in fixed reference anatomy. Entered measurements drive the geometry; the view is not a patient-specific reconstruction, a drilling guide or a check of surgical suitability.</p>
+</div>
+
+<h2>Anatomy source and attribution</h2>
+<p>The femur, tibia and fibula come from <a href="https://dbarchive.biosciencedbc.jp/en/bodyparts3d/desc.html">BodyParts3D</a>, an anatomical database representing an adult human male.</p>
+<div class="card">
+<p><strong>Attribution:</strong> BodyParts3D, © The Database Center for Life Science, licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).</p>
+<p class="links"><a href="https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html">Database license</a><a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0 terms</a><a href="https://github.com/Kevin-Mattheus-Moerman/BodyParts3D">Source mesh mirror</a></p>
+</div>
+<p>Source structures: FMA24474 (right femur), FMA24477 (right tibia), FMA24480 (right fibula). Changes made: the meshes were converted, rigidly rotated and translated, cropped at the shafts, capped and given recalculated normals. Bone shapes and sizes stay fixed whatever tunnel lengths are entered.</p>
+<p class="muted">Rendering uses three.js (MIT license); the case PDF uses pdf-lib (MIT license).</p>
+
+<h2>Pose, apertures and joint span</h2>
+<ul>
+<li>The tibia and fibula sit at a nominal 90° bend relative to the femur. This is a rigid teaching pose, not a simulation of knee motion. Cartilage, menisci, patella and soft tissues are omitted.</li>
+<li>The femoral aperture is an illustrative point on the medial wall of the lateral condyle, with a 35 mm reference path to the lateral cortex. The tibial aperture and anteromedial exit lie on the atlas surface, with a 40 mm reference path. Neither is a validated ACL footprint or a drilling recommendation.</li>
+<li>The joint span is a fixed 22 mm reference at 90°. It is not an entered case measurement. For a linked trans-tibial case, one straight line through both bones may represent a slightly different span; that span is labeled.</li>
+</ul>
+
+<h2>How entered lengths are shown</h2>
+<ul>
+<li>Changing a tunnel length changes the path direction and cortical exit inside the same fixed bone. The path keeps the reference aperture, stays in an illustrative lateral femoral or anteromedial tibial cortical region, and must meet that cortex before any other bone surface. Buttons sit on the actual cortical exit.</li>
+<li>When the atlas cannot represent an entered length there, the model draws the nearest valid path and labels it “Shown … (entered …)”. The entered value is kept for every calculation. For example, an entered 20 mm femoral tunnel is drawn as about 25.6 mm in this reference.</li>
+<li>Linked trans-tibial cases use one straight line through both bones. An entered femoral and tibial pair may not fit one line in this atlas; the represented lengths and span are shown in the viewer, the editor and the case PDF.</li>
+</ul>
+
+<h2>Instrument paths</h2>
+<ul>
+<li>Flexible pins and reamers curve through the anterior-medial portal and run straight inside bone.</li>
+<li>Rigid low-profile drilling is one straight pin through the anterior-medial portal, drilled in deep flexion straight through the femur. At the fixed 90° pose a straight extension out of the notch would cross the medial condyle, so the lab draws the pin and reamer along the tunnel axis from a short notch stub, with no curved approach.</li>
+<li>Outside-in starts at the lateral femoral cortex. Linked trans-tibial uses one straight 2.4 mm pin and one reamer pass through both bones. Retrograde (RR) sockets are cut from the joint side back toward the cortex; a blown cortex is reamed through.</li>
+<li>A graft or bone block that projects from an open tibial tunnel is trimmed flush with the tibial cortex around the tunnel. The cut follows a plane through the tunnel exit on the atlas surface; the trim amount is measured on the tunnel axis.</li>
+<li>All of these are illustrated teaching paths, not operative trajectories.</li>
+</ul>
+
+<h2>Measured geometry and implants</h2>
+<ul>
+<li>One scene unit is 1 mm. Tunnel length does not change bone size, graft diameter, implant size or zoom. Socket depth moves the socket end; the outer cortical opening is separate from the socket diameter.</li>
+<li>The graft follows the femoral insertion, the joint span and the tibial insertion. Its prepared length is checked against that path; a shortage or surplus is shown, never stretched away. BTB shows two bone blocks; QTB shows its block on the tibial end.</li>
+<li>Integrated button footprints are 13 × 4 mm; the 1.5 mm thickness is illustrative. ABS footprints and projection diameters follow the selected catalog record; projection depth is schematic. QuadCinch tape uses its documented 1.4 mm width; its thickness is schematic. Loop cross-sections and suture routes are schematic. The G-Lok XL outline is schematic; its exact envelope differs between sources.</li>
+<li>Screws stay within the entered diameter and length. A screw longer than its bone path visibly extends beyond it; incompatible hardware and its label turn red. Thread form, graft compression and tunnel-wall deformation are schematic. Screw and bone-block overlap is a geometric comparison, not a fixation-strength threshold.</li>
+</ul>
+
+<h2>Bone dimensions and research context</h2>
+<p>The distal reference femur measures 81.7 mm side to side and 62.2 mm front to back (vertices below y = 50 mm in the reference pose). The proximal tibial reference region measures 76.1 mm side to side and 60.3 mm front to back. These are atlas measurements, not population averages.</p>
+<p>Scale context: <a href="https://onlinelibrary.wiley.com/doi/10.1155/2012/679658">Terzidis et al. (2012), 360 adult femora</a> and <a href="https://www.nature.com/articles/s41598-023-31715-4">Prithishkumar et al. (2023), 111 healthy knees</a>. Their landmarks differ from these mesh extents, so no normal range or patient size is inferred. A <a href="https://pubmed.ncbi.nlm.nih.gov/27281318/">10-knee cadaver study (Kalra et al., 2016)</a> reported a mean 32.1 mm femoral tunnel at 90° flexion (range 22–45 mm), with length changing with flexion in the same knees.</p>
+<p>The G-Lok fold-height and flip-clearance relationships apply only to the fixed-loop chart. They are not used for adjustable loops, screws or bone blocks.</p>
+<p><small>Updated September 25, 2026 (6.4).</small></p>
+</main>
+</body>
+</html>

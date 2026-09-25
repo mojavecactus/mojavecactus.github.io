@@ -1,0 +1,29 @@
+{
+ "version": "6.5.0",
+ "commit": "762532a",
+ "files": [
+  "index.html",
+  "v6.5.0/app.js",
+  "v6.5.0/engine.js",
+  "v6.5.0/workflow.js",
+  "v6.5.0/catalog.js",
+  "v6.5.0/geometry.js",
+  "v6.5.0/reference-geometry.js",
+  "v6.5.0/model.js",
+  "v6.5.0/model-workflow.js",
+  "v6.5.0/model-sequences.js",
+  "v6.5.0/model-paths.js",
+  "v6.5.0/model-btb.js",
+  "v6.5.0/model-screw.js",
+  "v6.5.0/bone-plug-geometry.js",
+  "v6.5.0/measurement-guide.js",
+  "v6.5.0/viewer-export.js",
+  "v6.5.0/case-report.js",
+  "v6.5.0/lab.css",
+  "v6.5.0/shell.js",
+  "lib/three.module.js",
+  "lib/OrbitControls.js",
+  "lib/pdf-lib.js",
+  "anatomy/knee.json"
+ ]
+}

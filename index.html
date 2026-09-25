@@ -133,6 +133,7 @@
   });
 })();
 </script>
+<script>try{var t=+sessionStorage.getItem('tbx_from_lab');sessionStorage.removeItem('tbx_from_lab');if(t&&Date.now()-t<5000){var h=document.documentElement,d=function(e){if(!e||e.animationName==='tbx-rise12'&&e.target.id==='content'){h.classList.remove('tbx-from-lab');document.removeEventListener('animationend',d);}};h.classList.add('tbx-from-lab');document.addEventListener('animationend',d);setTimeout(d,2500);}}catch(e){}</script>
 <script>
 (function () {
   try {
@@ -1668,6 +1669,45 @@ html[data-vt="back"]::view-transition-old(tbx-hero){animation:tbx-out .3s linear
 /* ==== ONE reduced-motion policy (R7 M0): no translate / scale / rotate / morph; fades <= 120 ms; essential feedback stays
    but does not move (scan flash, spinners, the N4 hold bar, the Copy check and star colours). View Transitions are off in JS
    (vtOK), the launch and the logo check TBX_RM(). Every reduced-motion rule of this file lives here. */
+/* ---- Case Labs (4.154): Home title menu → one shiny "Case Labs" button (the wordmark's type in a box with a slow sheen and glow)
+   → labs/acl/. The hand-over is a container transform by transform only: the curtain (the Case Labs stage) grows from the tapped
+   box to the whole screen while the wordmark flies to its centre; the lab page continues from that frame. Reduce Motion: none. ---- */
+#bar .t.labs{cursor:pointer; -webkit-user-select:none; user-select:none}
+#bar .t.labs .lb-caret{display:inline-block; vertical-align:middle; margin:-3px 0 0 6px; color:var(--muted); transition:transform var(--m-base) var(--e-out), color 150ms linear}
+#bar .t.labs[aria-expanded="true"] .lb-caret{transform:rotate(180deg); color:var(--amber)}
+#bar .t.labs:focus-visible{outline:2px solid var(--amber); outline-offset:2px; border-radius:10px}
+#labscrim{position:fixed; inset:0; z-index:44; background:rgba(0,0,0,.38); opacity:0; transition:opacity var(--m-quick) var(--e-out)}
+#labscrim.open{opacity:1}
+#labmenu{position:fixed; z-index:45; left:50%; width:min(300px, calc(100vw - 32px)); padding:8px; border-radius:18px; border:1px solid #4A4A4A;
+  background:var(--panel); box-shadow:0 16px 40px rgba(0,0,0,.6); transform:translateX(-50%) translateY(-6px) scale(.98); transform-origin:50% 0; opacity:0;
+  transition:opacity var(--m-quick) var(--e-out), transform var(--m-base) var(--e-out)}
+#labmenu.open{opacity:1; transform:translateX(-50%)}
+#labmenu .lm-case{position:relative; isolation:isolate; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; width:100%; min-height:84px;
+  padding:14px 16px; border-radius:13px; border:1px solid rgba(253,181,21,.6); color:var(--bone); font:inherit; cursor:pointer; text-align:center;
+  background:radial-gradient(130% 120% at 50% 0%, #3a352c 0%, #24211d 52%, #161514 100%);
+  box-shadow:inset 0 1px 0 rgba(255,236,190,.16), inset 0 0 0 1px rgba(124,207,232,.10), 0 8px 22px rgba(0,0,0,.45)}
+#labmenu .lm-case::after{content:""; position:absolute; inset:0; z-index:-1; border-radius:inherit; pointer-events:none;
+  background:radial-gradient(90% 70% at 50% 110%, rgba(253,181,21,.26), rgba(253,181,21,0) 70%); opacity:.35; animation:lm-glow 3.4s var(--e-inout) .7s infinite}
+#labmenu .lm-shine{position:absolute; z-index:0; top:-30%; bottom:-30%; left:0; width:38%; pointer-events:none;
+  background:linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,244,214,.07) 30%, rgba(255,244,214,.34) 50%, rgba(255,244,214,.07) 70%, rgba(255,255,255,0) 100%);
+  transform:translateX(-140%) skewX(-18deg); animation:lm-shine 3.4s var(--e-inout) .7s infinite}
+#labmenu .lm-word{position:relative; z-index:1; font-size:clamp(17px, 5vw, 20px); font-weight:700; letter-spacing:.2px; line-height:1.15; white-space:nowrap}
+#labmenu .lm-word em, #labword em{font-style:normal; color:var(--amber)}
+#labmenu .lm-sub{position:relative; z-index:1; font-size:var(--fs-sm); color:var(--muted); letter-spacing:.02em}
+#labmenu .lm-case:active{transform:scale(.97)}
+#labmenu .lm-case:focus-visible{outline:2px solid var(--amber); outline-offset:3px}
+@keyframes lm-shine{0%{transform:translateX(-140%) skewX(-18deg)} 42%, 100%{transform:translateX(340%) skewX(-18deg)}}
+@keyframes lm-glow{0%, 100%{opacity:.35} 45%{opacity:1}}
+#labcurtain{position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:1000; pointer-events:none; transform-origin:0 0; border-radius:13px;
+  background:radial-gradient(130% 85% at 50% 42%, #2b2926 0%, #1c1b1a 52%, #121212 100%); transition:transform var(--m-launch) var(--e-out)}
+#labword{position:fixed; left:0; top:0; z-index:1001; pointer-events:none; white-space:nowrap; font-weight:700; letter-spacing:.2px; line-height:1.15; color:var(--bone);
+  transform-origin:50% 50%; transition:transform var(--m-launch) var(--e-inout), opacity var(--m-base) var(--e-out)}
+html.tbx-to-lab #content{opacity:0; transform:translateY(18px); transition:opacity var(--m-base) var(--e-in), transform var(--m-emph) var(--e-in)}
+html.tbx-to-lab #bottombar, html.tbx-to-lab #fb-fab{transform:translateY(120%); transition:transform var(--m-emph) var(--e-in)}
+html.tbx-to-lab #bar{opacity:0; transform:translateY(-10px); transition:opacity var(--m-base) var(--e-in), transform var(--m-base) var(--e-in)}
+html.tbx-to-lab #wncard{opacity:0; transition:opacity var(--m-quick) var(--e-in)}
+/* back from the lab (a fresh load): Home rises in once */
+html.tbx-from-lab #content{animation:tbx-rise12 var(--m-launch) var(--e-out) both}
 @media (prefers-reduced-motion: reduce){
   /* moved here unchanged */
   #toast{transition:none;}
@@ -1697,8 +1737,13 @@ html[data-vt="back"]::view-transition-old(tbx-hero){animation:tbx-out .3s linear
   html.launch-land #bar::after, html.launch-land #content, #content.vt-rise, #content.vt-fade, .pcard.vt-in{animation:none}
   .rowitem.nav-ring::after{animation:none; opacity:1}
   .skrow::after{animation:none; opacity:0}
+  /* Case Labs menu (4.154): fades only, no sheen or glow; the hand-over to the lab is skipped in JS */
+  #labmenu, #labmenu.open{transform:translateX(-50%); transition:opacity 120ms linear} #labscrim{transition:opacity 120ms linear}
+  #labmenu .lm-shine{animation:none; opacity:0} #labmenu .lm-case::after{animation:none} #labmenu .lm-case:active{transform:none}
+  #bar .t.labs .lb-caret{transition:none} html.tbx-from-lab #content{animation:none}
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*){animation:none !important}
 }
+
 </style>
 </head>
 <body>
@@ -2038,7 +2083,7 @@ if (R.classList.contains('authed')) begin('auto');
 </script>
 <script src="lib/inflate.js" defer></script>
 <script src="lib/zxing-reader.js" defer></script>
-<script src="app-4.153.js"></script>
+<script src="app-4.154.js"></script>
 <script>if (window.__tbxBootPending && window.TBX_BOOT) { window.__tbxBootPending = false; try { window.TBX_BOOT(); window.__tbxBootPhase = 'booted'; } catch (e) { window.TBX_FAIL('boot', e); } }</script>
 </body>
 </html>
