@@ -22,7 +22,7 @@ import {bonePlugLayout} from './model-btb.js';
 import {flushScrewPlacement,nearestSurfaceNormal} from './model-screw.js';
 
 export async function createModel(container,labelLayer,{insets:initialInsets}={}){
- const viewport={width:container.clientWidth||800,height:container.clientHeight||450};let captureViewport=null,insets={top:0,right:0,bottom:0,left:0,...(initialInsets||{})};const viewportSize=()=>{if(captureViewport)return captureViewport;const width=container.clientWidth,height=container.clientHeight;if(width>0&&height>0){viewport.width=width;viewport.height=height;}return viewport;};
+ const viewport={width:container.clientWidth||800,height:container.clientHeight||450};let captureViewport=null,insets={top:0,right:0,bottom:0,left:0,...(initialInsets||{})},anchorInsets=null;const viewportSize=()=>{if(captureViewport)return captureViewport;const width=container.clientWidth,height=container.clientHeight;if(width>0&&height>0){viewport.width=width;viewport.height=height;}return viewport;};
  const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setClearColor(0,0);
  renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
@@ -335,7 +335,7 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
   for(const side of ['femur','tibia']){const stage=workflowView[side];setBore(side,stage.reamed?1:0);if(stage.reamed){drawTunnel(side);componentSnapshot.tunnels.push(side);componentSnapshot.bare=false;}if(stage.pin&&!stage.pinning&&!stage.passing&&!stage.reaming&&!stage.cortexReaming){drawPin(side);componentSnapshot.pins.push(side);componentSnapshot.bare=false;}if((stage.fixed||side==='femur'&&stage.passed&&!stage.passing)&&!stage.fixing&&!(side==='femur'&&workflowView.xlPreview)){const values=evaluation?.sides?.[side]||state[side];if(['biosteon','wedge'].includes(values.fixation)){if(stage.fixed)makeScrew(side,values,frameFor(side));}else makeButton(side,values,frameFor(side));if(hardware[side])componentSnapshot.fixation.push(side);componentSnapshot.bare=false;}}
   if(workflowView.showPrepared){drawGraftShape(detachedPath(),'prepared');drawPreparedButton();componentSnapshot.preparedGraft=true;componentSnapshot.bare=false;}
   if(workflowView.femur.passed&&!workflowView.femur.passing&&!workflowView.tibia.passing&&!workflowView.trimming){makeGraft(workflowView.tibia.passed?1:0);componentSnapshot.placedGraft=true;componentSnapshot.bare=false;}
-  safeguardNotice.hidden=(!graftInfo&&!['femur','tibia'].some(side=>workflowView[side].measured))||geometry.displaySafeguards.length===0;
+  safeguardNotice.hidden=(!graftInfo&&!['femur','tibia'].some(side=>workflowView[side].measured))||geometry.displaySafeguards.length===0;placeNotice();
  }
  function drawFemoralPass(progress){
   const f=geometry.femur,t=geometry.tibia,values=evaluation?.sides?.femur||state.femur,isButton=!['biosteon','wedge'].includes(values.fixation),includeXL=hasXL('femur',values)&&state.femur.xlTiming==='before',spec=values.buttonSpec||{},adjustable=isButton&&values.fixation!=='glok',pose=(adjustable?adjustableFemoralPassPose:femoralButtonPassPose)(progress,{ttl:f.ttl,buttonLength:spec.length||spec.outerDiameter||13,xlBefore:includeXL}),gLength=clamp(Number(state.graftLength)||.2,.2,600),basis=frameFor('femur'),overtravel=isButton&&values.fixation==='glok'?pose.clearance:0,terminalDepth=f.graftInsertion+overtravel*(1-pose.seat),portal=v(medialPortal(f.entry,t.entry));
@@ -382,7 +382,7 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
    const values=evaluation?.sides?.[side]||state[side],basis=frameFor(side);if(!preview.fixBuilt){renderGroup=previewAssembly;if(['biosteon','wedge'].includes(values.fixation))makeScrew(side,values,basis);else makeButton(side,values,basis);preview.fixBuilt=true;}
    const approach=values.fixation==='biosteon'||values.fixation==='wedge'?basis.axis.clone().multiplyScalar(side==='tibia'?1:-1):basis.normal;previewAssembly.position.copy(approach).multiplyScalar(['biosteon','wedge'].includes(values.fixation)?18*(1-progress):0);if(hardware[side])hardware[side].displayCenter=v(hardware[side].center).add(previewAssembly.position).toArray();
   }
-  for(let i=toolStart;i<toolsVisible.length;i++)toolsVisible[i].preview=true;renderGroup=assembly;componentSnapshot.previewStage=stage;componentSnapshot.previewProgress=progress;componentSnapshot.previewComponents=stage==='trim_tibia'?['bone-trim']:stage==='prep'?['prepared-graft']:stage.startsWith('pass_')?['graft']:stage.startsWith('fix_')||stage==='xl_femur'?['fixation']:stage.endsWith('_ream')?['reamer','progressive-bore']:stage.endsWith('_pin')?['guide-pin']:['measurement'];componentSnapshot.bare=false;safeguardNotice.hidden=(!graftInfo&&!['femur','tibia'].some(side=>workflowView[side].measured))||geometry.displaySafeguards.length===0;drawOverlay();
+  for(let i=toolStart;i<toolsVisible.length;i++)toolsVisible[i].preview=true;renderGroup=assembly;componentSnapshot.previewStage=stage;componentSnapshot.previewProgress=progress;componentSnapshot.previewComponents=stage==='trim_tibia'?['bone-trim']:stage==='prep'?['prepared-graft']:stage.startsWith('pass_')?['graft']:stage.startsWith('fix_')||stage==='xl_femur'?['fixation']:stage.endsWith('_ream')?['reamer','progressive-bore']:stage.endsWith('_pin')?['guide-pin']:['measurement'];componentSnapshot.bare=false;safeguardNotice.hidden=(!graftInfo&&!['femur','tibia'].some(side=>workflowView[side].measured))||geometry.displaySafeguards.length===0;placeNotice();drawOverlay();
  }
  function cancelAnimation(restore=true){if(animation?.resolve)animation.resolve({cancelled:true,stage:animation.stage});animation=null;preview=null;clearGroup(previewAssembly);if(restore&&state){rebuildScene();drawOverlay();}}
  function recommendedStepDuration(stage=options.workflow?.stage||'plan'){const side=stage.startsWith('tibia')||stage.endsWith('tibia')?'tibia':'femur';return stageDuration(stage,state?.[side]?.technique);}
@@ -391,16 +391,16 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
   const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;if(reduced||duration<=0){renderPreview(1);return Promise.resolve({cancelled:false,stage,reducedMotion:!!reduced});}
   return new Promise(resolve=>{animation={stage,start:performance.now(),duration:clamp(Number(duration)||2300,300,12000),resolve};});
  }
- function update(nextState,nextEvaluation,viewSettings={}){
+ function update(nextState,nextEvaluation,viewSettings={}){forgetLabelSides();
   if(disposed)return;cancelAnimation(false);state=nextState;evaluation=nextEvaluation;options={...options,...viewSettings};geometry=constructGeometry(reference,state,evaluation);geometry.displaySafeguards??=[];const enteredGraftLength=Number(state.graftLength),illustratedGraftLength=clamp(enteredGraftLength||.2,.2,600);if(Math.abs(enteredGraftLength-illustratedGraftLength)>.00001)geometry.displaySafeguards.push({field:'graftLength',entered:enteredGraftLength,rendered:illustratedGraftLength,reason:'Finite display safeguard; entered prepared length retained'});
-  safeguardNotice.hidden=geometry.displaySafeguards.length===0;safeguardNotice.textContent=geometry.displaySafeguards.length?'Illustration limited · entered measurements retained':'';safeguardNotice.title=geometry.displaySafeguards.map(x=>`${x.field}: entered ${x.entered}, illustrated ${x.rendered.toFixed(1)} mm`).join('\n');
+  safeguardNotice.hidden=geometry.displaySafeguards.length===0;safeguardNotice.textContent=geometry.displaySafeguards.length?'Illustration limited · entered measurements retained':'';placeNotice();safeguardNotice.title=geometry.displaySafeguards.map(x=>`${x.field}: entered ${x.entered}, illustrated ${x.rendered.toFixed(1)} mm`).join('\n');
   for(const mesh of boneMeshes){const transform=geometry[mesh.userData.side],a=transform.matrix,t=transform.translation;mesh.matrixAutoUpdate=false;mesh.matrix.set(a[0][0],a[0][1],a[0][2],t[0],a[1][0],a[1][1],a[1][2],t[1],a[2][0],a[2][1],a[2][2],t[2],0,0,0,1);mesh.matrixWorldNeedsUpdate=true;mesh.material.opacity=clamp(Number(options.opacity)||.64,.08,1);mesh.material.depthWrite=options.opacity>.93;}
   rebuildScene();rebuildMeasurementGuide();drawOverlay();
  }
 
  async function captureFinalImage({final=false,width,height}={}){
   if(disposed||!state||!geometry)throw Error('The model is not ready to capture.');
-  const savedOptions=options,savedPreview=preview?{...preview}:null,savedAnimation=animation,started=performance.now();let pending;animation=null;
+  const savedOptions=options,savedPreview=preview?{...preview}:null,savedAnimation=animation,started=performance.now(),savedSides=new Map(labelSides),savedBeside=besideSide;let pending;animation=null;forgetLabelSides();
   // Report framing: always the Straight on view at its default framing, as a 3:2 image laid out like a desktop viewer
   // (900 × 600 CSS px) — never the viewer's last angle or zoom. Labels keep a readable size even when the case was built on a phone.
   const RW=900,RH=600,frame={wupp:worldUnitsPerPixel,left:camera.left,right:camera.right,top:camera.top,bottom:camera.bottom,ratio:renderer.getPixelRatio?renderer.getPixelRatio():1,w:viewportSize().width,h:viewportSize().height,view:camera.view?.enabled?{...camera.view}:null,position:camera.position.clone(),quaternion:camera.quaternion.clone(),up:camera.up.clone(),zoom:camera.zoom,target:orbit.target.clone()};
@@ -414,7 +414,7 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
    const aspect=viewportSize().width/viewportSize().height,scale=Math.min(width?width/renderer.domElement.width:Infinity,height?height/renderer.domElement.height:Infinity),w=Number.isFinite(scale)?renderer.domElement.width*scale:renderer.domElement.width,h=w/aspect;
    pending=composeViewerImage({canvas:renderer.domElement,svg,width:w,height:h});
   }finally{captureViewport=null;worldUnitsPerPixel=frame.wupp;camera.up.copy(frame.up);camera.position.copy(frame.position);camera.quaternion.copy(frame.quaternion);camera.zoom=frame.zoom;orbit.target.copy(frame.target);camera.left=frame.left;camera.right=frame.right;camera.top=frame.top;camera.bottom=frame.bottom;if(frame.view)camera.setViewOffset(frame.view.fullWidth,frame.view.fullHeight,frame.view.offsetX,frame.view.offsetY,frame.view.width,frame.view.height);else camera.clearViewOffset();camera.updateProjectionMatrix();camera.updateMatrixWorld();if(renderer.setSize){renderer.setPixelRatio(frame.ratio);renderer.setSize(frame.w,frame.h,false);}if(svg.setAttribute)svg.setAttribute('viewBox',`0 0 ${frame.w} ${frame.h}`);
-   options=savedOptions;preview=savedPreview;rebuildScene();rebuildMeasurementGuide();if(savedPreview)renderPreview(savedPreview.progress);animation=savedAnimation;if(animation)animation.start+=performance.now()-started;drawOverlay();renderer.render(scene,camera);}
+   options=savedOptions;preview=savedPreview;labelSides.clear();for(const [k,v] of savedSides)labelSides.set(k,v);besideSide=savedBeside;rebuildScene();rebuildMeasurementGuide();if(savedPreview)renderPreview(savedPreview.progress);animation=savedAnimation;if(animation)animation.start+=performance.now()-started;drawOverlay();renderer.render(scene,camera);}
   return {...await pending,final:!!final};
  }
  function setOptions(next){const previous=options;options={...options,...next};if(!state)return;
@@ -436,7 +436,7 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
   orbit._quat.setFromUnitVectors(camera.up,Y);orbit._quatInverse.copy(orbit._quat).invert();orbit._sphericalDelta?.set(0,0,0);
   orbit.minPolarAngle=straight?Math.PI/2-STRAIGHT_TILT:0;orbit.maxPolarAngle=straight?Math.PI/2+STRAIGHT_TILT:Math.PI;
  }
- function setView(name='anterior'){
+ function setView(name='anterior'){forgetLabelSides();
   if(disposed)return;const damping=orbit.enableDamping;orbit.enableDamping=false;orbit.update();view=Object.hasOwn(VIEW_OFFSETS,name)?name:'anterior';
   // Camera zoom is retained when switching presets.
   orbitFrame(view);orbit.target.copy(targetFor(view));camera.position.copy(orbit.target).add(v(VIEW_OFFSETS[view]));camera.lookAt(orbit.target);
@@ -446,9 +446,13 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
  function resetZoom(){camera.zoom=1;camera.updateProjectionMatrix();}
  function reset(){setView('anterior');}
  // The page may cover parts of the viewer (header, bottom sheet, side panel): insets name those edges in CSS px. The knee is
- // centred in the free rectangle through a camera view offset, so zoom stays about the target and labels dock inside it.
- function frameRect(){const {width:w,height:h}=viewportSize();if(captureViewport)return {l:0,t:0,r:w,b:h,w,h};const l=clamp(insets.left||0,0,w*.7),r=w-clamp(insets.right||0,0,w*.7),t=clamp(insets.top||0,0,h*.75),b=Math.max(t+1,h-clamp(insets.bottom||0,0,h*.75));return {l,t,r:Math.max(l+1,r),b,w:Math.max(1,r-l),h:Math.max(1,b-t)};}
- function applyFrustum(){const w=viewportSize().width,h=viewportSize().height,f=frameRect(),dx=(f.l+f.r)/2-w/2,dy=(f.t+f.b)/2-h/2,fw=w+2*Math.abs(dx),fh=h+2*Math.abs(dy);
+ // centred through a camera view offset, so zoom stays about the target; labels, pills and the scale bar dock inside the free
+ // rectangle. The anchor insets (when the page gives them) say where the knee is centred instead: on phones the half-open sheet,
+ // so dragging the sheet never moves the knee — lowering it only uncovers more of the model below.
+ function frameRect(from=insets){const {width:w,height:h}=viewportSize();if(captureViewport)return {l:0,t:0,r:w,b:h,w,h};const l=clamp(from.left||0,0,w*.7),r=w-clamp(from.right||0,0,w*.7),t=clamp(from.top||0,0,h*.75),b=Math.max(t+1,h-clamp(from.bottom||0,0,h*.75));return {l,t,r:Math.max(l+1,r),b,w:Math.max(1,r-l),h:Math.max(1,b-t)};}
+ // where the knee is centred; the docked labels are laid out for this rectangle too, so they hold still with it
+ function anchorFrame(){return frameRect(anchorInsets||insets);}
+ function applyFrustum(){const w=viewportSize().width,h=viewportSize().height,f=anchorFrame(),dx=(f.l+f.r)/2-w/2,dy=(f.t+f.b)/2-h/2,fw=w+2*Math.abs(dx),fh=h+2*Math.abs(dy);
   camera.left=-worldUnitsPerPixel*fw/2;camera.right=worldUnitsPerPixel*fw/2;camera.top=worldUnitsPerPixel*fh/2;camera.bottom=-worldUnitsPerPixel*fh/2;
   if(captureViewport||Math.abs(dx)<.5&&Math.abs(dy)<.5)camera.clearViewOffset();else camera.setViewOffset(fw,fh,Math.abs(dx)-dx,Math.abs(dy)-dy,w,h);
   orbit.panSpeed=2/(fw/w+fh/h);camera.updateProjectionMatrix();}
@@ -457,12 +461,16 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
  let fitWidth=0,fitPending=false,fitInsets=null;
  const insetsOf=next=>({top:+next?.top||0,right:+next?.right||0,bottom:+next?.bottom||0,left:+next?.left||0});
  // the scale is fitted to the fit insets (the page's resting layout, e.g. the peeking sheet) — never to less than 120 px
- function fitScale(){const saved=insets;if(fitInsets)insets=fitInsets;const f=frameRect();insets=saved;worldUnitsPerPixel=Math.max(160/Math.max(120,f.h),170/Math.max(120,f.w));}
- function placeNotice(){const f=frameRect(),h=viewportSize().height;safeguardNotice.style.maxWidth=f.w<570?'190px':'220px';safeguardNotice.style.left=(f.l+10)+'px';safeguardNotice.style.top=f.h<350?'auto':(f.t+10)+'px';safeguardNotice.style.bottom=f.h<350?(h-f.b+86)+'px':'auto';}
+ function fitScale(){const f=frameRect(fitInsets||insets);worldUnitsPerPixel=Math.max(160/Math.max(120,f.h),170/Math.max(120,f.w));}
+ // the safeguard notice holds still with the knee too (laid out for the anchor rectangle)
+ // the safeguard notice holds still with the knee: upper left of the anchor rectangle (the labels and badges keep clear of it)
+ function placeNotice(){const f=anchorFrame(),n=safeguardNotice.style;n.maxWidth=f.w<570?'190px':'220px';n.left=(f.l+10)+'px';n.top=(f.t+10)+'px';n.bottom='auto';}
  function resize(){const w=viewportSize().width,h=viewportSize().height;if(w<1||h<1)return;dirty=true;renderer.setSize(w,h,false);const first=worldUnitsPerPixel==null;if(first||Math.abs(w-fitWidth)>1){fitWidth=w;fitScale();fitPending=!first;}applyFrustum();svg.setAttribute('viewBox',`0 0 ${w} ${h}`);placeNotice();}
  // a width change refits the scale once the page reports its new layout (the next setInsets), not with the old insets
- function setInsets(next={},fit=null){const n=insetsOf(next);if(fit)fitInsets=insetsOf(fit);if(!fitPending&&['top','right','bottom','left'].every(k=>Math.abs(n[k]-insets[k])<.5))return;insets=n;if(worldUnitsPerPixel==null)return;if(fitPending){fitPending=false;fitScale();}applyFrustum();placeNotice();}
- function getSnapshot(){return {ready:!!geometry,view,measurementGuide:measurementGuide?structuredClone(measurementGuide):null,orientation:{enabled:!!options.orientation,landmarks:orientationLandmarks},activeSide:options.activeSide,workflow:workflowView,components:componentSnapshot,instruments:toolsVisible,graft:graftInfo,animationRunning:!!animation,bores:Object.fromEntries(Object.entries(boreUniforms).map(([side,u])=>[side,{enabled:u.boreEnabled.value>0,socketStart:u.socketStart.value,socketEnd:u.socket.value,shaftStart:u.shaftStart.value,shaftEnd:u.shaftEnd.value,radius:u.radius.value,shaftRadius:u.shaftRadius.value,pilotRadius:u.pilotRadius.value}])),displaySafeguards:geometry?JSON.parse(JSON.stringify(geometry.displaySafeguards)):[],anatomyWarnings:geometry?.anatomyWarnings||[],geometry:geometry?JSON.parse(JSON.stringify(geometry)):null,hardware:JSON.parse(JSON.stringify(hardware)),graftDiameter:state?renderDiameter(state.graftDiameter):null,reference:JSON.parse(JSON.stringify(reference)),camera:{position:camera.position.toArray(),target:orbit.target.toArray(),zoom:camera.zoom,worldUnitsPerPixel,visibleHeight:(camera.top-camera.bottom)/camera.zoom},bones:boneMeshes.map(m=>({name:m.name,axialScale:1,transverseScale:1,opacity:m.material.opacity,matrix:m.matrix.toArray(),dimensions:geometry?.[m.userData.side]?.boneDimensions})),insets:{...insets},frame:frameRect(),cameraUp:camera.up.toArray(),limitations:'Fixed adult atlas anatomy at a 90 degree reference pose. Tunnel directions change around reference ACL apertures to match entered lengths where a surface-bound cortical path exists. Unattainable lengths show the nearest sampled reference path separately. Screw interference, graft deformation, cortical blowout depth and unverified implant details are schematic, not patient-specific surgical planning.'};}
+ const sameInsets=(a,b)=>['top','right','bottom','left'].every(k=>Math.abs(a[k]-b[k])<.5);
+ // next: the edges covered now (overlays dock inside); fit: the resting layout the scale is fitted to; anchor: where the knee sits
+ function setInsets(next={},fit=null,anchor=null){const n=insetsOf(next),a=anchor?insetsOf(anchor):null;if(fit)fitInsets=insetsOf(fit);if(!fitPending&&sameInsets(n,insets)&&(a&&anchorInsets?sameInsets(a,anchorInsets):a===anchorInsets))return;insets=n;anchorInsets=a;if(worldUnitsPerPixel==null)return;if(fitPending){fitPending=false;fitScale();}applyFrustum();placeNotice();}
+ function getSnapshot(){return {ready:!!geometry,view,measurementGuide:measurementGuide?structuredClone(measurementGuide):null,orientation:{enabled:!!options.orientation,landmarks:orientationLandmarks},activeSide:options.activeSide,workflow:workflowView,components:componentSnapshot,instruments:toolsVisible,graft:graftInfo,animationRunning:!!animation,bores:Object.fromEntries(Object.entries(boreUniforms).map(([side,u])=>[side,{enabled:u.boreEnabled.value>0,socketStart:u.socketStart.value,socketEnd:u.socket.value,shaftStart:u.shaftStart.value,shaftEnd:u.shaftEnd.value,radius:u.radius.value,shaftRadius:u.shaftRadius.value,pilotRadius:u.pilotRadius.value}])),displaySafeguards:geometry?JSON.parse(JSON.stringify(geometry.displaySafeguards)):[],anatomyWarnings:geometry?.anatomyWarnings||[],geometry:geometry?JSON.parse(JSON.stringify(geometry)):null,hardware:JSON.parse(JSON.stringify(hardware)),graftDiameter:state?renderDiameter(state.graftDiameter):null,reference:JSON.parse(JSON.stringify(reference)),camera:{position:camera.position.toArray(),target:orbit.target.toArray(),zoom:camera.zoom,worldUnitsPerPixel,visibleHeight:(camera.top-camera.bottom)/camera.zoom},bones:boneMeshes.map(m=>({name:m.name,axialScale:1,transverseScale:1,opacity:m.material.opacity,matrix:m.matrix.toArray(),dimensions:geometry?.[m.userData.side]?.boneDimensions})),insets:{...insets},frame:frameRect(),labels:labelLayout.map(l=>({...l,rect:{...l.rect}})),anchorInsets:anchorInsets?{...anchorInsets}:null,anchorFrame:anchorFrame(),targetScreen:project(orbit.target.toArray()),cameraUp:camera.up.toArray(),limitations:'Fixed adult atlas anatomy at a 90 degree reference pose. Tunnel directions change around reference ACL apertures to match entered lengths where a surface-bound cortical path exists. Unattainable lengths show the nearest sampled reference path separately. Screw interference, graft deformation, cortical blowout depth and unverified implant details are schematic, not patient-specific surgical planning.'};}
 
  const escape=text=>String(text).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
  const project=point=>{const p=v(point).project(camera);return {x:(p.x*.5+.5)*viewportSize().width,y:(-.5*p.y+.5)*viewportSize().height};};
@@ -479,8 +487,18 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
  function scaleBar(f,short,ticks=false){const y=short?f.b-42:f.b-76,length=10/(worldUnitsPerPixel||1)*camera.zoom,a={x:f.l+24,y},b={x:f.l+24+length,y};return line(a,b,'#cbdee7',2)+(ticks?line({x:a.x,y:y-3},{x:a.x,y:y+3},'#cbdee7',2)+line({x:b.x,y:y-3},{x:b.x,y:y+3},'#cbdee7',2):'')+`<text x="${(a.x+length/2).toFixed(2)}" y="${y-7}" fill="#c8dde5" font-size="11" text-anchor="middle">10 mm</text>`;}
  function arrow(a,b,color){const dx=b.x-a.x,dy=b.y-a.y,l=Math.hypot(dx,dy)||1,u={x:dx/l,y:dy/l},n={x:-u.y,y:u.x};return `<path d="M${xy({x:a.x+u.x*5+n.x*2.4,y:a.y+u.y*5+n.y*2.4})} L${xy(a)} L${xy({x:a.x+u.x*5-n.x*2.4,y:a.y+u.y*5-n.y*2.4})}" fill="none" stroke="${color}" stroke-width="1.5"/>`;}
  function dimension(a,b,text,color,offset,dock){const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,n={x:-dy/len,y:dx/len},A={x:a.x+n.x*offset,y:a.y+n.y*offset},B={x:b.x+n.x*offset,y:b.y+n.y*offset},mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};return line(a,A,color,1,'2 3')+line(b,B,color,1,'2 3')+line(A,B,color,1.8)+arrow(A,B,color)+arrow(B,A,color)+marker(a,color)+marker(b,color)+line(mid,dock,color,1)+pill(text,dock,color);}
+ // where each orientation badge would like to sit, and its landmark dot, before any label is placed — labels leave these free if
+ // they can, so the badges stay beside their landmarks
+ function badgeWishes(){
+  if(!options.orientation||!geometry)return [];const f=anchorFrame(),small=f.w<570,top=f.t+(small?60:62),bottom=f.b-(small?58:62),out=[];
+  for(const landmark of orientationLandmarks){const point=v(landmark.point).add(v(geometry.femur.translation)),anchor=project(point.toArray()),outward=project(point.clone().add(v(landmark.offset)).toArray());
+   let dx=outward.x-anchor.x,dy=outward.y-anchor.y,l=Math.hypot(dx,dy);if(l<.5){dx=0;dy=-1;l=1;}dx/=l;dy/=l;
+   const width=Math.ceil(textWidth(landmark.label,11.5))+16,reach=Math.max(26,width/2+10),x=clamp(anchor.x+dx*reach,f.l+width/2+6,f.r-width/2-6),y=clamp(anchor.y+dy*reach,top,bottom);
+   out.push({x:x-width/2-3,y:y-14,w:width+6,h:28},{x:anchor.x-6,y:anchor.y-6,w:12,h:12});}
+  return out;
+ }
  function orientationOverlay(){
-  if(!options.orientation||!geometry)return '';const f=frameRect(),small=f.w<570,placed=[];let out='';
+  if(!options.orientation||!geometry)return '';const f=anchorFrame(),small=f.w<570,placed=[];let out='';
   // Each badge sits beside its own projected landmark, pushed outward along that landmark's direction, so the
   // leaders stay short and follow the knee as it rotates. The words are spelled out on every screen size.
   const top=f.t+(small?60:62),bottom=f.b-(small?58:62);
@@ -490,7 +508,7 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
    const text=landmark.label,width=Math.ceil(textWidth(text,11.5))+16,reach=Math.max(26,width/2+10);
    const want={x:anchor.x+dx*reach,y:anchor.y+dy*reach},inside=b=>({x:clamp(b.x,f.l+width/2+6,f.r-width/2-6),y:clamp(b.y,top,bottom)});
    // how much a badge at b would cover the labels (and badges) already placed, in px²
-   const cover=b=>{const L=b.x-width/2-3,R=b.x+width/2+3,T=b.y-14,B=b.y+14;let a=0;for(const r of overlayRects)a+=Math.max(0,Math.min(R,r.x+r.w)-Math.max(L,r.x))*Math.max(0,Math.min(B,r.y+r.h)-Math.max(T,r.y));for(const o of placed)a+=Math.max(0,(o.width+width)/2+4-Math.abs(o.x-b.x))*Math.max(0,24-Math.abs(o.y-b.y));return a;};
+   const cover=b=>{const L=b.x-width/2-3,R=b.x+width/2+3,T=b.y-14,B=b.y+14;let a=0;for(const r of overlayRects)a+=Math.max(0,Math.min(R,r.x+r.w)-Math.max(L,r.x))*Math.max(0,Math.min(B,r.y+r.h)-Math.max(T,r.y));for(const o of placed)a+=Math.max(0,(o.width+width)/2+4-Math.abs(o.x-b.x))*Math.max(0,24-Math.abs(o.y-b.y));for(const g of leaderSegments)for(let k=0;k<=12;k++){const x=g.a.x+(g.b.x-g.a.x)*k/12,y=g.a.y+(g.b.y-g.a.y)*k/12;if(x>L&&x<R&&y>T&&y<B){a+=400;break;}}return a;};
    // the free spot nearest the preferred one (further out along the landmark's direction, up/down, up to two badge-widths
    // across); if every spot touches a label, the one that covers the least
    let label=inside(want),least=cover(label),dist=0;
@@ -500,27 +518,178 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
   }
   return out;
  }
+ // ---- labels (6.6.2): collected first, then laid out together -------------------------------------------------------------------
+ // A label is {text, color, rank, anchor?, want, lines?, seg?, dot?, beside?}: `anchor` is the screen point its leader starts from
+ // (plain status labels have none), `lines` the SVG drawn under it (a dimension line, `seg` its measured line), `dot` puts a marker
+ // on the anchor, `beside` marks the prepared graft shown beside the knee. Labels that point into the knee go to the side column
+ // nearer their anchor (femoral ones usually left, tibial ones right), each as close to its anchor's height as the others allow,
+ // off the tunnels and measured lines, over as little bone as they can, in an order where no two leaders cross or run through a
+ // label; the prepared graft's labels stand in a column right beside it; plain labels (the tool in use, notes, warnings) head the
+ // right column. It is laid out in the anchor rectangle, so nothing moves when the phone sheet moves — unless that rectangle is
+ // too small to hold the labels (small phones), when the visible area is used, and at worst labels may touch: none is ever dropped.
+ const PILL_H=26;let labelLayout=[],leaderSegments=[];
+ // while the knee is dragged round, a label keeps its side until its anchor is well past the middle (reset by a new view or case)
+ const labelSides=new Map();let besideSide=null;const forgetLabelSides=()=>{labelSides.clear();besideSide=null;};
+ // where the bones are drawn, in 6 px cells over a rectangle: every bone triangle filled, so it holds at any zoom
+ const boneProjection=new Map();
+ function boneCells(F,S,cols,rows){
+  const cells=new Uint8Array(cols*rows),m=new THREE.Matrix4(),{width:w,height:h}=viewportSize();camera.updateMatrixWorld();
+  for(const mesh of boneMeshes){
+   if(!mesh.visible)continue;const pos=mesh.geometry.getAttribute('position'),index=mesh.geometry.index,n=pos.count;
+   let p=boneProjection.get(mesh);if(!p||p.x.length!==n){p={x:new Float32Array(n),y:new Float32Array(n)};boneProjection.set(mesh,p);}
+   m.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse).multiply(mesh.matrix);const e=m.elements;
+   for(let i=0;i<n;i++){const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),cw=e[3]*x+e[7]*y+e[11]*z+e[15]||1;p.x[i]=(((e[0]*x+e[4]*y+e[8]*z+e[12])/cw*.5+.5)*w-F.l)/S;p.y[i]=((-(e[1]*x+e[5]*y+e[9]*z+e[13])/cw*.5+.5)*h-F.t)/S;
+    const q=Math.floor(p.x[i]),r=Math.floor(p.y[i]);if(q>=0&&q<cols&&r>=0&&r<rows)cells[r*cols+q]=1;}
+   const count=index?index.count:n;
+   for(let t=0;t+2<count;t+=3){
+    const a=index?index.getX(t):t,b=index?index.getX(t+1):t+1,c=index?index.getX(t+2):t+2,ax=p.x[a],ay=p.y[a],bx=p.x[b],by=p.y[b],cx=p.x[c],cy=p.y[c];
+    const c0=Math.max(0,Math.floor(Math.min(ax,bx,cx))),c1=Math.min(cols-1,Math.floor(Math.max(ax,bx,cx))),r0=Math.max(0,Math.floor(Math.min(ay,by,cy))),r1=Math.min(rows-1,Math.floor(Math.max(ay,by,cy)));
+    if(c0>c1||r0>r1||(c0===c1&&r0===r1))continue;
+    const area=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);if(Math.abs(area)<1e-9)continue;
+    for(let r=r0;r<=r1;r++){const py=r+.5;for(let q=c0;q<=c1;q++){const px=q+.5,w0=(bx-ax)*(py-ay)-(by-ay)*(px-ax),w1=(cx-bx)*(py-by)-(cy-by)*(px-bx),w2=(ax-cx)*(py-cy)-(ay-cy)*(px-cx);
+     if(area>0?w0>=0&&w1>=0&&w2>=0:w0<=0&&w1<=0&&w2<=0)cells[r*cols+q]=1;}}
+   }
+  }
+  return cells;
+ }
+ // a coarse picture of a rectangle in 6 px cells: the bones, and the "subject" — measured lines, tunnels, the graft, other leaders
+ function occupancy(F,segments){
+  const S=6,cols=Math.ceil(F.w/S)+1,rows=Math.ceil(F.h/S)+1,bone=boneCells(F,S,cols,rows),subject=new Uint8Array(cols*rows);
+  for(const g of segments){const dx=g.b.x-g.a.x,dy=g.b.y-g.a.y,len=Math.hypot(dx,dy),n=Math.ceil(len/3)+1,half=g.r||0,nx=len?-dy/len:0,ny=len?dx/len:0;
+   for(let o=-half;o<=half+1e-9;o+=Math.max(3,half||3))for(let j=0;j<=n;j++){const x=g.a.x+dx*j/n+nx*o,y=g.a.y+dy*j/n+ny*o,q=Math.floor((x-F.l)/S),r=Math.floor((y-F.t)/S);if(q>=0&&q<cols&&r>=0&&r<rows)subject[r*cols+q]=1;}}
+  return {S,cols,rows,bone,subject,F};
+ }
+ // what a label centred at each y (one per px from lo) in the band [x0, x1] would cost: covering bone up to 70 (as much as moving
+ // 70 px), covering the subject 400, soft rectangles their own cost, hard rectangles (page corners, anchors) — never
+ function bandCost(lo,hi,x0,x1,grid,rects,soft=[]){
+  const n=Math.max(1,Math.floor(hi-lo)+1),cost=new Float64Array(n),m=PILL_H/2;
+  if(grid){const {S,cols,rows,bone,subject,F}=grid,c0=Math.max(0,Math.floor((x0-F.l)/S)),c1=Math.min(cols-1,Math.floor((x1-F.l)/S)),width=Math.max(1,c1-c0+1),rb=new Float64Array(rows),rs=new Float64Array(rows);
+   for(let r=0;r<rows;r++){let b=0,t=0;for(let c=c0;c<=c1;c++){const k=r*cols+c;b+=bone[k];t+=subject[k];}rb[r]=b/width;rs[r]=t;}
+   for(let i=0;i<n;i++){const y=lo+i,r0=Math.max(0,Math.floor((y-m-F.t)/S)),r1=Math.min(rows-1,Math.floor((y+m-F.t)/S));let b=0,t=0;for(let r=r0;r<=r1;r++){b+=rb[r];t+=rs[r];}cost[i]=70*b/Math.max(1,r1-r0+1)+(t?400:0);}}
+  for(const r of rects)if(r.x<x1+4&&r.x+r.w>x0-4){const a=Math.max(0,Math.ceil(r.y-m-4-lo)),b=Math.min(n-1,Math.floor(r.y+r.h+m+4-lo));for(let i=a;i<=b;i++)cost[i]=Infinity;}
+  for(const r of soft)if(r.x<x1&&r.x+r.w>x0){const a=Math.max(0,Math.ceil(r.y-m-lo)),b=Math.min(n-1,Math.floor(r.y+r.h+m-lo));for(let i=a;i<=b;i++)cost[i]+=r.cost;}
+  return cost;
+ }
+ // the increasing centres, at least `gap` apart, that cost least in all: each label's distance from where it wants to be plus
+ // what it covers there (`costs[j]` is label j's cost for each y from lo)
+ function fitCentres(want,costs,lo,gap){
+  const n=want.length;if(!n)return [];const m=costs[0].length,P=[];for(let i=0;i<m;i+=2)P.push(i);if(P.length<n&&gap>0)return null;
+  let prev=Float64Array.from(P,i=>Math.abs(lo+i-want[0])+costs[0][i]);const back=[];
+  for(let j=1;j<n;j++){const cur=new Float64Array(P.length).fill(Infinity),from=new Int32Array(P.length).fill(-1);let best=Infinity,at=-1,q=0;
+   for(let p=0;p<P.length;p++){while(q<P.length&&P[q]<=P[p]-gap){if(prev[q]<best){best=prev[q];at=q;}q++;}const c=costs[j][P[p]];if(at>=0&&c<Infinity){cur[p]=best+Math.abs(lo+P[p]-want[j])+c;from[p]=at;}}
+   back.push(from);prev=cur;}
+  let end=-1,total=Infinity;for(let p=0;p<P.length;p++)if(prev[p]<total){total=prev[p];end=p;}if(end<0||!Number.isFinite(total))return null;
+  const out=new Array(n);out[n-1]=lo+P[end];for(let j=n-1;j>0;j--){end=back[j-1][end];out[j-1]=lo+P[end];}out.total=total;return out;
+ }
+ const crosses=(p,q,r,s)=>{const d=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x),d1=d(r,s,p),d2=d(r,s,q),d3=d(p,q,r),d4=d(p,q,s);return (d1*d2<0)&&(d3*d4<0);};
+ function permutations(n){const out=[],a=[...Array(n).keys()],go=k=>{if(k===n){out.push([...a]);return;}for(let i=k;i<n;i++){[a[k],a[i]]=[a[i],a[k]];go(k+1);[a[k],a[i]]=[a[i],a[k]];}};go(0);return out;}
+ // one column of labels: `edge` is its outer x (left edge of a left-aligned column, right edge of a right-aligned one); each label is
+ // judged over its own width. `squeeze`: when nothing else fits, labels may sit closer than a label's height (the last resort).
+ function placeColumn(items,{align,edge,lo,hi,grid,rects,soft=[],squeeze=false}){
+  if(!items.length)return [];
+  const rectOf=(it,y)=>({x:align==='left'?edge:edge-it.w,y:y-PILL_H/2,w:it.w,h:PILL_H});
+  const cost=new Map(items.map(it=>{const r=rectOf(it,0);return [it,bandCost(lo,hi,r.x,r.x+r.w,grid,rects,soft)];}));
+  // the leader meets the side of the label facing its anchor, or its top or bottom when the anchor is right above or below it
+  const endOf=(it,y)=>{const a=it.anchor;if(!a)return null;const r=rectOf(it,y);if(a.x<=r.x)return {x:r.x,y};if(a.x>=r.x+r.w)return {x:r.x+r.w,y};return {x:clamp(a.x,r.x+8,r.x+r.w-8),y:a.y<y?r.y:r.y+r.h};};
+  const through=(g,r)=>{for(let k=1;k<16;k++){const x=g.a.x+(g.b.x-g.a.x)*k/16,y=g.a.y+(g.b.y-g.a.y)*k/16;if(x>r.x+1&&x<r.x+r.w-1&&y>r.y+1&&y<r.y+r.h-1)return true;}return false;};
+  const gaps=[34,29,PILL_H+1];if(squeeze)gaps.push(items.length>1?Math.max(0,2*Math.floor((hi-lo)/(items.length-1)/2)):0);
+  // a top-to-bottom order of the labels, placed as well as it can be: roomy spacing if it fits, then tighter; scored by what the
+  // places cost, plus a heavy price for leaders that cross or run through another label
+  const evaluate=seq=>{let ys=null;for(const gap of gaps){ys=fitCentres(seq.map(i=>items[i].want),seq.map(i=>cost.get(items[i])),lo,gap);if(ys)break;}if(!ys)return null;
+   const L=seq.map((i,k)=>items[i].anchor?{a:items[i].anchor,b:endOf(items[i],ys[k])}:null),R=seq.map((i,k)=>rectOf(items[i],ys[k]));let bad=0;
+   for(let i=0;i<L.length;i++){if(!L[i])continue;for(let j=0;j<L.length;j++){if(j>i&&L[j]&&crosses(L[i].a,L[i].b,L[j].a,L[j].b))bad+=10;if(j!==i&&through(L[i],R[j]))bad++;}}
+   return {seq,ys,score:bad*1e5+ys.total};};
+  const order=items.map((it,i)=>i).sort((i,j)=>items[i].want-items[j].want||i-j),plain=order.filter(i=>!items[i].anchor),pointed=order.filter(i=>items[i].anchor);
+  let best=evaluate([...plain,...pointed]);if(!best)return null;
+  // leaders that cross or run through a label: try the other orders (a column holds a few labels)
+  if(best.score>=1e5&&pointed.length<=6)for(const perm of permutations(pointed.length)){const r=evaluate([...plain,...perm.map(k=>pointed[k])]);if(r&&r.score<best.score-1e-6)best=r;}
+  return best.seq.map((i,k)=>{const it=items[i],y=best.ys[k];return {it,rect:rectOf(it,y),end:endOf(it,y)};});
+ }
+ function hudSize(){if(captureViewport)return null;try{const h=document.getElementById('hud');if(h&&h.offsetHeight)return {w:h.offsetWidth,h:h.offsetHeight};}catch{}return {w:46,h:46};}
+ function noticeRect(F){if(captureViewport||safeguardNotice.hidden)return null;const A=anchorFrame();return {x:A.l+10,y:A.t+10,w:safeguardNotice.offsetWidth||200,h:safeguardNotice.offsetHeight||46};}
+ // lay the labels out in rectangle F; `squeeze` is the last resort (page corners and anchors only cost, labels may touch)
+ function layoutIn(F,items,squeeze){
+  const M=8,cx=(F.l+F.r)/2,pad=squeeze?2:14,lo=F.t+pad+PILL_H/2,hi=Math.max(lo,F.b-pad-PILL_H/2);
+  for(const it of items)it.w=Math.min(F.w-2*M,Math.ceil(textWidth(it.text))+26);
+  // the page's corners: the safeguard notice (upper left), the 10 mm scale bar (lower left), the view buttons (lower right)
+  const hud=hudSize(),notice=noticeRect(F),sy=F.b-(F.h<350?42:76),corners=[{x:F.l+18,y:sy-20,w:74,h:26}];
+  if(hud)corners.push({x:F.r-12-hud.w,y:F.b-18-hud.h,w:hud.w,h:hud.h+6});if(notice)corners.push(notice);
+  const anchors=items.filter(it=>it.anchor).map(it=>({x:it.anchor.x-3,y:it.anchor.y-3,w:6,h:6}));
+  const rects=squeeze?[]:[...corners,...anchors],soft=squeeze?[...corners,...anchors].map(r=>({...r,cost:300})):[];
+  const placed=[],sides=new Map();let besideAt=null,missing=false;
+  // the prepared graft beside the knee: its labels stand next to it, on the side facing the knee
+  const beside=items.filter(it=>it.beside),box=items.besideBox;
+  if(beside.length&&box){const maxW=Math.max(...beside.map(it=>it.w)),mid=(box.l+box.r)/2,prefer=besideSide==='right'?mid<cx+30:besideSide==='left'?!(mid>cx-30):mid<cx;
+   for(const right of [prefer,!prefer]){const edge=right?box.r+14:box.l-14;if(right?edge+maxW>F.r-M:edge-maxW<F.l+M)continue;
+    const col=placeColumn(beside,{align:right?'left':'right',edge,lo,hi,grid:null,rects,soft,squeeze});if(col){placed.push(...col);if(!squeeze)rects.push(...col.map(p=>p.rect));soft.push(...col.map(p=>({...p.rect,cost:1e4})));besideAt=right?'right':'left';break;}}}
+  const rest=items.filter(it=>!placed.some(p=>p.it===it));
+  if(rest.length){const segs=[...items.filter(it=>it.seg).map(it=>it.seg),...(items.tunnels||[]),...(items.graftSeg?[items.graftSeg]:[])],grid=occupancy(F,segs),wishes=badgeWishes().map(r=>({...r,cost:150}));
+   const column=(side,list,extraRects=[],g=grid)=>placeColumn(list,{align:side,edge:side==='left'?F.l+M:F.r-M,lo,hi,grid:g,rects:squeeze?rects:[...rects,...extraRects],soft:[...soft,...wishes,...(squeeze?extraRects.map(r=>({...r,cost:1e4})):[])],squeeze});
+   const split={left:[],right:[]};for(const it of rest){const prev=labelSides.get(it.text),x=it.anchor?.x;split[!it.anchor?'right':prev==='left'?(x<cx+30?'left':'right'):prev==='right'?(x>cx-30?'right':'left'):x<cx?'left':'right'].push(it);}
+   // the right column goes first and the left one keeps clear of it and its leaders (two long labels can reach past the middle
+   // on a narrow phone); a side that cannot hold its labels hands over the one nearest the middle — each label moves once at most
+   const moved=new Set();let L=null,R=null;
+   for(;;){R=column('right',split.right);L=R&&column('left',split.left,R.map(p=>p.rect),R.some(p=>p.it.anchor)?occupancy(F,[...segs,...R.filter(p=>p.it.anchor).map(p=>({a:p.it.anchor,b:p.end}))]):grid);
+    if(L&&R)break;const full=!R?'right':'left',other=full==='left'?'right':'left',movable=split[full].filter(it=>it.anchor&&!moved.has(it)).sort((a,b)=>Math.abs(a.anchor.x-cx)-Math.abs(b.anchor.x-cx));
+    if(!movable.length)break;const it=movable[0];moved.add(it);split[full].splice(split[full].indexOf(it),1);split[other].push(it);}
+   if(L&&R){placed.push(...L,...R);for(const p of L)sides.set(p.it.text,'left');for(const p of R)sides.set(p.it.text,'right');}else missing=true;}
+  return {placed,missing:missing||placed.length<items.length,sides,besideAt};
+ }
+ // the anchor rectangle first (labels hold still with the sheet); if it cannot hold them, the visible area; at worst squeezed
+ function layoutLabels(items){
+  const A=anchorFrame(),V=frameRect();let res=layoutIn(A,items,false);
+  if(res.missing&&V.h>A.h+24)res=layoutIn(V,items,false);
+  if(res.missing)res=layoutIn(V.h>A.h?V:A,items,true);
+  for(const [text,side] of res.sides)labelSides.set(text,side);if(res.besideAt)besideSide=res.besideAt;
+  return res.placed;
+ }
+ function drawLabels(placed){
+  let lines='',pills='';labelLayout=[];leaderSegments=[];
+  for(const {it,rect,end} of placed){
+   lines+=it.lines||'';
+   if(it.anchor){lines+=line(it.anchor,end,it.color,it.lines?1:1.3);if(it.dot)lines+=marker(it.anchor,it.color);leaderSegments.push({a:it.anchor,b:end});}
+   overlayRects.push(rect);labelLayout.push({text:it.text,rect,anchor:it.anchor||null,end:it.anchor?end:null});
+   pills+=`<g transform="translate(${rect.x.toFixed(2)},${rect.y.toFixed(2)})"><rect width="${rect.w}" height="${PILL_H}" rx="2" fill="#080808" fill-opacity=".86" stroke="#ffffff" stroke-opacity=".85"/><rect x="1.5" y="1.5" width="3" height="23" fill="${it.color}"/><text x="${(rect.w+4)/2}" y="17.2" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="700" font-family="${LABEL_FONT}">${escape(it.text)}</text></g>`;
+  }
+  return lines+pills;
+ }
+ // a dimension line between two screen points, offset sideways; the label's leader starts at its middle
+ function dimensionLabel(a,b,text,color,offset,rank,extra={}){const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,n={x:-dy/len,y:dx/len},A={x:a.x+n.x*offset,y:a.y+n.y*offset},B={x:b.x+n.x*offset,y:b.y+n.y*offset},mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
+  return {text,color,rank,anchor:mid,want:mid.y,seg:{a:A,b:B},lines:line(a,A,color,1,'2 3')+line(b,B,color,1,'2 3')+line(A,B,color,1.8)+arrow(A,B,color)+arrow(B,A,color)+marker(a,color)+marker(b,color),...extra};}
+ const pointerLabel=(point,text,color,rank,extra={})=>({text,color,rank,anchor:point,want:point.y,dot:true,...extra});
  function workflowOverlay(){
-  const f=frameRect(),short=f.h<350,compact=f.w<570,dock=short?{x:f.r-12,y:f.t+70,gap:28}:compact?{x:f.r-12,y:f.t+72,gap:37}:{x:f.r-12,y:f.t+83,gap:43};overlayRects=[];let out='',row=0;
+  const f=frameRect(),F=anchorFrame(),short=f.h<350,compact=f.w<570;overlayRects=[];const items=[];
   const activeStage=workflowView.previewStage||workflowView.stage,side=activeStage.startsWith('tibia')||activeStage.endsWith('tibia')?'tibia':activeStage.startsWith('femur')||activeStage.endsWith('femur')?'femur':options.activeSide==='tibia'?'tibia':'femur',g=geometry[side],flags=workflowView[side],a=project(g.entry),c=project(g.cortex),socket=project(g.socket),tip=project(g.graftTip);
-  const place=()=>({x:dock.x,y:dock.y+row++*dock.gap});
-  if(graftInfo?.kind.startsWith('prepared')&&graftInfo.kind!=='prepared-staged'){const start=project(graftInfo.ends[0].point),end=project(graftInfo.ends[1].point);out+=dimension(start,end,`Prepared graft ${fmt(graftInfo.preparedLength)} mm`,'#f3c770',12,place());const appearanceLabel=compact?({folded:'Folded · two strands',rapidease:'RapidEase · four strands',quad:'Quad tendon ribbon',btb:'BTB · two blocks',qtb:'Quad · one block'}[graftInfo.family]||graftInfo.appearance):graftInfo.appearance;if(graftInfo.family==='btb'){for(const [point,label] of [[start,'Femoral side'],[end,'Tibial side']]){const dockPoint=place();out+=line(point,dockPoint,'#8cdcc5')+marker(point,'#8cdcc5')+pill(label,dockPoint,'#8cdcc5');}}else out+=pill(appearanceLabel,place(),'#8cdcc5');}
-  if(flags.measured||flags.measuring){const gauge=toolsVisible.findLast(tool=>tool.side===side&&tool.kind==='Outside-in depth gauge');if(gauge){const label=place(),point=project(gauge.pinTip),text=gauge.readingAtPinTip?`Pin-tip reading ${fmt(g.ttl)} mm`:'Gauge over lateral pin';out+=line(point,label,'#e1edf2')+marker(point,'#e1edf2')+pill(text,label,'#e1edf2');}else {const measured=flags.measuring?workflowView.progress*g.ttl:g.ttl,end=flags.measuring?project(v(g.entry).addScaledVector(v(g.direction),measured).toArray()):c;out+=dimension(a,end,g.supported?`Tunnel ${fmt(measured)} mm`:`Shown ${fmt(measured)} mm (entered ${fmt(g.requestedTTL)})`,g.supported?'#e1edf2':'#f3b86e',-22,place());}}
-  if(flags.cortexReaming){out+=pill('Cortical reamer 4.5 mm',place(),'#6adeee');}
-  else if(flags.reamed){out+=dimension(a,socket,`${geometry.linked?.enabled&&side==='tibia'?'Full tunnel':'Socket'} ${fmt(g.socketDepth)} mm`,'#6adeee',18,place());}
-  else if(flags.reaming){const tool=toolsVisible.findLast(t=>t.side===side&&t.kind.includes('Reamer')||t.side===side&&t.kind.includes('reamer'));if(tool)out+=pill(`${tool.retrograde?'RetroReamer':'Reamer'} ${fmt(tool.headDiameter)} mm`,place(),'#6adeee');else if(workflowView.progress>=.999)out+=dimension(a,socket,`${geometry.linked?.enabled&&side==='tibia'?'Full tunnel':'Socket'} ${fmt(g.socketDepth)} mm`,'#6adeee',18,place());}
-  if(flags.passed&&!flags.passing&&row<(short?3:4))out+=dimension(a,side==='tibia'&&graftInfo?.trimAmount?project(graftInfo.ends[1].point):tip,`${side==='tibia'&&graftInfo?.trimAmount?'Retained end':'Graft target'} ${fmt(g.graftInsertion-(side==='tibia'?graftInfo?.trimAmount||0:0))} mm`,'#f3c770',7,place());
-  const hw=hardware[side];if(hw&&(flags.fixed||flags.fixing||hw.context==='prepared'||side==='femur'&&flags.passed||workflowView.previewStage==='pass_femur'||workflowView.previewStage==='xl_femur')){const label=place(),color=hw.invalid?'#ff7777':'#7ce0c1',point=project(hw.displayCenter||hw.center),text=(hw.kind.includes('screw')?`Screw ${fmt(hw.diameter)} × ${fmt(hw.length)} mm`:`Button ${fmt(hw.length)} × ${fmt(hw.width)} mm${hw.xl?' · XL':''}`)+(hw.invalid?' !':'');out+=line(point,label,color)+marker(point,color)+pill(text,label,color);}
-  else if((flags.pin||flags.pinning)&&toolsVisible.some(tool=>/guide pin/i.test(tool.kind)&&tool.side===side)){out+=pill(state[side].technique==='flexible'?'Flexible pin · 2.4 mm tip':side==='femur'&&state.femur.technique==='low_profile'?'Straight pin · 2.4 mm':'Guide pin 2.4 mm',place(),'#dce7ed');}
-  if(graftInfo?.kind==='passage'||flags.passing){const phrase=workflowView.route==='all_inside'?'AM / medial portal passage':'Through-tibia graft passage';if(row<(short?4:5))out+=pill(phrase,place(),'#f3c770');}
-  if(graftInfo?.shortfall>.1&&!(workflowView.previewStage?.startsWith('pass_')&&workflowView.progress<1)&&row<(short?4:6))out+=pill(`Graft ${fmt(graftInfo.shortfall)} mm short`,place(),'#ff8880');
-  if(geometry.linked?.enabled&&['femur_pin','femur_ream','femur_cortex_ream'].includes(activeStage)&&row<(short?4:5))out+=pill('Through the tibial tunnel',place(),'#b7c9d2');
+  const status=(text,color,rank)=>items.push({text,color,rank,want:-1e4});
+  if(graftInfo?.kind.startsWith('prepared')&&graftInfo.kind!=='prepared-staged'){
+   const start=project(graftInfo.ends[0].point),end=project(graftInfo.ends[1].point),radius=(renderDiameter(state.graftDiameter)/2)/(worldUnitsPerPixel||1)*camera.zoom;
+   // the dimension line runs on the graft's side facing the knee, where its labels stand
+   const dx=end.x-start.x,dy=end.y-start.y,len=Math.hypot(dx,dy)||1,nx=-dy/len,towardKnee=Math.sign(((F.l+F.r)/2)-(start.x+end.x)/2)||1,offset=Math.abs(nx)>.2?12*Math.sign(nx)*towardKnee:12;
+   const group=[];group.push(dimensionLabel(start,end,`Prepared graft ${fmt(graftInfo.preparedLength)} mm`,'#f3c770',offset,1,{beside:true}));
+   const appearanceLabel=compact?({folded:'Folded · two strands',rapidease:'RapidEase · four strands',quad:'Quad tendon ribbon',btb:'BTB · two blocks',qtb:'Quad · one block'}[graftInfo.family]||graftInfo.appearance):graftInfo.appearance;
+   if(graftInfo.family==='btb'){group.push(pointerLabel(start,'Femoral side','#8cdcc5',1,{beside:true}),pointerLabel(end,'Tibial side','#8cdcc5',1,{beside:true}));}
+   else {const at={x:start.x+(end.x-start.x)*.62,y:start.y+(end.y-start.y)*.62};group.push(pointerLabel(at,appearanceLabel,'#8cdcc5',2,{beside:true,dot:false}));}
+   items.push(...group);const dl=group[0].seg;items.besideBox={l:Math.min(start.x,end.x,dl.a.x,dl.b.x)-radius,r:Math.max(start.x,end.x,dl.a.x,dl.b.x)+radius};items.graftSeg={a:start,b:end,r:radius};
+   // the orientation badges keep off the graft (and its dimension line)
+   const r=radius+14;overlayRects.push({x:Math.min(start.x,end.x)-r,y:Math.min(start.y,end.y)-r,w:Math.abs(dx)+2*r,h:Math.abs(dy)+2*r,keepOut:true});}
+  if(flags.measured||flags.measuring){const gauge=toolsVisible.findLast(tool=>tool.side===side&&tool.kind==='Outside-in depth gauge');if(gauge){items.push(pointerLabel(project(gauge.pinTip),gauge.readingAtPinTip?`Pin-tip reading ${fmt(g.ttl)} mm`:'Gauge over lateral pin','#e1edf2',1));}else {const measured=flags.measuring?workflowView.progress*g.ttl:g.ttl,end=flags.measuring?project(v(g.entry).addScaledVector(v(g.direction),measured).toArray()):c;items.push(dimensionLabel(a,end,g.supported?`Tunnel ${fmt(measured)} mm`:`Shown ${fmt(measured)} mm (entered ${fmt(g.requestedTTL)})`,g.supported?'#e1edf2':'#f3b86e',-22,g.supported?1:0));}}
+  if(flags.cortexReaming){status('Cortical reamer 4.5 mm','#6adeee',2);}
+  else if(flags.reamed){items.push(dimensionLabel(a,socket,`${geometry.linked?.enabled&&side==='tibia'?'Full tunnel':'Socket'} ${fmt(g.socketDepth)} mm`,'#6adeee',18,1));}
+  else if(flags.reaming){const tool=toolsVisible.findLast(t=>t.side===side&&t.kind.includes('Reamer')||t.side===side&&t.kind.includes('reamer'));if(tool)status(`${tool.retrograde?'RetroReamer':'Reamer'} ${fmt(tool.headDiameter)} mm`,'#6adeee',2);else if(workflowView.progress>=.999)items.push(dimensionLabel(a,socket,`${geometry.linked?.enabled&&side==='tibia'?'Full tunnel':'Socket'} ${fmt(g.socketDepth)} mm`,'#6adeee',18,1));}
+  if(flags.passed&&!flags.passing)items.push(dimensionLabel(a,side==='tibia'&&graftInfo?.trimAmount?project(graftInfo.ends[1].point):tip,`${side==='tibia'&&graftInfo?.trimAmount?'Retained end':'Graft target'} ${fmt(g.graftInsertion-(side==='tibia'?graftInfo?.trimAmount||0:0))} mm`,'#f3c770',7,2));
+  const hw=hardware[side];if(hw&&(flags.fixed||flags.fixing||hw.context==='prepared'||side==='femur'&&flags.passed||workflowView.previewStage==='pass_femur'||workflowView.previewStage==='xl_femur')){const color=hw.invalid?'#ff7777':'#7ce0c1',text=(hw.kind.includes('screw')?`Screw ${fmt(hw.diameter)} × ${fmt(hw.length)} mm`:`Button ${fmt(hw.length)} × ${fmt(hw.width)} mm${hw.xl?' · XL':''}`)+(hw.invalid?' !':'');const point=project(hw.displayCenter||hw.center),beside=hw.context==='prepared'&&items.some(it=>it.beside);if(beside){items.besideBox.l=Math.min(items.besideBox.l,point.x-10);items.besideBox.r=Math.max(items.besideBox.r,point.x+10);}items.push(pointerLabel(point,text,color,hw.invalid?0:1,{beside}));}
+  else if((flags.pin||flags.pinning)&&toolsVisible.some(tool=>/guide pin/i.test(tool.kind)&&tool.side===side)){status(state[side].technique==='flexible'?'Flexible pin · 2.4 mm tip':side==='femur'&&state.femur.technique==='low_profile'?'Straight pin · 2.4 mm':'Guide pin 2.4 mm','#dce7ed',2);}
+  if(graftInfo?.kind==='passage'||flags.passing)status(workflowView.route==='all_inside'?'AM / medial portal passage':'Through-tibia graft passage','#f3c770',3);
+  if(graftInfo?.shortfall>.1&&!(workflowView.previewStage?.startsWith('pass_')&&workflowView.progress<1))status(`Graft ${fmt(graftInfo.shortfall)} mm short`,'#ff8880',0);
+  if(geometry.linked?.enabled&&['femur_pin','femur_ream','femur_cortex_ream'].includes(activeStage))status('Through the tibial tunnel','#b7c9d2',3);
+  items.tunnels=['femur','tibia'].map(s=>({a:project(geometry[s].entry),b:project(geometry[s].cortex)}));
+  const notice=noticeRect(F);if(notice)overlayRects.push(notice);
+  const placed=layoutLabels(items),out=drawLabels(placed);
   const hasVisible=out.length>0||componentSnapshot.placedGraft||componentSnapshot.preparedGraft;
-  if(hasVisible)out+=scaleBar(f,short);
-  svg.innerHTML=orientationOverlay()+out;
+  svg.innerHTML=orientationOverlay()+out+(hasVisible?scaleBar(f,short):'');
  }
  function measurementOverlay(){
-  const f=frameRect(),compact=f.w<570,color=measurementGuide.color,dock={x:f.r-12,y:f.t+(f.h<300?64:76)},gap=f.h<300?29:35;let out='',row=0;
+  const f=frameRect(),tight=anchorFrame().h<300,compact=f.w<570,color=measurementGuide.color,dock={x:f.r-12,y:f.t+(tight?64:76)},gap=tight?29:35;let out='',row=0;
   for(const part of measurementGuide.parts){const name=part.side==='femur'?'Femoral':'Tibial',a=project(part.start),b=project(part.end),center=v(part.end),axis=v(part.axis);let start=a,end=b;
    if(part.kind==='diameter'){const radial=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);radial.addScaledVector(axis,-radial.dot(axis)).normalize();if(radial.length()<.1)radial.copy(axis).cross(Y).normalize();start=project(center.clone().addScaledVector(radial,-part.diameter/2).toArray());end=project(center.clone().addScaledVector(radial,part.diameter/2).toArray());}
    const quantity=measurementGuide.field==='ttl'?'tunnel':measurementGuide.field==='socket'?'depth':measurementGuide.field==='aperture'?'opening':'diameter',label=`${name} ${quantity} ${fmt(part.entered)} mm`,place={x:dock.x,y:dock.y+row++*gap};out+=dimension(start,end,label,color,part.kind==='diameter'?0:18,place);
@@ -529,11 +698,11 @@ export async function createModel(container,labelLayer,{insets:initialInsets}={}
   out+=pill(measurementGuide.invalid?'Adjusting · check fit':'Adjusting measurement',{x:f.l,y:f.b-(f.h<300?66:76)},color);svg.innerHTML=out;
  }
  function drawOverlay(){
-  overlayRects=[];if(!geometry){svg.innerHTML='';return;}if(measurementGuide){measurementOverlay();return;}if(!options.labels){svg.innerHTML=orientationOverlay();return;}
+  overlayRects=[];labelLayout=[];leaderSegments=[];if(!geometry){svg.innerHTML='';return;}if(measurementGuide){measurementOverlay();return;}if(!options.labels){svg.innerHTML=orientationOverlay();return;}
   if(workflowView.active){workflowOverlay();return;}
-  const w=viewportSize().width,h=viewportSize().height;if(w<1||h<1)return;const f=frameRect();
+  const w=viewportSize().width,h=viewportSize().height;if(w<1||h<1)return;const f=frameRect(),tight=anchorFrame().h<350;
   const side=options.activeSide==='tibia'?'tibia':'femur',g=geometry[side],values=evaluation?.sides?.[side]||state[side],a=project(g.entry),c=project(g.cortex),s=project(g.socket),tip=project(g.graftTip),compact=f.w<570,short=f.h<350;
-  const dock=short?{x:f.r-12,y:f.t+70,gap:28}:compact?{x:f.r-12,y:f.t+72,gap:37}:{x:f.r-12,y:f.t+83,gap:43};
+  const dock=tight?{x:f.r-12,y:f.t+70,gap:28}:compact?{x:f.r-12,y:f.t+72,gap:37}:{x:f.r-12,y:f.t+83,gap:43};
   let out='';
   out+=dimension(a,c,g.supported?`${side==='femur'?'Femoral':'Tibial'} tunnel ${fmt(g.ttl)} mm`:`Shown ${fmt(g.ttl)} mm (entered ${fmt(g.requestedTTL)})`,g.supported?'#e1edf2':'#f3b86e',-24,{x:dock.x,y:dock.y});
   out+=dimension(a,s,`${geometry.linked?.enabled&&side==='tibia'?'Full tunnel':'Socket'} ${fmt(g.socketDepth)} mm`,'#6adeee',18,{x:dock.x,y:dock.y+dock.gap});

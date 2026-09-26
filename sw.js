@@ -1,4 +1,4 @@
-var CACHE = 'tbx-v393-20260925';
+var CACHE = 'tbx-v394-20260925';
 // P2: photos (img/) and guide pages (guide/pages/) are NOT in these lists. They live in their own long-lived cache,
 // IMG, keyed by content hash from img-manifest.json (tools/img-manifest.mjs): <scope>img/x.jpg?h=<16 hex of sha256>.
 // A release keeps every photo the phone already has, downloads only new or changed ones and prunes removed ones.

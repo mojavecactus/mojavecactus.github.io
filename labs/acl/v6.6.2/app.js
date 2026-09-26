@@ -212,7 +212,8 @@ $('#app').addEventListener('scroll',()=>{const a=$('#app');if(a.scrollTop||a.scr
 
 // ---- the walkthrough sheet. Phones: a sheet in front of the knee — peek (the step and its buttons), half (the fields with the
 // knee still in view above) and full (typing). Drag or tap its handle; a number field opens it fully and closing the keyboard
-// puts it back. Landscape phones and screens from 860 px dock it on the right. The knee is framed in whatever area is free.
+// puts it back. Landscape phones and screens from 860 px dock it on the right. On phones the knee is framed above the half-open
+// sheet and holds still while the sheet moves: lowering it uncovers more of the model, raising it covers the lower part.
 const sheet=(()=>{
  const el=$('#sheet'),grab=$('#grab'),sb=$('#sb'),top=$('.sh-top'),app=$('#app'),hud=$('#hud'),head=$('#top');
  const DOCKED='(min-width:860px) and (min-height:541px), (orientation:landscape) and (max-height:540px)';
@@ -228,16 +229,18 @@ const sheet=(()=>{
  }
  function set(s,{animate=true}={}){
   document.documentElement.style.setProperty('--topH',head.offsetHeight+'px');state=s;el.dataset.state=s;grab.setAttribute('aria-expanded',String(s!=='peek'));grab.setAttribute('aria-label',s==='peek'?'Show more of the walkthrough':'Show more of the knee');grab.title=s==='peek'?'':'Arrow up / down to resize';
-  if(docked()){clearTimeout(settle);el.style.transform='';sb.style.height='';model?.setInsets(insets(),fitInsets());return;}
+  if(docked()){clearTimeout(settle);el.style.transform='';sb.style.height='';model?.setInsets(insets(),fitInsets(),anchorInsets());return;}
   const m=metrics(),vis=visible(s,m),height=Math.max(60,vis-26)+'px';
   if(!animate||reduced())el.classList.add('drag');
   if(vis-26>sb.offsetHeight||!animate)sb.style.height=height;
   el.style.transform=`translateY(${Math.max(0,m.H-vis)}px)`;
   clearTimeout(settle);settle=setTimeout(()=>{if(drag)return;sb.style.height=height;el.classList.remove('drag');},animate&&!reduced()?360:0);
-  model?.setInsets(insets(),fitInsets());
+  model?.setInsets(insets(),fitInsets(),anchorInsets());
  }
  // the knee's size is fitted once to the area left above the peeking sheet (phones) or beside the panel
  function fitInsets(){const i=insets();if(docked())return i;return {...i,bottom:metrics().peek};}
+ // …and centred where the half-open sheet leaves it, whatever the sheet's state (the sheet only uncovers or covers the model)
+ function anchorInsets(){const i=insets();if(docked())return i;return {...i,bottom:metrics().half};}
  // a tap on the handle: peek ⇄ half; from full it drops to half
  const toggled=()=>state==='peek'?'half':state==='half'?'peek':'half';
  function forPreview(){if(!docked()&&state==='full')set('half');}
@@ -262,9 +265,9 @@ const sheet=(()=>{
  const sync=()=>{if(!drag)set(state,{animate:false});};
  if(window.ResizeObserver){const ro=new ResizeObserver(sync);ro.observe(app);ro.observe(head);ro.observe(top);}else addEventListener('resize',sync);
  set('half',{animate:false});
- return {set,forPreview,insets,fitInsets,state:()=>state};
+ return {set,forPreview,insets,fitInsets,anchorInsets,state:()=>state};
 })();
 function modelFailure(error){console.error('Case preview unavailable',error);try{model?.dispose();}catch{}model=null;$('#model-loading').hidden=true;$('#model-error').hidden=false;$('#model-error').textContent='The 3D preview could not start. The case fields still work. Reload to try the model again.';}
 refresh(true,false);
 Object.defineProperty(window,'aclSandbox',{value:Object.freeze({getState:()=>structuredClone(draft),getEvaluation:()=>structuredClone(evaluation),getModel:()=>model?.getSnapshot(),getSteps:()=>structuredClone(steps),getSheet:()=>({state:sheet.state(),insets:sheet.insets()})}),writable:false});
-try{const {createModel}=await import('./model.js');model=await createModel($('#viewport'),$('#labels'),{insets:sheet.fitInsets()});model.setInsets(sheet.insets());settings.workflow=viewWorkflow(draft);model.update(state,evaluation,settings);setView('anterior');$('#model-loading').hidden=true;}catch(error){modelFailure(error);}
+try{const {createModel}=await import('./model.js');model=await createModel($('#viewport'),$('#labels'),{insets:sheet.fitInsets()});model.setInsets(sheet.insets(),null,sheet.anchorInsets());settings.workflow=viewWorkflow(draft);model.update(state,evaluation,settings);setView('anterior');$('#model-loading').hidden=true;}catch(error){modelFailure(error);}
