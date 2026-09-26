@@ -101,6 +101,7 @@ a:hover{text-decoration:underline}
 .sm-t span{font-size:12.5px;color:var(--muted)}
 .sm-go{color:var(--muted);font-size:20px}
 .sm-ck{color:var(--amber);display:flex}
+.sm-item:not(.cur) .sm-ck{visibility:hidden}
 
 /* ---- floating view buttons (above the sheet) ---- */
 #hud{position:absolute;right:calc(12px + var(--sar));bottom:calc(var(--sheet-vis) + 12px);z-index:8;display:flex;flex-direction:column;gap:6px;transition:opacity var(--m-base) var(--e-out)}
@@ -328,6 +329,98 @@ footer a{color:var(--dim);text-decoration:underline;text-decoration-color:#6b665
 @media (max-height:700px) and (orientation:portrait){
   .sh-h h2{font-size:17px}
   .case-actions{margin-top:10px}
+}
+
+/* ---- demo mode (6.7): the sheet, the view tabs and the chips step aside and the knee takes the stage — between the header and
+   the demo card on phones, beside it on landscape phones, above it on wide screens. The card holds each step's line (it pops
+   in as the step starts), a segment per step that fills as it plays, and Back / Pause / Next. ---- */
+.demo-line{display:flex;align-items:center;gap:8px;margin:6px 0 0;min-width:0;font:650 13.5px/1.3 var(--font);color:var(--bone)}
+.demo-labels{margin-left:auto;height:30px;padding:0 12px;font-size:12.5px}
+#demo-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.demo-tag{flex:none;font:800 10px/1 var(--font);letter-spacing:.08em;text-transform:uppercase;color:#151515;background:var(--amber);padding:4px 7px;border-radius:6px}
+.demo-exit svg{width:13px;height:13px}
+.sm-ico.play{background:var(--amber-t);border-color:rgba(253,181,21,.28);color:var(--amber)}
+html.menu-open #top{z-index:25}
+html.demo-on .lenses,html.demo-on .tools,html.demo-on .legend,html.demo-on #new-case,html.demo-on #export-button{display:none!important}
+/* (the "illustration limited" notice speaks to entered measurements; a demo's are its own, chosen to draw as given) */
+html.demo-on .acl-display-safeguard{display:none!important}
+html.demo-on #sheet{transform:translateY(calc(100% + 24px))!important;visibility:hidden;transition:transform var(--m-sheet) var(--e-in),visibility 0s linear var(--m-sheet)}
+.demo{position:absolute;z-index:9;left:calc(10px + var(--sal));right:calc(10px + var(--sar));bottom:calc(10px + var(--sab));max-width:600px;margin:0 auto;display:flex;flex-direction:column;justify-content:flex-end;pointer-events:none}
+.demo-card{pointer-events:auto;border-radius:16px;border:1px solid #3b3b3b;background:rgba(29,29,29,.95);box-shadow:0 14px 40px rgba(0,0,0,.5);color:var(--bone)}
+.demo-card h2{margin:0;font:750 16.5px/1.25 var(--font);letter-spacing:-.01em;text-wrap:balance}
+.demo-card h2:focus{outline:none}
+.demo-eyebrow{margin:0 0 3px;font:700 10.5px/1.2 var(--font);letter-spacing:.1em;text-transform:uppercase;color:var(--amber);font-variant-numeric:tabular-nums}
+.demo[data-phase=choose] .demo-player,.demo[data-phase=end] .demo-player{visibility:hidden}
+.demo:not([data-phase=choose]) .demo-pick,.demo:not([data-phase=end]) .demo-end{display:none}
+.demo-card.rise{animation:demo-rise 360ms var(--e-out) both}
+@keyframes demo-rise{from{opacity:0;transform:translateY(22px)}}
+/* the player */
+.demo-player{padding:11px 14px 10px}
+.demo-segs{display:flex;gap:3px;height:3px;margin:0 0 10px}
+.demo-segs span{flex:1;min-width:0;border-radius:2px;background:#48453f;overflow:hidden}
+.demo-segs i{display:block;height:100%;background:var(--amber);transform-origin:0 50%;transform:scaleX(0)}
+.demo-cap.pop{animation:demo-pop 340ms var(--e-out) both}
+@keyframes demo-pop{from{opacity:0;transform:translateY(9px) scale(.985)}}
+.demo-text{margin:5px 0 0;font-size:14.5px;line-height:1.45;color:var(--dim);text-wrap:pretty}
+.demo-text b{font-weight:700;color:var(--cyan);white-space:nowrap;font-variant-numeric:tabular-nums}
+.demo-ctl{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:8px;margin-top:11px}
+.demo-ctl .btn{width:100%;padding:0 10px}
+#demo-play svg{width:15px;height:15px;flex:none}
+#demo-play .i-play,#demo-play.paused .i-pause{display:none}
+#demo-play.paused .i-play{display:block}
+/* the chooser: over the player's place, taller, scrolling if the screen is short */
+.demo-pick,.demo-end{position:absolute;left:0;right:0;bottom:0;max-height:calc(100vh - var(--topH) - 22px - var(--sab));max-height:calc(100dvh - var(--topH) - 22px - var(--sab));overflow:auto;overscroll-behavior:contain}
+.demo-pick{padding:14px 14px 12px}
+.dp-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.dp-head h2{font-size:18px}
+.dp-head .ib{margin:-7px -7px 0 0}
+.dp-sub{margin:5px 0 10px;font-size:13px;line-height:1.45;color:var(--muted)}
+.dp-list{display:grid;gap:6px}
+.dp-item{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#232323;text-align:left;color:var(--bone)}
+.dp-item:active{background:#2d2d2d;transform:scale(.99)}
+.dp-item:focus-visible{outline-offset:-2px}
+.dp-t{flex:1;min-width:0}
+.dp-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.dp-row b{min-width:0;font:650 15px/1.25 var(--font)}
+.dp-row small{flex:none;font:650 11.5px/1.2 var(--font);color:var(--amber);white-space:nowrap}
+.dp-s{display:block;margin-top:3px;font-size:12.5px;line-height:1.4;color:var(--muted)}
+.dp-go{flex:none;width:30px;height:30px;border-radius:15px;display:grid;place-items:center;background:var(--amber);color:#151515}
+.dp-go svg{width:13px;height:13px;margin-left:2px}
+/* the closing card */
+.demo-end{padding:14px}
+.demo-end h2{font-size:18px}
+.de-facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;margin:11px 0 13px;font-size:13px;line-height:1.35}
+.de-facts dt{color:var(--muted)}
+.de-facts dd{margin:0;color:var(--bone);text-align:right}
+.de-acts{display:grid;grid-template-columns:1fr 1.15fr 1fr;gap:8px}
+.de-acts .btn{width:100%;padding:0 8px}
+/* the invitation on an empty plan */
+.demo-invite{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 12px;margin:12px 0;padding:10px 12px;border-radius:12px;border:1px solid rgba(253,181,21,.38);background:#1d1d1d}
+.demo-invite>div{flex:1 1 150px;min-width:0}
+.demo-invite b{display:block;font-size:13.5px}
+.demo-invite span{display:block;margin-top:2px;font-size:12px;color:var(--muted)}
+.demo-invite .btn{flex:none}
+/* where the sheet docks (wide screens, landscape phones) the demo card takes its place on the right, so the knee keeps the
+   full height beside it */
+@media (min-width:860px) and (min-height:541px),(orientation:landscape) and (max-height:540px){
+  html.demo-on #sheet{transform:translateX(calc(100% + 24px))!important}
+  .demo{left:auto;margin:0;max-width:none}
+  .demo-pick{top:0;max-height:none}
+  .demo-end{max-height:100%}
+}
+@media (min-width:860px) and (min-height:541px){
+  .demo{right:calc(14px + var(--sar));top:calc(var(--topH) + 4px);bottom:14px;width:390px}
+}
+@media (orientation:landscape) and (max-height:540px){
+  .demo{right:calc(8px + var(--sar));top:calc(var(--sat) + 8px);bottom:calc(8px + var(--sab));width:min(46vw,380px)}
+  .demo-player{padding:9px 12px 9px}
+  .demo-text{font-size:13.5px}
+  .demo-ctl{margin-top:9px}
+}
+@media (max-height:700px) and (orientation:portrait){
+  .demo-text{font-size:14px;line-height:1.4}
+  .dp-sub{display:none}
+  .dp-s{font-size:12px}
 }
 
 /* ---- the hand-over from ToolBox: html.lab-enter is set in <head> before the first paint, so these animations start with it.

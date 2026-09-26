@@ -57,7 +57,8 @@ export function stepsForCase(input){
     if(draft.values.femur.technique==='flexible')start.push(step('femur_flexible_pin','Pass the 2.4 mm flexible guide pin','pin','femur'));
     if(draft.values.femur.technique==='low_profile')start.push(step('femur_low_profile_pin','Pass the 2.4 mm low-profile guide pin','pin','femur'));
     if(draft.values.femur.technique==='outside_in')start.push(step('femur_pin','Place the 2.4 mm outside-in guide pin','pin','femur'));
-    start.push(step('femur_measure','Measure the femoral path','measure','femur'));
+    // outside-in: the length is read off the placed pin (Nate, Sept 26 2026)
+    start.push(step('femur_measure',draft.values.femur.technique==='outside_in'?'Measure the femoral path off the pin':'Measure the femoral path','measure','femur'));
     start.push(step('femur_ream','Ream the femoral socket','ream','femur'));
     if(separateFemoralCortex(draft))start.push(step('femur_cortex_ream','Ream the 4.5 mm cortical passage','ream','femur'));
     start.push(step('tibia_measure','Measure the tibial path','measure','tibia'));

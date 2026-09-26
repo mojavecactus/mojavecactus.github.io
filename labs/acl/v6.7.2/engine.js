@@ -201,9 +201,12 @@ export function allowedTechniques(graft,side,state) {
 // fits: femur, head at the block's joint-side end unless the reamed socket is too short for that; tibia, head at the block's
 // outer end (the trimmed end when it projects) unless the screw would then reach the joint. It is never proud of the tunnel
 // aperture. Without a block it sits flush with the aperture. Axial positions are mm from the joint aperture.
+// An outside-in femoral tunnel takes its screw from the lateral side, outside in (Nate, Sept 26 2026): it is seated like a
+// tibial screw, head at the block's outer end or flush with the lateral cortex.
+export const screwFromOutside=(side,data)=>side==='tibia'||data?.technique==='outside_in';
 export function screwSeat(side,data,insertion,plugLength,bonePlug){
   const length=data.screwLength;
-  if(side==='femur'){
+  if(!screwFromOutside(side,data)){
     const block=Math.max(0,insertion-plugLength),head=bonePlug?Math.min(block,Math.max(0,data.socket-length)):0;
     return {span:[head,head+length],head,flushWithBlock:!!bonePlug&&near(head,block),flushWithAperture:near(head,0)};
   }
@@ -328,7 +331,7 @@ export function evaluate(input) {
       }
       if(bonePlug&&positive(plugLength)&&positive(data.screwLength)) {
         if(screwPlugOverlap<=1e-7)add(`${side}-screw-plug-overlap`,'warning',`${label} screw and bone block do not overlap in this model`,`The modeled screw occupies ${fm(screwAxialSpan[0])}–${fm(screwAxialSpan[1])} mm and the block ${fm(plugAxialSpan[0])}–${fm(plugAxialSpan[1])} mm from the joint aperture. Review insertion depth and screw placement.`,side);
-        else if(screwPlugOverlap<plugLength-1e-7)add(`${side}-screw-plug-overlap`,'info',`${label} screw overlaps ${fm(screwPlugOverlap)} mm of the ${fm(plugLength)} mm block`,`The screw is seated flush with the ${side==='tibia'?'outer':'joint-side'} end of the block where it fits and is never proud of the tunnel opening. Review the intended screw placement for this partial overlap.`,side);
+        else if(screwPlugOverlap<plugLength-1e-7)add(`${side}-screw-plug-overlap`,'info',`${label} screw overlaps ${fm(screwPlugOverlap)} mm of the ${fm(plugLength)} mm block`,`The screw is seated flush with the ${side==='tibia'?'outer':screwFromOutside(side,data)?'lateral':'joint-side'} end of the block where it fits and is never proud of the tunnel opening. Review the intended screw placement for this partial overlap.`,side);
       }
       if(!positive(data.screwDiameter)||!positive(data.screwLength))add(`${side}-screw-positive`,'error','Screw measurements must be positive','Enter the surgeon-selected diameter and length.',side);
       if(!catalogScrew) {

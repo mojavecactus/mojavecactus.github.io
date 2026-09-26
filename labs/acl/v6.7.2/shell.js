@@ -50,7 +50,8 @@
     if (!help || help.hidden === !on) return;
     if (on) { helpFrom = document.activeElement; help.hidden = false; try { helpOk.focus({ preventScroll: true }); } catch (x) {} return; }
     help.hidden = true; store('acl_lab_help_v1', '1'); // seen only once it was actually shown
-    var to = helpFrom && document.contains(helpFrom) && helpFrom !== document.body ? helpFrom : title; helpFrom = null;
+    // (opened from the menu, the item it came from is gone by now: the title takes the focus instead)
+    var to = helpFrom && document.contains(helpFrom) && helpFrom !== document.body && helpFrom.getClientRects().length ? helpFrom : title; helpFrom = null;
     if (to && (help.contains(document.activeElement) || document.activeElement === document.body)) { try { to.focus({ preventScroll: true }); } catch (x) {} }
   }
   if (helpOk) helpOk.addEventListener('click', function () { showHelp(false); });
@@ -60,15 +61,26 @@
   // ---- section menu under the title
   if (!title || !menu) return;
   if (!home) { var tb = menu.querySelector('[data-section="toolbox"]'); if (tb) tb.hidden = true; }
+  // the lab and its demo are the two places here: the menu marks the one showing (app.mjs owns demo mode, html.demo-on)
+  function markCurrent() {
+    var demo = root.classList.contains('demo-on');
+    [].forEach.call(menu.querySelectorAll('[data-section="acl"],[data-section="demo"]'), function (item) {
+      var on = (item.getAttribute('data-section') === 'demo') === demo;
+      item.classList.toggle('cur', on);
+      if (item.getAttribute('role') === 'menuitemradio') item.setAttribute('aria-checked', String(on));
+    });
+  }
   function openMenu() {
-    menu.hidden = false; title.setAttribute('aria-expanded', 'true');
+    markCurrent();
+    menu.hidden = false; title.setAttribute('aria-expanded', 'true'); root.classList.add('menu-open');
     requestAnimationFrame(function () { menu.classList.add('open'); });
     var first = menu.querySelector('[role^="menuitem"]:not([hidden])'); if (first) first.focus({ preventScroll: true });
   }
   function closeMenu(now) {
     if (menu.hidden) return;
     title.setAttribute('aria-expanded', 'false'); menu.classList.remove('open');
-    if (now || reduced()) menu.hidden = true; else setTimeout(function () { if (!menu.classList.contains('open')) menu.hidden = true; }, 180);
+    var done = function () { menu.hidden = true; root.classList.remove('menu-open'); };
+    if (now || reduced()) done(); else setTimeout(function () { if (!menu.classList.contains('open')) done(); }, 180);
   }
   title.addEventListener('click', function (e) { e.stopPropagation(); if (menu.hidden) openMenu(); else closeMenu(); });
   menu.addEventListener('click', function (e) {
@@ -76,13 +88,15 @@
     var s = item.getAttribute('data-section');
     if (s === 'toolbox') toToolbox(e);
     else if (s === 'help') { closeMenu(true); showHelp(true); }
-    else { closeMenu(); title.focus(); }
+    else if (s === 'demo') { closeMenu(true); document.dispatchEvent(new CustomEvent('lab:demo')); }
+    else { closeMenu(); title.focus(); document.dispatchEvent(new CustomEvent('lab:case')); }
   });
   document.addEventListener('pointerdown', function (e) { if (!menu.hidden && !e.target.closest('#sitemenu,#title')) closeMenu(); });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && help && !help.hidden) { showHelp(false); return; }
+    // (Esc taken here is marked, so the demo does not also close on it)
+    if (e.key === 'Escape' && help && !help.hidden) { e.preventDefault(); showHelp(false); return; }
     if (menu.hidden) return;
-    if (e.key === 'Escape') { closeMenu(); title.focus(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); closeMenu(); title.focus(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       var items = [].slice.call(menu.querySelectorAll('[role^="menuitem"]:not([hidden])')), i = items.indexOf(document.activeElement);
       if (!items.length) return;

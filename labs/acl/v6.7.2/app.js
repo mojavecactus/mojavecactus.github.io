@@ -1,5 +1,6 @@
 import {GRAFTS,FIXATIONS,TECHNIQUES,BUTTONS,FIXED_LOOPS,allowedFixations,allowedTechniques,nominalAperture,evaluate,tibialTrim,plannedFemoralInsertion} from './engine.js';
 import {createCase,sanitizeCase,stepsForCase,materializeCase,requiredPathsForStep,missingForStep,canCompleteStep,updateCaseValue,completeStep,goToStep,workflowForCase,plannedTibialInsertion,AVERAGE_JOINT_SPAN_SOURCE} from './workflow.js';
+import {DEMOS,buildDemoCase,demoCaseAt,demoCaption,demoSummary,demoLength,stepTiming,createDemoPlayer} from './demo.js';
 
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -7,7 +8,11 @@ const fmt=x=>typeof x==='number'&&Number.isFinite(x)?Number(x.toFixed(2)).toStri
 const cap=s=>s==='femur'?'Femoral':s==='tibia'?'Tibial':'Graft';
 const STORAGE='acl-case-lab-v3';
 let draft=createCase(),state,evaluation,model,steps=[],busy=false,pdfBusy=false,saveTimer,toastTimer,modelFrame,revision=0,previewRun=0,view='anterior',attempted=false,savedCase=null;
-const XRAY_OPACITY=.28,settings={labels:true,orientation:true,opacity:XRAY_OPACITY,activeSide:'femur'};
+const XRAY_OPACITY=.28,settings={labels:true,orientation:true,opacity:XRAY_OPACITY,activeSide:'femur',lean:false,spacious:false}; // (lean, spacious: the demo's label style)
+// demo mode (below): its own cases on the model while it is open; the case being edited is left alone
+const demo={on:false,phase:null,preset:null,base:null,steps:[],player:null,caption:null,segs:[],shown:[],raf:0,last:0,from:null,camera:null,scroll:0,measured:0,speed:1,guard:0,labels:true};
+try{demo.labels=localStorage.getItem('acl_demo_labels')!=='0';}catch{}
+let modelBroken=false,resolveModel,rejectModel;const modelReady=new Promise((res,rej)=>{resolveModel=res;rejectModel=rej;});modelReady.catch(()=>{});
 try{const raw=localStorage.getItem(STORAGE);if(raw)savedCase=sanitizeCase(JSON.parse(raw));}catch{}
 $('#resume-banner').hidden=!savedCase?.values?.graft;
 function get(path,obj=draft.values){return path.split('.').reduce((o,k)=>o?.[k],obj);}
@@ -28,7 +33,7 @@ function visibleIssues(){const map=new Map();for(const [path,list] of Object.ent
 function prepText(){return ({folded:'Record the prepared folded soft-tissue construct. Its strands fold over the selected fixation loop.',rapidease:'Record the dimensions of the supplied presutured quadruple-strand graft and its prepared attachment loops.',quad:'Record the prepared quad tendon construct with its QuadCinch fixation end.',btb:'Record the tendon construct and each bone block separately.'})[graft()?.family]||'';}
 function renderPlan(){
  const selected=graft();let out=select('graft','Graft & preparation',GRAFTS,selected?.description||'Choose the graft to begin. No graft or hardware is placed in the knee yet.');
- if(!selected)return out+note('Start with the plan','Reaming and fixation choices appear after you select a graft.');
+ if(!selected)return '<div class="demo-invite"><div><b>New to the lab?</b><span>Watch a whole ACL construct built, step by step.</span></div><button type="button" class="btn" data-demo-open>▶ Watch a demo</button></div>'+out+note('Start with the plan','Reaming and fixation choices appear after you select a graft.');
  out+='<h3 class="step-subtitle">Reaming approach</h3>';
  for(const side of ['femur','tibia'])out+=select(side+'.technique',cap(side),TECHNIQUES[side].filter(t=>allowedTechniques(state.graft,side,state).includes(t.id)));
  if(draft.values.tibia.technique==='retrograde')out+=tibialCortexPlan();
@@ -55,8 +60,8 @@ function renderPrep(){
  return out+note('Fixed reference joint span',`${fmt(state.jointSpan)} mm at 90° flexion. Used for the graft-length balance. ${source(AVERAGE_JOINT_SPAN_SOURCE.url,'Average joint-span study ↗')}`);
 }
 function renderMeasure(side){
- const flexible=side==='femur'&&draft.values.femur.technique==='flexible';
- return (isLinked()?(side==='tibia'?note('Tibial tunnel first','Set the tibial aimer on the ACL tibial footprint and read the tunnel length. Its pin enters the anteromedial tibia, medial to the tibial tubercle and above the pes anserinus, and runs steeply up to the footprint.'):note('Measure along the femoral pin','The femoral pin runs from the notch out through the anterolateral femur. Record the femoral length along it; the socket is reamed through the tibial tunnel next.')):'')+(flexible?note('Measure over the flexible pin','Bring the measuring guide in from outside the lateral femur, slide it over the pin down to bone, then record the total femoral tunnel length.'): '')+number(side+'.ttl','Total '+side+' tunnel length',20,80,1,flexible?'Pin placed first → guide against lateral cortex → read the total tunnel length.':isLinked()&&side==='femur'?'Enter the measured aperture-to-cortex length along the pin.':`Enter the measured aperture-to-cortex length. The ${side==='femur'?'35':'40'} mm reference positions the unprepared bone; it is not an entered measurement.`)+note('Measurement only',flexible?'The pin stays in place for the flexible reamer. No graft-sized socket has been reamed yet.':'Preview draws the measured path. The bone remains unreamed until the reaming step.');
+ const flexible=side==='femur'&&draft.values.femur.technique==='flexible',outsideIn=side==='femur'&&draft.values.femur.technique==='outside_in';
+ return (isLinked()?(side==='tibia'?note('Tibial tunnel first','Set the tibial aimer on the ACL tibial footprint and read the tunnel length. Its pin enters the anteromedial tibia, medial to the tibial tubercle and above the pes anserinus, and runs steeply up to the footprint.'):note('Measure along the femoral pin','The femoral pin runs from the notch out through the anterolateral femur. Record the femoral length along it; the socket is reamed through the tibial tunnel next.')):'')+(flexible?note('Measure over the flexible pin','Bring the measuring guide in from outside the lateral femur, slide it over the pin down to bone, then record the total femoral tunnel length.'): '')+(outsideIn?note('Measure off the pin','Read the tunnel length off the placed outside-in guide pin, from the joint to the lateral cortex. No separate measuring guide.'):'')+number(side+'.ttl','Total '+side+' tunnel length',20,80,1,flexible?'Pin placed first → guide against lateral cortex → read the total tunnel length.':outsideIn?'Read off the pin: joint aperture to lateral cortex.':isLinked()&&side==='femur'?'Enter the measured aperture-to-cortex length along the pin.':`Enter the measured aperture-to-cortex length. The ${side==='femur'?'35':'40'} mm reference positions the unprepared bone; it is not an entered measurement.`)+note('Measurement only',flexible?'The pin stays in place for the flexible reamer. No graft-sized socket has been reamed yet.':outsideIn?'Preview marks the pin in 5 mm steps out to the lateral cortex. The bone remains unreamed until the reaming step.':'Preview draws the measured path. The bone remains unreamed until the reaming step.');
 }
 function renderCortexReam(){const flexible=draft.values.femur.technique==='flexible';return note('Perforate the lateral cortex',isLinked()?'The femoral socket is already reamed. Pass the 4.5 mm reamer over the same 2.4 mm pin, up through the tibial tunnel and the socket, and through the lateral cortex to allow later button passage. Withdraw the reamer and remove the pin after this pass.':`The graft-sized socket is already reamed. Pass the ${flexible?'flexible':'low-profile'} 4.5 mm reamer over the same 2.4 mm guide pin again, through the lateral cortex, to allow later button passage. Withdraw the reamer and remove the pin after this pass.`)+facts([['Cortical reamer','4.5 mm'],['Guide pin','2.4 mm'],['Total femoral tunnel',fmt(draft.values.femur.ttl)+' mm'],['Graft socket',fmt(state.femur.socket)+' × '+fmt(state.femur.diameter)+' mm']])+renderCortexControls('femur');}
 
@@ -103,7 +108,8 @@ function candidateMarkup(side){
  return `<div class="inline-suggestions"><h3 class="step-subtitle">${titanium?(rec.catalogOnly?'Titanium catalog options':'Titanium sizing options'):'Biosteon guide options'}</h3><p class="help">${esc(rec.detail)}</p><div class="candidate-list">${(rec.candidates||[]).map((c,i)=>{const on=draft.values[side].screwDiameter===c.diameter&&draft.values[side].screwLength===c.length;return `<button type="button" class="candidate${on?' selected':''}" data-candidate="${i}" data-rec="${index}"><span><b>${esc(c.label)}</b><small>${esc(c.sku)}</small></span><span>${on?'Selected':'Apply'}</span></button>`;}).join('')}</div>${source(rec.source,titanium?'Titanium catalog ↗':'Sizing guide ↗')}</div>`;
 }
 function renderFix(side){const d=draft.values[side],fix=FIXATIONS.find(f=>f.id===d.fixation);let out=(side==='tibia'&&d.technique==='retrograde'?fixationChoice(side):'')+note(cap(side)+' fixation',esc(fix?.label||'Select primary fixation.'));if(fix?.kind==='screw')out+=(d.fixation==='biosteon'?select(side+'.boneQuality','Bone quality for guide options',[{id:'normal',label:'Normal / hard bone'},{id:'soft',label:'Softer bone'}]):'')+number(side+'.screwDiameter','Screw diameter',6,12,1,'The entered size remains selected until you explicitly apply a suggestion.')+number(side+'.screwLength','Screw length',20,35,1)+`<div id="active-suggestions">${candidateMarkup(side)}</div>`;if(fix?.kind==='abs'){out+=select(side+'.button','Attachable button',BUTTONS);const spec=BUTTONS.find(b=>b.id===d.button);if(spec)out+=`<div class="button-dimensions">${spec.outerDiameter?spec.outerDiameter+' mm outer diameter':spec.width+' × '+spec.length+' mm footprint'} · ${spec.projection?spec.projection+' mm central projection':'flat profile'} · ${spec.thickness} mm rim.<br>Measured cortical opening: ${fmt(state[side].aperture)} mm.</div>`;out+='<button class="button subtle" type="button" data-go-step="'+side+'_ream'+'">Edit cortical opening →</button>';}
-if(fix?.kind==='screw'&&evaluation.sides[side].bonePlug)out+=note('Screw seating',side==='femur'?'Seated flush with the joint-side end of the bone block where the socket allows, and never proud of the tunnel opening.':'Seated flush with the outer end of the bone block, and never proud of the tunnel opening.');
+if(fix?.kind==='screw'&&side==='femur'&&d.technique==='outside_in')out+=note('Screw from the lateral side','Inserted outside in from the lateral femoral cortex'+(evaluation.sides[side].bonePlug?', seated flush with the outer end of the bone block and never proud of the lateral opening.':', seated flush with the lateral cortex.'));
+else if(fix?.kind==='screw'&&evaluation.sides[side].bonePlug)out+=note('Screw seating',side==='femur'?'Seated flush with the joint-side end of the bone block where the socket allows, and never proud of the tunnel opening.':'Seated flush with the outer end of the bone block, and never proud of the tunnel opening.');
 if(d.fixation==='biosteon'&&graft()?.family==='btb')out+=note('Tap before the screw','The Biosteon sizing guide recommends tapping the tunnel before inserting a Biosteon screw with a BTB graft. Tap size is at surgeon discretion; the Biosteon HA/PLLA tap is line-to-line with the screw size. No tap is added to this case.');
 if(side==='femur'&&d.xl)out+=facts([['G-Lok XL',d.xlTiming==='after'?'Added after button passage':'Attached before button passage']]);
 if(d.fixation==='glok')out+=facts([['Fixed loop',fmt(d.loop)+' mm'],['Femoral engagement',fmt(evaluation.sides.femur.graftInsertion)+' mm']]);if(side==='tibia')out+=`<div data-trim-summary>${trimSummary()}</div>`;const ready=requiredPathsForStep(draft,current().id).every(known);if(ready&&evaluation.sides[side].fixationSku)out+=`<div class="part-preview"><span>Selected ${cap(side).toLowerCase()} assembly</span><code>${esc(evaluation.sides[side].fixationSku)}</code></div>`;return out;}
@@ -112,7 +118,7 @@ function renderReview(){return note('Construct walkthrough complete','Review the
 const TT_DESCRIPTIONS={tibia_measure:'Set the tibial aimer on the ACL footprint and read the tunnel length before drilling.',tibia_pin:'Drill the 2.4 mm guide pin up from the anteromedial tibia to the ACL footprint.',tibia_ream:'Ream the tibial tunnel over the pin. The same reamer makes the femoral socket later.',femur_pin:'Through the tibial tunnel with the offset aimer, drill the 2.4 mm pin into the femur and out the anterolateral cortex.',femur_measure:'Measure the femoral path along the pin before choosing the socket depth.',femur_ream:'Ream the femoral socket over the pin through the tibial tunnel to its depth.',femur_cortex_ream:'Ream over the same pin with the 4.5 mm reamer, up through the tibial tunnel, to open the lateral cortex for the button.'};
 const descriptions={plan:'Choose the graft, reaming approaches and planned fixation. The knee starts unprepared.',prep:'Record the completed graft preparation. The prepared graft and femoral button are shown beside the knee.',femur_measure:'Measure the femoral tunnel before choosing its reamed depth.',femur_pin:'Place the outside-in 2.4 mm guide pin before measuring or reaming.',femur_low_profile_pin:'Drill the straight 2.4 mm guide pin through the femur before measuring or reaming.',femur_flexible_pin:'Pass the 2.4 mm flexible guide pin through the AM portal before measuring or reaming.',femur_cortex_ream:'Ream over the same pin again with the 4.5 mm reamer to perforate the lateral cortex for later button passage.',trim_tibia:'Trim the calculated tibial graft overhang after fixation.',xl_femur:'Add the G-Lok XL accessory at the selected point in femoral button passage.',femur_ream:'Enter the femoral reaming dimensions, then use Preview to animate or Next to continue.',tibia_measure:'Measure the tibial tunnel before choosing its reamed depth.',tibia_pin:'Preview the tibial guide-pin route before reaming.',tibia_ream:'Enter the tibial reaming dimensions, then use Preview to animate or Next to continue.',pass_femur:'With both sides prepared, advance the graft along the selected passage route.',pass_tibia:'Seat the second graft end into the tibial socket.',fix_femur:'Confirm the selected femoral implant and preview its seating.',fix_tibia:'Confirm the selected tibial implant and preview its seating.',review:'Review the completed construct and any measurement or product concerns.'};
 function renderFields(){const id=current().id;$('#step-fields').innerHTML=id==='plan'?renderPlan():id==='prep'?renderPrep():id==='xl_femur'?renderXLStep():id==='trim_tibia'?renderTrim():id==='femur_cortex_ream'?renderCortexReam():id.endsWith('_measure')?renderMeasure(id.split('_')[0]):id.endsWith('_ream')?renderReam(id.split('_')[0]):id.endsWith('_pin')?renderPin(id):id.startsWith('pass_')?renderPass(id):id.startsWith('fix_')?renderFix(id.split('_')[1]):renderReview();}
-function renderNavigation(){const step=current(),index=steps.indexOf(step),completed=draft.completed.includes(step.id),check=canCompleteStep(draft,step.id);$('#step-heading').textContent=step.label;$('#step-description').textContent=step.id==='femur_measure'&&draft.values.femur.technique==='flexible'?'Measure over the placed pin from the outside lateral cortex.':(isLinked()&&TT_DESCRIPTIONS[step.id])||descriptions[step.id]||'';$('#step-eyebrow').textContent='STEP '+String(index+1).padStart(2,'0')+(completed?' · COMPLETE':'');$('#step-count').textContent=`${index+1} / ${steps.length}`;$('#progress-bar').style.transform='scaleX('+(draft.completed.length/steps.length)+')';$('#case-map-summary').textContent=graft()?.label||'No plan yet';$('#step-list').innerHTML=steps.map((s,i)=>{const unlocked=draft.completed.includes(s.id)||i===draft.completed.length;return `<li><button type="button" data-go-step="${s.id}"${unlocked?'':' disabled'} class="${draft.completed.includes(s.id)?'is-complete':''}"${s.id===step.id?' aria-current="step"':''}>${esc(s.label)}</button></li>`;}).join('');$('#previous-step').disabled=index===0||busy;$('#preview-step').hidden=['plan','review'].includes(step.id);$('#preview-step').disabled=busy||!check.ok;$('#preview-step').textContent=busy?'Playing…':'▶ Preview';$('#complete-step').disabled=false;$('#complete-step').textContent=step.id==='review'?(completed?'Download PDF ↗':'Complete & download PDF ↗'):'Next →';if(attempted&&!check.ok){$('#step-validation').hidden=false;$('#step-validation').innerHTML='<b>Complete these entries first:</b>'+check.missing.map(m=>'<p>'+esc(m)+'</p>').join('');}else $('#step-validation').hidden=true;$('#scene-stage-label').textContent=step.label;$('#scene-stage-status').textContent=busy?'Previewing this step':draft.completed.length?`${Math.min(draft.completed.length,index+1)} completed · ${step.id==='review'?'review':'step by step'}`:'Unprepared reference knee';$('#editor-summary').textContent=!draft.values.graft?'No graft or measurements selected':completed?'Step completed · measurements remain editable':check.ok?'Preview the step or continue with Next':'Enter the remaining case details';}
+function renderNavigation(){const step=current(),index=steps.indexOf(step),completed=draft.completed.includes(step.id),check=canCompleteStep(draft,step.id);$('#step-heading').textContent=step.label;$('#step-description').textContent=step.id==='femur_measure'&&draft.values.femur.technique==='flexible'?'Measure over the placed pin from the outside lateral cortex.':step.id==='femur_measure'&&draft.values.femur.technique==='outside_in'?'Read the tunnel length off the placed pin before reaming.':(isLinked()&&TT_DESCRIPTIONS[step.id])||descriptions[step.id]||'';$('#step-eyebrow').textContent='STEP '+String(index+1).padStart(2,'0')+(completed?' · COMPLETE':'');$('#step-count').textContent=`${index+1} / ${steps.length}`;$('#progress-bar').style.transform='scaleX('+(draft.completed.length/steps.length)+')';$('#case-map-summary').textContent=graft()?.label||'No plan yet';$('#step-list').innerHTML=steps.map((s,i)=>{const unlocked=draft.completed.includes(s.id)||i===draft.completed.length;return `<li><button type="button" data-go-step="${s.id}"${unlocked?'':' disabled'} class="${draft.completed.includes(s.id)?'is-complete':''}"${s.id===step.id?' aria-current="step"':''}>${esc(s.label)}</button></li>`;}).join('');$('#previous-step').disabled=index===0||busy;$('#preview-step').hidden=['plan','review'].includes(step.id);$('#preview-step').disabled=busy||!check.ok;$('#preview-step').textContent=busy?'Playing…':'▶ Preview';$('#complete-step').disabled=false;$('#complete-step').textContent=step.id==='review'?(completed?'Download PDF ↗':'Complete & download PDF ↗'):'Next →';if(attempted&&!check.ok){$('#step-validation').hidden=false;$('#step-validation').innerHTML='<b>Complete these entries first:</b>'+check.missing.map(m=>'<p>'+esc(m)+'</p>').join('');}else $('#step-validation').hidden=true;$('#scene-stage-label').textContent=step.label;$('#scene-stage-status').textContent=busy?'Previewing this step':draft.completed.length?`${Math.min(draft.completed.length,index+1)} completed · ${step.id==='review'?'review':'step by step'}`:'Unprepared reference knee';$('#editor-summary').textContent=!draft.values.graft?'No graft or measurements selected':completed?'Step completed · measurements remain editable':check.ok?'Preview the step or continue with Next':'Enter the remaining case details';}
 function syncFields(){for(const input of $$('[data-path]')){let value=get(input.dataset.path);if(input.readOnly){if(input.dataset.path.endsWith('PlugDiameter'))value=draft.values.graftDiameter;else if(input.dataset.path.endsWith('.socket'))value=state[input.dataset.path.split('.')[0]].ttl;else if(input.dataset.path==='tibia.graftInsertion')value=derivedTibia();else if(input.dataset.path==='femur.graftInsertion'&&isGlok())value=evaluation.sides.femur.graftInsertion;else if(input.dataset.path.endsWith('.aperture'))value=nominalAperture(state,input.dataset.path.split('.')[0]);}if(input.type==='checkbox')input.checked=!!value;else if(input.type==='range'){const entered=typeof value==='number'&&Number.isFinite(value);input.disabled=false;input.min=entered?Math.min(Number(input.dataset.min),value):input.dataset.min;input.max=entered?Math.max(Number(input.dataset.max),value):input.dataset.max;input.value=entered?value:input.min;}else if(input!==document.activeElement||input.readOnly)input.value=value??'';}}
 function syncCortex(){for(const side of ['femur','tibia']){const wrap=$(`[data-measurement="${side}.aperture"]`);if(!wrap)continue;const nominal=known(side+'.diameter')?nominalAperture(state,side):null,locked=!draft.values[side].blownCortex&&!draft.values[side].apertureOverride&&nominal!==null,input=wrap.querySelector('input[type=number]');input.readOnly=locked;input.setAttribute('aria-readonly',String(locked));wrap.classList.toggle('readonly',locked);if(locked)input.value=nominal;else if(input!==document.activeElement)input.value=draft.values[side].aperture??'';for(const node of wrap.querySelectorAll('input[type=range],.range-captions,.empty-range'))node.hidden=locked;const help=wrap.querySelector('.help');if(help)help.textContent=locked?`${fmt(nominal)} mm cortical opening.`:draft.values[side].blownCortex?'Starts at the reamer diameter; adjust to the measured opening.':'Enter the cortical opening.';}}
 function feedback(){const visible=visibleIssues(),ids=new Set(visible.map(i=>i.id));for(const wrap of $$('[data-measurement],[data-field]')){const path=wrap.dataset.measurement||wrap.dataset.field,list=(evaluation.fieldIssues?.[path]||[]).filter(i=>ids.has(i.id)),errors=list.filter(i=>i.level==='error'),warnings=list.filter(i=>i.level==='warning');wrap.classList.toggle('is-invalid',!!errors.length);wrap.classList.toggle('is-warning',!errors.length&&!!warnings.length);for(const input of wrap.querySelectorAll('input,select'))input.setAttribute('aria-invalid',errors.length?'true':'false');const box=wrap.querySelector('.field-feedback');if(box)box.innerHTML=[...new Set((errors.length?errors:warnings).map(i=>i.message))].slice(0,2).map(m=>`<p><span>!</span> ${esc(m)}</p>`).join('');const range=wrap.querySelector('[type=range]');if(range){const limits=evaluation.fieldLimits?.[path]||{},min=Number(range.min),max=Number(range.max),pct=n=>Math.max(0,Math.min(100,(n-min)/(max-min||1)*100));const safe=known(path)&&visible.some(i=>(evaluation.fieldIssues?.[path]||[]).some(j=>j.id===i.id));range.style.setProperty('--safe-start',safe&&limits.min!==undefined?pct(limits.min)+'%':'0%');range.style.setProperty('--safe-end',safe&&limits.max!==undefined?pct(limits.max)+'%':'100%');}const empty=wrap.querySelector('.empty-range');if(empty)empty.hidden=known(path);}
@@ -130,7 +136,7 @@ function showModelWarnings(snapshot){
 }
 // While the prep step is open and its sizes are entered, show that prepared graft beside the knee (no hidden defaults).
 function viewWorkflow(d){const w=workflowForCase(d);if(w.stage==='prep'&&!w.graftPrepared&&canCompleteStep(d,'prep').ok)w.graftPrepared=true;return w;}
-function modelUpdate(){cancelAnimationFrame(modelFrame);modelFrame=requestAnimationFrame(()=>{if(!model)return;try{settings.workflow=viewWorkflow(draft);model.update(state,evaluation,settings);showModelWarnings(model.getSnapshot());}catch(error){modelFailure(error);}});}
+function modelUpdate(){cancelAnimationFrame(modelFrame);if(demo.on)return;modelFrame=requestAnimationFrame(()=>{if(!model||demo.on)return;try{settings.workflow=viewWorkflow(draft);model.update(state,evaluation,settings);showModelWarnings(model.getSnapshot());}catch(error){modelFailure(error);}});}
 function refresh(structural=false,shouldSave=true){steps=stepsForCase(draft);state=materializeCase(draft);evaluation=evaluate(state);state=evaluation.state;if(structural)renderFields();syncFields();syncCortex();renderNavigation();feedback();record();for(const box of $$('[data-trim-summary]'))box.innerHTML=trimSummary();for(const box of $$('[data-femoral-seating]'))box.innerHTML=femoralSeating();modelUpdate();if(shouldSave)save();}
 function edit(path,value){if(busy)stopPreview();const before=draft.completed.length;draft=updateCaseValue(draft,path,value);revision++;attempted=false;if(draft.completed.length<before)toast('Updated. Affected steps are reopened so the scene can be rebuilt.');}
 function setView(name){view=name;settings.activeSide=name==='tibia'?'tibia':name==='detail'?'femur':settings.activeSide;$$('[data-view]').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.view===name));b.tabIndex=b.dataset.view===name?0:-1;});$('#scene-title').textContent=({detail:'Femoral tunnel detail',anterior:'Straight on · femoral notch',tibia:'Tibial tunnel detail',side:'Lateral view'})[name]||'Straight on · femoral notch';model?.setOptions(settings);model?.setView(name);}
@@ -192,7 +198,7 @@ document.addEventListener('pointercancel',dismissMeasurementGuideSoon);
 document.addEventListener('pointerdown',e=>{const el=e.target;if(el.matches('input[type=range][data-path]')&&!known(el.dataset.path)){edit(el.dataset.path,Number(el.value));refresh();}if(el.matches('input[data-path]:not([readonly])'))showMeasurementGuide(el.dataset.path);});
 document.addEventListener('input',e=>{const el=e.target;if(!el.matches('input[data-path]:not([type=checkbox])')||el.readOnly)return;const value=el.value.trim()===''?null:Number(el.value);if(value!==null&&!Number.isFinite(value))return;edit(el.dataset.path,value);showMeasurementGuide(el.dataset.path);refresh();dismissMeasurementGuideSoon();});
 document.addEventListener('change',e=>{const el=e.target;if(!el.matches('[data-path]'))return;if(el.type==='number'||el.type==='range')return;let value=el.type==='checkbox'?el.checked:el.value;if(el.dataset.path.endsWith('.loop'))value=value===''?null:Number(value);edit(el.dataset.path,value);refresh(true);});
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b||b.disabled)return;if(b.dataset.goStep){stopPreview();draft=goToStep(draft,b.dataset.goStep);revision++;attempted=false;refresh(true);$('.case-map').open=false;focusStep();}if(b.dataset.view)setView(b.dataset.view);if(b.dataset.cortex){const side=b.dataset.cortex;edit(side+'.blownCortex',!draft.values[side].blownCortex);refresh(true);}if(b.dataset.candidate!==undefined){const rec=evaluation.recommendations[Number(b.dataset.rec)],candidate=rec?.candidates?.[Number(b.dataset.candidate)];if(candidate){for(const [side,values] of Object.entries(candidate.patch||{}))for(const [key,value] of Object.entries(values))edit(side+'.'+key,value);refresh(true);toast('Selected guide size applied.');}}});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b||b.disabled)return;if(b.dataset.demoOpen!==undefined)openDemo();if(b.dataset.goStep){stopPreview();draft=goToStep(draft,b.dataset.goStep);revision++;attempted=false;refresh(true);$('.case-map').open=false;focusStep();}if(b.dataset.view)setView(b.dataset.view);if(b.dataset.cortex){const side=b.dataset.cortex;edit(side+'.blownCortex',!draft.values[side].blownCortex);refresh(true);}if(b.dataset.candidate!==undefined){const rec=evaluation.recommendations[Number(b.dataset.rec)],candidate=rec?.candidates?.[Number(b.dataset.candidate)];if(candidate){for(const [side,values] of Object.entries(candidate.patch||{}))for(const [key,value] of Object.entries(values))edit(side+'.'+key,value);refresh(true);toast('Selected guide size applied.');}}});
 $('#complete-step').addEventListener('click',()=>{if(!canCompleteStep(draft,current().id).ok&&sheet.state()==='peek')sheet.set('half');perform(true);});$('#preview-step').addEventListener('click',()=>{sheet.forPreview();perform(false);});$('#previous-step').addEventListener('click',()=>{const index=steps.findIndex(s=>s.id===draft.currentStep);if(index>0){stopPreview();draft=goToStep(draft,steps[index-1].id);revision++;attempted=false;refresh(true);focusStep();}});
 $('#new-case').addEventListener('click',()=>{clearTimeout(saveTimer);stopPreview();$('.case-map').open=false;if(draft.values.graft){savedCase=structuredClone(draft);try{localStorage.setItem(STORAGE,JSON.stringify(savedCase));}catch{}$('#resume-banner').hidden=false;}clearMeasurementGuide();draft=createCase();revision++;attempted=false;refresh(true,false);setView('anterior');$('#sb').scrollTop=0;sheet.set(sheet.state()==='peek'?'half':sheet.state());toast(savedCase?'New empty case. The previous case is under Resume.':'New empty case.');});
 $('#resume-case').addEventListener('click',()=>{if(!savedCase)return;stopPreview();draft=sanitizeCase(savedCase);revision++;attempted=false;$('#resume-banner').hidden=true;refresh(true);focusStep();toast('Saved case resumed.');});
@@ -206,7 +212,7 @@ const pressed=(id,on)=>$('#'+id).setAttribute('aria-pressed',String(!!on));
 for(const key of ['labels','orientation'])$('#'+key+'-toggle').addEventListener('click',()=>{settings[key]=!settings[key];pressed(key+'-toggle',settings[key]);model?.setOptions(settings);});
 $('#xray-toggle').addEventListener('click',()=>{const on=$('#xray-toggle').getAttribute('aria-pressed')!=='true';pressed('xray-toggle',on);settings.opacity=on?XRAY_OPACITY:1;model?.setOptions(settings);});
 $('#legend-toggle').addEventListener('click',()=>{const on=$('#legend').hidden;$('#legend').hidden=!on;pressed('legend-toggle',on);});
-$('#zoom-in').addEventListener('click',()=>model?.zoomBy(1.2));$('#zoom-out').addEventListener('click',()=>model?.zoomBy(1/1.2));$('#zoom-reset').addEventListener('click',()=>{model?.resetZoom();model?.setView(view);});
+$('#zoom-in').addEventListener('click',()=>model?.zoomBy(1.2));$('#zoom-out').addEventListener('click',()=>model?.zoomBy(1/1.2));$('#zoom-reset').addEventListener('click',()=>{model?.resetZoom();model?.setView(demo.on?'anterior':view);});
 // the stage never scrolls: focus or find-in-page can nudge a clipped box, so snap it back
 $('#app').addEventListener('scroll',()=>{const a=$('#app');if(a.scrollTop||a.scrollLeft){a.scrollTop=0;a.scrollLeft=0;}});
 
@@ -223,20 +229,22 @@ const sheet=(()=>{
  function metrics(){const H=Math.max(1,el.offsetHeight),sab=$('#sabm')?.offsetHeight||0,peek=Math.min(H,26+top.offsetHeight+sab),half=Math.min(H,Math.max(peek+150,Math.round(H*.56)));return {H,peek,half,full:H};}
  const visible=(s,m)=>s==='full'?m.full:s==='peek'?m.peek:m.half;
  function insets(){
-  const h=head.offsetHeight;document.documentElement.style.setProperty('--topH',h+'px');
-  if(docked()){app.style.setProperty('--sheet-vis','0px');app.style.removeProperty('--toast-at');hud.classList.remove('away');const left=el.getBoundingClientRect().left-app.getBoundingClientRect().left;return {top:h,right:Math.max(0,app.clientWidth-left+8),bottom:0,left:0};}
-  const m=metrics(),vis=visible(state==='full'?'half':state,m);app.style.setProperty('--sheet-vis',vis+'px');app.style.setProperty('--toast-at',(state==='full'?(($('#sabm')?.offsetHeight||0)+16):vis+16)+'px');hud.classList.toggle('away',state==='full');return {top:h,right:0,bottom:vis,left:0};
+  const h=head.offsetHeight,own=!demo.on;if(own)document.documentElement.style.setProperty('--topH',h+'px'); // (in demo mode the demo card owns the page's layout variables)
+  if(docked()){if(own){app.style.setProperty('--sheet-vis','0px');app.style.removeProperty('--toast-at');hud.classList.remove('away');}const left=el.offsetLeft;return {top:h,right:Math.max(0,app.clientWidth-left+8),bottom:0,left:0};} // (its laid-out place: the panel may be sliding in)
+  const m=metrics(),vis=visible(state==='full'?'half':state,m);if(own){app.style.setProperty('--sheet-vis',vis+'px');app.style.setProperty('--toast-at',(state==='full'?(($('#sabm')?.offsetHeight||0)+16):vis+16)+'px');hud.classList.toggle('away',state==='full');}return {top:h,right:0,bottom:vis,left:0};
  }
  function set(s,{animate=true}={}){
   document.documentElement.style.setProperty('--topH',head.offsetHeight+'px');state=s;el.dataset.state=s;grab.setAttribute('aria-expanded',String(s!=='peek'));grab.setAttribute('aria-label',s==='peek'?'Show more of the walkthrough':'Show more of the knee');grab.title=s==='peek'?'':'Arrow up / down to resize';
-  if(docked()){clearTimeout(settle);el.style.transform='';sb.style.height='';model?.setInsets(insets(),fitInsets(),anchorInsets());return;}
-  const m=metrics(),vis=visible(s,m),height=Math.max(60,vis-26)+'px';
-  if(!animate||reduced())el.classList.add('drag');
+  if(docked()){clearTimeout(settle);el.style.transform='';sb.style.height='';place();return;}
+  const m=metrics(),vis=visible(s,m),height=Math.max(60,vis-26)+'px',to=`translateY(${Math.max(0,m.H-vis)}px)`;
+  if((!animate||reduced())&&el.style.transform!==to)el.classList.add('drag'); // (a move already under way to the same place carries on)
   if(vis-26>sb.offsetHeight||!animate)sb.style.height=height;
-  el.style.transform=`translateY(${Math.max(0,m.H-vis)}px)`;
+  el.style.transform=to;
   clearTimeout(settle);settle=setTimeout(()=>{if(drag)return;sb.style.height=height;el.classList.remove('drag');},animate&&!reduced()?360:0);
-  model?.setInsets(insets(),fitInsets(),anchorInsets());
+  place();
  }
+ // the model's frame follows the sheet — except in demo mode, where the demo card sets it
+ function place(){if(demo.on){demoLayout();return;}model?.setInsets(insets(),fitInsets(),anchorInsets());}
  // the knee's size is fitted once to the area left above the peeking sheet (phones) or beside the panel
  function fitInsets(){const i=insets();if(docked())return i;return {...i,bottom:metrics().peek};}
  // …and centred where the half-open sheet leaves it, whatever the sheet's state (the sheet only uncovers or covers the model)
@@ -262,12 +270,165 @@ const sheet=(()=>{
  function reveal(node){const r=node.getBoundingClientRect(),b=sb.getBoundingClientRect(),stick=top.offsetHeight,limit=Math.min(b.bottom,window.visualViewport?.height||innerHeight)-16;if(r.top<b.top+stick+8||r.bottom>limit)sb.scrollTop+=r.top-(b.top+stick+16);}
  document.addEventListener('focusin',e=>{if(docked()||!e.target.matches?.(KEYED))return;if(state!=='full'){auto=auto||state;set('full');}setTimeout(()=>reveal(e.target),reduced()?0:380);});
  document.addEventListener('focusout',()=>{if(!auto)return;setTimeout(()=>{if(document.activeElement?.matches?.(KEYED)||!auto)return;const back=auto;auto=null;if(state==='full')set(back);},150);});
- const sync=()=>{if(!drag)set(state,{animate:false});};
+ const sync=()=>{if(drag)return;if(demo.on){demoLayout();return;}set(state,{animate:false});}; // (demo mode: the hidden sheet keeps its size and scroll)
  if(window.ResizeObserver){const ro=new ResizeObserver(sync);ro.observe(app);ro.observe(head);ro.observe(top);}else addEventListener('resize',sync);
  set('half',{animate:false});
  return {set,forPreview,insets,fitInsets,anchorInsets,state:()=>state};
 })();
-function modelFailure(error){console.error('Case preview unavailable',error);try{model?.dispose();}catch{}model=null;$('#model-loading').hidden=true;$('#model-error').hidden=false;$('#model-error').textContent='The 3D preview could not start. The case fields still work. Reload to try the model again.';}
+// ---- demo mode (6.7): pick an ACL construct and watch it built on the knee, step by step, each step's line popping up as it
+// plays. The walkthrough's own step animations play one after another (demo.mjs paces them); Back, Pause and Next steer it.
+// The case being edited is never touched: the demo puts its own cases on the model and, on the way out, gives back the case,
+// the sheet (and where it was scrolled), the camera and the knee's scale exactly as they were.
+const DEMO_SIDE='(min-width:860px) and (min-height:541px), (orientation:landscape) and (max-height:540px)'; // the sheet's docked layouts
+const reducedMotion=()=>matchMedia('(prefers-reduced-motion:reduce)').matches;
+const numbers=text=>esc(text).replace(/\d+(?:\.\d+)?(?: × \d+(?:\.\d+)?)? mm/g,m=>`<b>${m}</b>`);
+let demoLines=null;
+const allDemoLines=()=>demoLines??=DEMOS.flatMap(p=>{const base=buildDemoCase(p);return stepsForCase(base).map((s,i)=>demoCaption(s.id,demoCaseAt(base,i)));});
+function rise(el){el.classList.remove('rise');void el.offsetWidth;el.classList.add('rise');}
+// a card that has just appeared ignores taps for a moment, so a double tap (or one tap too many on Next) never lands on it
+function shown(el){rise(el);demo.guard=performance.now()+450;}
+// the line keeps one height (the tallest of any demo at this width), so the demo card — and the knee above it — never moves.
+// Measured on a hidden copy, so a screen reader hears nothing while it happens.
+function demoMeasure(){
+ const cap=$('#demo-cap'),width=cap.clientWidth;if(!width||width===demo.measured)return;
+ const probe=cap.cloneNode(true);probe.removeAttribute('id');probe.removeAttribute('aria-live');probe.setAttribute('aria-hidden','true');probe.classList.remove('pop');
+ for(const n of probe.querySelectorAll('[id]'))n.removeAttribute('id');
+ Object.assign(probe.style,{position:'absolute',visibility:'hidden',left:'0',top:'0',width:width+'px',minHeight:'0'});
+ const title=probe.querySelector('h2'),text=probe.querySelector('.demo-text');cap.parentNode.append(probe);let max=0;
+ for(const line of allDemoLines()){title.textContent=line.title;text.innerHTML=numbers(line.text);max=Math.max(max,probe.offsetHeight);}
+ probe.remove();cap.style.minHeight=max+'px';demo.measured=width;
+}
+// the knee's frame: under the header and above the demo card (beside it where the sheet docks), fitted afresh
+function demoLayout(){
+ if(!demo.on)return;const app=$('#app'),h=$('#top').offsetHeight;demoMeasure();
+ document.documentElement.style.setProperty('--topH',h+'px');
+ const a=app.getBoundingClientRect(),r=$('#demo-player').getBoundingClientRect(),side=matchMedia(DEMO_SIDE).matches;
+ const frame=side?{top:h,right:Math.max(0,Math.round(a.right-r.left+8)),bottom:0,left:0}:{top:h,right:0,bottom:Math.max(0,Math.round(a.bottom-r.top+8)),left:0};
+ app.style.setProperty('--sheet-vis',(side?0:frame.bottom)+'px');app.style.setProperty('--toast-at',(side?16:frame.bottom+6)+'px');$('#hud').classList.remove('away');
+ model?.setInsets(frame,frame,frame,{refit:true});
+}
+// a demo case on the model: X-ray on whatever the lab's chips say (they are hidden here); labels and orientation badges follow
+// the demo's own Labels switch, lean (nothing the demo card already says) and spaced out
+const demoLabelOptions=()=>({labels:demo.labels,orientation:demo.labels,lean:true,spacious:true});
+function demoModel(d,side='femur'){
+ if(!model)return;
+ try{const st=materializeCase(d),ev=evaluate(st);model.update(ev.state,ev,{...settings,...demoLabelOptions(),opacity:XRAY_OPACITY,measurementGuide:null,activeSide:side,workflow:workflowForCase(d)});model.setView('anterior');}
+ catch(error){modelFailure(error);}
+}
+function demoLabelsSwitch(){$('#demo-labels').setAttribute('aria-pressed',String(demo.labels));}
+function toggleDemoLabels(){
+ demo.labels=!demo.labels;demoLabelsSwitch();try{localStorage.setItem('acl_demo_labels',demo.labels?'1':'0');}catch{}
+ if(demo.on)model?.setOptions(demoLabelOptions()); // (labels only: a playing step carries on)
+}
+const demoIO={
+ get count(){return demo.steps.length;},
+ show(i){
+  const step=demo.steps[i],d=demoCaseAt(demo.base,i),line=demoCaption(step.id,d),last=i===demo.steps.length-1;demo.caption=line;
+  $('#demo-count').textContent=`Step ${i+1} of ${demo.steps.length}`;$('#demo-step').textContent=line.title;$('#demo-text').innerHTML=numbers(line.text);
+  const cap=$('#demo-cap');cap.classList.remove('pop');void cap.offsetWidth;cap.classList.add('pop');
+  const next=$('#demo-next');next.textContent=last?'Finish ›':'Next ›';next.setAttribute('aria-label',last?'Finish the demo':'Next step');
+  demoModel(d,step.side||'femur');
+  return stepTiming(step.id,d,line,{reduced:reducedMotion()});
+ },
+ animate(ms){try{model?.animateStep({duration:ms/demo.speed});}catch(error){console.error('Demo step animation failed',error);}},
+ pause(){model?.pauseAnimation();},
+ resume(){model?.resumeAnimation();},
+ cancel(){model?.cancelAnimation(false);},
+ render(s){
+  demo.segs.forEach((seg,k)=>{const p=s.done||k<s.index?1:k===s.index?s.fraction:0;if(demo.shown[k]!==p){demo.shown[k]=p;seg.style.transform=`scaleX(${p})`;}});
+  const play=$('#demo-play'),paused=!s.playing;
+  if(play.classList.contains('paused')!==paused){play.classList.toggle('paused',paused);$('#demo-play-label').textContent=paused?'Play':'Pause';play.setAttribute('aria-label',paused?'Play the demo':'Pause the demo');}
+ },
+ finish(){
+  demo.phase='end';$('#demo').dataset.phase='end';$('#demo-end-title').textContent=demo.preset.title;
+  $('#demo-facts').innerHTML=demoSummary(demo.base).map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  shown($('#demo-end'));$('#demo-end-title').focus({preventScroll:true});
+ }
+};
+// the clock runs only while a demo plays (nothing ticks while it is paused, choosing or finished)
+function demoLoop(t){
+ if(!demo.on||!demo.player?.status().playing){demo.raf=0;demo.last=0;return;}
+ demo.raf=requestAnimationFrame(demoLoop);const dt=demo.last?t-demo.last:16;demo.last=t;demo.player.tick(dt*demo.speed);
+}
+function demoRun(){if(demo.on&&!demo.raf&&demo.player?.status().playing){demo.last=0;demo.raf=requestAnimationFrame(demoLoop);}}
+function demoAct(fn){if(!demo.player||performance.now()<demo.guard)return;fn(demo.player);demoRun();}
+function showPicker(){
+ demo.player=null;model?.cancelAnimation(false);demo.phase='choose';demo.preset=null;demo.caption=null;
+ $('#demo').dataset.phase='choose';$('#demo-title').textContent='Choose a construct';
+ const list=$('#demo-list');if(!list.children.length)list.innerHTML=DEMOS.map(p=>{const len=demoLength(p);return `<button type="button" class="dp-item" data-demo="${esc(p.id)}" aria-label="${esc(p.title+'. '+p.subtitle+'. '+len.label)}"><span class="dp-t"><span class="dp-row"><b>${esc(p.title)}</b><small>${esc(len.minutes)}</small></span><span class="dp-s">${esc(p.subtitle)}</span></span><span class="dp-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3.5v17l14-8.5z" fill="currentColor"/></svg></span></button>`;}).join('');
+ list.scrollTop=0;$('#demo-pick').scrollTop=0;
+ if(model){demoModel(createCase());model?.resetZoom();}
+ shown($('#demo-pick'));list.querySelector('button')?.focus({preventScroll:true});
+}
+function openDemo(){
+ if(modelBroken){toast('The demo needs the 3D knee, which could not start here.');return;}
+ if(!demo.on){
+  stopPreview();renderNavigation();clearMeasurementGuide();cancelAnimationFrame(modelFrame);
+  // what comes back on the way out: the camera (view, orbit, pan, zoom, scale) and where the sheet was scrolled
+  demo.camera=model?.cameraState()||null;demo.scroll=$('#sb').scrollTop;demo.from=document.activeElement;demo.measured=0;
+  demo.on=true;document.documentElement.classList.add('demo-on');$('#demo').hidden=false;$('#demo-line').hidden=false;$('#demo-exit').hidden=false;$('#sheet').inert=true;demoLabelsSwitch();
+ }
+ showPicker();demoLayout();
+}
+async function startDemo(id){
+ const preset=DEMOS.find(p=>p.id===id);if(!preset||!demo.on||performance.now()<demo.guard)return;
+ demo.preset=preset;demo.base=buildDemoCase(preset);demo.steps=stepsForCase(demo.base);demo.phase='play';
+ $('#demo').dataset.phase='play';$('#demo-title').textContent=preset.title;
+ $('#demo-segs').innerHTML=demo.steps.map(()=>'<span><i></i></span>').join('');demo.segs=[...$('#demo-segs').querySelectorAll('i')];demo.shown=[];
+ shown($('#demo-player'));$('#demo-play').focus({preventScroll:true});
+ if(!model){
+  $('#demo-count').textContent='One moment';$('#demo-step').textContent='Preparing the 3D knee…';$('#demo-text').textContent='';
+  try{await modelReady;}catch{return;}
+  if(!demo.on||demo.preset!==preset||demo.phase!=='play')return;demoLayout();
+ }
+ demo.player=createDemoPlayer(demoIO);demo.player.start();demoRun();
+ demo.guard=performance.now()+450; // (from when step 1 is on screen: putting it on the model takes a moment)
+}
+function replayDemo(){if(!demo.player||performance.now()<demo.guard)return;demo.phase='play';$('#demo').dataset.phase='play';rise($('#demo-player'));demo.player.start();demoRun();demo.guard=performance.now()+450;$('#demo-play').focus({preventScroll:true});}
+function closeDemo(){
+ if(!demo.on)return;
+ cancelAnimationFrame(demo.raf);demo.raf=0;demo.player=null;demo.on=false;demo.phase=null;demo.preset=null;demo.caption=null;
+ const box=$('#demo');box.hidden=true;delete box.dataset.phase;$('#demo-line').hidden=true;$('#demo-exit').hidden=true;$('#sheet').inert=false;
+ document.documentElement.classList.remove('demo-on');
+ sheet.set(sheet.state()); // the sheet slides back and the page's frame for the knee returns with it
+ $('#sb').scrollTop=demo.scroll;
+ if(model){
+  try{
+   model.cancelAnimation(false);cancelAnimationFrame(modelFrame);settings.workflow=viewWorkflow(draft);model.update(state,evaluation,settings);showModelWarnings(model.getSnapshot());
+   // the knee at the size it had (refitted only if the screen's width changed meanwhile) and the camera where it was
+   const c=demo.camera,sameWidth=c&&Math.abs($('#viewport').clientWidth-c.width)<=1;
+   model.setInsets(sheet.insets(),sheet.fitInsets(),sheet.anchorInsets(),sameWidth?{scale:c.scale}:{refit:true});
+   if(c)model.restoreCamera(c);else setView(view);
+  }catch(error){modelFailure(error);}
+ }
+ demo.camera=null;
+ const back=demo.from&&document.contains(demo.from)&&demo.from!==document.body&&demo.from.getClientRects().length?demo.from:$('#title');demo.from=null;
+ try{back.focus({preventScroll:true});}catch{}
+}
+$('#demo-labels').addEventListener('click',toggleDemoLabels);
+$('#demo-play').addEventListener('click',()=>demoAct(p=>p.toggle()));
+$('#demo-next').addEventListener('click',()=>demoAct(p=>p.next()));
+$('#demo-back').addEventListener('click',()=>demoAct(p=>p.back()));
+$('#demo-list').addEventListener('click',e=>{const b=e.target.closest('[data-demo]');if(b)startDemo(b.dataset.demo);});
+$('#demo-replay').addEventListener('click',replayDemo);
+$('#demo-another').addEventListener('click',()=>{if(performance.now()>=demo.guard)showPicker();});
+$('#demo-done').addEventListener('click',()=>{if(performance.now()>=demo.guard)closeDemo();});
+for(const id of ['demo-exit','demo-pick-close'])$('#'+id).addEventListener('click',closeDemo);
+document.addEventListener('lab:demo',openDemo);
+document.addEventListener('lab:case',()=>{if(demo.on)closeDemo();});
+// keys: Space plays or pauses, ← → step, L labels, Esc leaves (the menu and the help card take Esc first)
+document.addEventListener('keydown',e=>{
+ if(!demo.on||e.defaultPrevented||e.altKey||e.ctrlKey||e.metaKey||!$('#sitemenu').hidden||!$('#help').hidden)return;
+ if(e.key==='Escape'){e.preventDefault();closeDemo();return;}
+ if(demo.phase!=='play'||!demo.player||e.target.closest?.('input,select,textarea'))return;
+ if(e.key==='ArrowRight'){e.preventDefault();demo.player.next();demoRun();}
+ else if(e.key==='ArrowLeft'){e.preventDefault();demo.player.back();demoRun();}
+ else if(e.key===' '&&!e.target.closest?.('button,a,summary')){e.preventDefault();demo.player.toggle();demoRun();}
+ else if(e.key==='l'||e.key==='L'){e.preventDefault();toggleDemoLabels();}
+});
+// a demo left in the background waits for its viewer
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&demo.player?.status().playing)demo.player.pause();});
+function modelFailure(error){console.error('Case preview unavailable',error);try{model?.dispose();}catch{}model=null;modelBroken=true;rejectModel(error);$('#model-loading').hidden=true;$('#model-error').hidden=false;$('#model-error').textContent='The 3D preview could not start. The case fields still work. Reload to try the model again.';if(demo.on){closeDemo();toast('The 3D knee stopped, so the demo closed. Your case is unchanged.');}}
 refresh(true,false);
-Object.defineProperty(window,'aclSandbox',{value:Object.freeze({getState:()=>structuredClone(draft),getEvaluation:()=>structuredClone(evaluation),getModel:()=>model?.getSnapshot(),getSteps:()=>structuredClone(steps),getSheet:()=>({state:sheet.state(),insets:sheet.insets()})}),writable:false});
-try{const {createModel}=await import('./model.js');model=await createModel($('#viewport'),$('#labels'),{insets:sheet.fitInsets()});model.setInsets(sheet.insets(),null,sheet.anchorInsets());settings.workflow=viewWorkflow(draft);model.update(state,evaluation,settings);setView('anterior');$('#model-loading').hidden=true;}catch(error){modelFailure(error);}
+Object.defineProperty(window,'aclSandbox',{value:Object.freeze({getState:()=>structuredClone(draft),getEvaluation:()=>structuredClone(evaluation),getModel:()=>model?.getSnapshot(),getSteps:()=>structuredClone(steps),getSheet:()=>({state:sheet.state(),insets:demo.on?null:sheet.insets()}),setDemoSpeed:n=>{demo.speed=Math.min(8,Math.max(.25,Number(n)||1));},getDemo:()=>({on:demo.on,speed:demo.speed,labels:demo.labels,phase:demo.phase,preset:demo.preset?.id||null,steps:demo.steps.map(s=>s.id),caption:demo.caption?{...demo.caption}:null,...(demo.player?.status()||{})})}),writable:false});
+try{const {createModel}=await import('./model.js');model=await createModel($('#viewport'),$('#labels'),{insets:sheet.fitInsets()});model.setInsets(sheet.insets(),null,sheet.anchorInsets());settings.workflow=viewWorkflow(draft);model.update(state,evaluation,settings);setView('anterior');$('#model-loading').hidden=true;resolveModel(model);if(demo.on){demoLayout();if(demo.phase!=='play'){demoModel(createCase());model.resetZoom();}}}catch(error){modelFailure(error);}

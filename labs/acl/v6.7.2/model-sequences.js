@@ -2,7 +2,9 @@ const limit=x=>Math.max(0,Math.min(1,Number.isFinite(+x)?+x:0));
 const phase=(p,a,b)=>limit((p-a)/(b-a));
 const lerp=(a,b,t)=>a+(b-a)*t;
 
-export function recommendedStepDuration(stage,technique=''){
+export function recommendedStepDuration(stage,technique='',fixation=''){
+ // an ABS button goes onto the loops outside the knee, then is cinched down to the bone slowly (Nate, Sept 26 2026)
+ if(stage.startsWith('fix_')&&String(fixation||'').endsWith('_abs'))return 5600;
  // trans-tibial femoral passes travel up the tibial tunnel first
  if(technique==='transtibial'&&stage==='femur_pin')return 5200;
  if(technique==='transtibial'&&['femur_ream','femur_cortex_ream'].includes(stage))return 7500;
